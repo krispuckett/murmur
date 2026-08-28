@@ -1,0 +1,27 @@
+name: MurmurLab
+options:
+  bundleIdPrefix: com.krispuckett
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  Murmur:
+    path: ../
+targets:
+  MurmurLab:
+    type: application
+    platform: iOS
+    sources: [MurmurLab]
+    dependencies:
+      - package: Murmur
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.krispuckett.MurmurLab
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Murmur Lab
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
