@@ -1,14 +1,16 @@
 # Murmur
 
 Thinking indicators for AI products, built as living material. Murmur is a
-Swift package with 24 Metal shader species behind one SwiftUI view, a lab app
-for designing a configuration by hand, and an export that writes the
-implementation prompt for a coding agent.
+Swift package with 32 Metal shader species behind one SwiftUI view, five AI
+states with designed transitions, a lab app for tuning a configuration by
+hand, and an export that writes the implementation prompt for a coding agent.
 
 Every style is generated per pixel in a fragment shader. There are no videos,
 no particle systems, no sprite sheets, and nothing that pulses for attention.
 The family verbs are flow and settle: motion you feel rather than watch, calm
-enough to sit beside someone's words while a model thinks.
+enough to sit beside someone's words while a model thinks. Each species also
+carries one playful gesture, an occasional flourish it performs and lets go
+of, on an aperiodic clock so it never reads as a loop.
 
 ## Quick start
 
@@ -36,13 +38,32 @@ MurmurView(MurmurConfiguration(style: .eddy))
 Both views adapt to light and dark. A configuration is Codable, so a design
 can be saved, versioned, or sent across a wire.
 
+## States
+
+`MurmurState` gives the indicator an agent's inner life: `idle`, `thinking`,
+`responding`, `success`, `error`. Drive it from your host app:
+
+```swift
+MurmurPill(config, state: agentIsStreaming ? .responding : .thinking)
+```
+
+Idle is nearly still and dim. Thinking opens the palette and lifts the tempo
+above the resting material. Responding runs brighter and quicker for
+streaming. Success re-runs the style's arrival arc as a completion breath.
+Error walks the hue family toward dark ember and drops to an uneasy simmer,
+never an alarm color. State changes glide over about half a second, and each
+state has an entry animation (`wake`, `swell`, `stutter`, or none) you can
+retune per state through `configuration.treatments`; custom treatments are
+Codable and travel with the export.
+
 ## The lab
 
 `Lab/MurmurLab.xcodeproj` is an iOS app for designing a configuration by
-hand: a gallery of all 24 species running live, a studio with the style at
-300 pt over a size-truth row (20, 46, 120 pt at once), dials for the shared
-parameters and the style's four character knobs, curated tones plus full
-color pickers, and pill previews on both stages.
+hand: a gallery of all 32 species running live, a studio with the style
+pinned large beside 46 and 20 pt truth previews while the dials scroll
+beneath it, a row of five live state previews with per-state entry tuning,
+dials for the shared parameters and the style's four character knobs, curated
+tones plus full color pickers, and pill previews on both stages.
 
 The Export button writes the whole design as a prompt: the dependency line,
 the exact configuration call with every value you changed, and a short spec.
@@ -55,16 +76,16 @@ jumps straight to any studio, which is how agents drive it for screenshots.
 
 ## The roster
 
-Four families, six species each. Names are `MurmurStyle` cases.
+Four families, eight species each. Names are `MurmurStyle` cases.
 
 | Family | Species |
 |---|---|
-| liquid | eddy, well, tide, undertow, meander, confluence |
-| ink | bloom, marbling, wick, strata, halation, pool |
-| light | caustic, aurora, ember, lantern, mirage, oculus |
-| signal | murmuration, loom, cipher, tuning, current, veil |
+| liquid | eddy, well, tide, undertow, meander, confluence, melt, glaze |
+| ink | bloom, marbling, wick, strata, halation, pool, feather, palimpsest |
+| light | caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse |
+| signal | murmuration, loom, cipher, tuning, current, veil, echo, glyph |
 
-Five species (confluence, bloom, strata, oculus, tuning) have an arrival arc:
+Six species (confluence, bloom, strata, oculus, tuning, feather) have an arrival arc:
 they run once from birth toward a settled state when the view appears, and
 settled is still alive, a whisper of drift rather than a freeze. The arcs are
 closed-form, so any time value renders the correct frame.
