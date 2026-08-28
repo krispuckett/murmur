@@ -1,0 +1,211 @@
+// The roster. Every fact a style carries that is not pixels lives here:
+// which pack file holds its body, what its four character knobs are called,
+// whether it honors the settle arc, and the one line that says what species
+// it is. SPEC.md's roster tables are the source; this file is their
+// transcription. If a table changes, change it here in the same commit.
+
+import Foundation
+
+/// The four pack files. A family is a shared physics, not a color scheme:
+/// liquid has weight, ink has capillary time, light passes through media,
+/// signal finds order in noise.
+public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
+    case liquid, ink, light, signal
+
+    public var displayName: String { rawValue.capitalized }
+
+    /// The Metal namespace prefix. Every function and helper in a pack file
+    /// wears it; there is no cross-file linkage in Metal, so the prefix is
+    /// what keeps four copies of the same kit from colliding.
+    public var shaderPrefix: String {
+        switch self {
+        case .liquid: "ml_"
+        case .ink: "mi_"
+        case .light: "mg_"
+        case .signal: "ms_"
+        }
+    }
+
+    /// The pack file's base name, without the .metal extension. Used by the
+    /// self-contained export to read the source back out of the bundle.
+    public var packFileName: String {
+        switch self {
+        case .liquid: "MurmurLiquid"
+        case .ink: "MurmurInk"
+        case .light: "MurmurLight"
+        case .signal: "MurmurSignal"
+        }
+    }
+
+    /// The family's styles in roster order, for gallery grouping.
+    public var styles: [MurmurStyle] {
+        MurmurStyle.allCases.filter { $0.family == self }
+    }
+}
+
+/// One character dial: the name the designer sees and the value the style
+/// was tuned at. Knobs are always 0...1; the Swift layer passes them to the
+/// shader untouched, so meaning lives entirely in the Metal.
+public struct MurmurKnob: Sendable, Hashable, Codable {
+    public let label: String
+    public let defaultValue: Double
+
+    public init(label: String, defaultValue: Double) {
+        self.label = label
+        self.defaultValue = defaultValue
+    }
+}
+
+/// The 24 species.
+public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
+    case eddy, well, tide, undertow, meander, confluence
+    case bloom, marbling, wick, strata, halation, pool
+    case caustic, aurora, ember, lantern, mirage, oculus
+    case murmuration, loom, cipher, tuning, current, veil
+
+    public var id: String { rawValue }
+
+    public var displayName: String { rawValue.capitalized }
+
+    public var family: MurmurFamily {
+        switch self {
+        case .eddy, .well, .tide, .undertow, .meander, .confluence: .liquid
+        case .bloom, .marbling, .wick, .strata, .halation, .pool: .ink
+        case .caustic, .aurora, .ember, .lantern, .mirage, .oculus: .light
+        case .murmuration, .loom, .cipher, .tuning, .current, .veil: .signal
+        }
+    }
+
+    /// The `[[ stitchable ]]` function name, e.g. "ml_eddy".
+    public var shaderName: String { family.shaderPrefix + rawValue }
+
+    /// Styles whose concept has an arrival read `epoch` and run a settle arc.
+    /// The rest ignore it. Settled is never frozen: a whisper of drift stays.
+    public var hasArc: Bool {
+        switch self {
+        case .confluence, .bloom, .strata, .oculus, .tuning: true
+        default: false
+        }
+    }
+
+    /// The species intent, one line, as written in the roster. This is the
+    /// sentence the agent export hands to whoever implements the indicator,
+    /// so it says what the thing IS, not how it is built.
+    public var species: String {
+        switch self {
+        case .eddy:
+            "thought circling a center: a slow rotational shear field, light caught in the turn"
+        case .well:
+            "pulling inward: light and density drawn toward a deep center that never fills"
+        case .tide:
+            "a slow wash crossing the frame and returning, weight leaning with it"
+        case .undertow:
+            "two layers sliding opposite ways, structure born where they shear"
+        case .meander:
+            "one bright channel wandering through dark mass, the path is the thought"
+        case .confluence:
+            "two flows finding each other and joining; joined is the rest state"
+        case .bloom:
+            "ink meeting water: a front advancing with a live fBm edge, settling saturated"
+        case .marbling:
+            "combed ink: layered laminar folds sliding past each other, suminagashi tempo"
+        case .wick:
+            "ink drawn upward through fiber: capillary creep, gravity in reverse, grain of the paper visible in the climb"
+        case .strata:
+            "sediment settling into layers: horizontal density bands finding their level"
+        case .halation:
+            "a dark mass wearing its own light: soft halo shifting as the mass slowly reforms"
+        case .pool:
+            "ink already at rest, meniscus alive: the stillest style in the set, surface tension doing the thinking"
+        case .caustic:
+            "light refracted through moving water onto a floor: the web, soft, never cellular"
+        case .aurora:
+            "a curtain of light folding in slow air, horizontal grammar, nothing falls"
+        case .ember:
+            "heat above a warm floor: shimmer rising, light pooled low"
+        case .lantern:
+            "one light behind moving fog: presence felt through a medium, never seen directly"
+        case .mirage:
+            "horizontal refraction bands bending a distant light, the desert-road shimmer"
+        case .oculus:
+            "a soft aperture admitting light, opening as thought completes; open is rest"
+        case .murmuration:
+            "the namesake: a flock as one soft mass, density turning and folding over itself, individuals never resolvable"
+        case .loom:
+            "threads finding a weave: warp and weft interference resolving into cloth and relaxing again"
+        case .cipher:
+            "meaning surfacing: latent structure in a dark field, revealed where a slow attention passes"
+        case .tuning:
+            "static finding the station: broadband noise narrowing toward a coherent line; coherent is rest, noise never fully gone"
+        case .current:
+            "signal moving through a medium: impulses traveling a soft network, felt as moving light, never drawn as wires"
+        case .veil:
+            "layers of translucency sliding: what is behind almost legible, parallax as depth of thought"
+        }
+    }
+
+    /// Exactly four, always, in c0...c3 order.
+    public var characterKnobs: [MurmurKnob] {
+        switch self {
+        // Liquid
+        case .eddy:
+            [k("swirl", 0.5), k("drift", 0.3), k("grain", 0.4), k("shear", 0.5)]
+        case .well:
+            [k("pull", 0.5), k("depthGlow", 0.5), k("churn", 0.3), k("offset", 0.5)]
+        case .tide:
+            [k("reach", 0.5), k("lean", 0.4), k("foam", 0.3), k("period", 0.5)]
+        case .undertow:
+            [k("contrast", 0.5), k("slip", 0.5), k("veil", 0.3), k("bias", 0.5)]
+        case .meander:
+            [k("width", 0.4), k("wander", 0.5), k("bank", 0.4), k("flow", 0.5)]
+        case .confluence:
+            [k("approach", 0.5), k("mingle", 0.5), k("shimmer", 0.3), k("angle", 0.5)]
+        // Ink
+        case .bloom:
+            [k("spread", 0.5), k("edgeTear", 0.5), k("tail", 0.4), k("asymmetry", 0.3)]
+        case .marbling:
+            [k("folds", 0.5), k("comb", 0.4), k("contrast", 0.5), k("drift", 0.3)]
+        case .wick:
+            [k("climb", 0.5), k("fiber", 0.5), k("pooling", 0.3), k("dryEdge", 0.4)]
+        case .strata:
+            [k("layers", 0.5), k("settle", 0.5), k("disturb", 0.2), k("tilt", 0.5)]
+        case .halation:
+            [k("mass", 0.5), k("corona", 0.5), k("morph", 0.4), k("offset", 0.5)]
+        case .pool:
+            [k("tension", 0.5), k("tremor", 0.2), k("sheen", 0.5), k("tilt", 0.5)]
+        // Light
+        case .caustic:
+            [k("web", 0.5), k("depthWater", 0.5), k("swim", 0.4), k("focus", 0.5)]
+        case .aurora:
+            [k("fold", 0.5), k("height", 0.5), k("wander", 0.4), k("thin", 0.5)]
+        case .ember:
+            [k("heat", 0.5), k("shimmer", 0.4), k("floor", 0.5), k("updraft", 0.4)]
+        case .lantern:
+            [k("fog", 0.5), k("reach", 0.5), k("drift", 0.4), k("offset", 0.5)]
+        case .mirage:
+            [k("bands", 0.5), k("bend", 0.5), k("distance", 0.5), k("haze", 0.4)]
+        case .oculus:
+            [k("aperture", 0.5), k("rim", 0.4), k("beam", 0.5), k("dust", 0.3)]
+        // Signal
+        case .murmuration:
+            [k("flock", 0.5), k("turn", 0.5), k("cohesion", 0.5), k("sky", 0.3)]
+        case .loom:
+            [k("threads", 0.5), k("tension", 0.5), k("sheen", 0.4), k("angle", 0.5)]
+        case .cipher:
+            [k("reveal", 0.5), k("structure", 0.5), k("dwell", 0.5), k("scatter", 0.3)]
+        case .tuning:
+            [k("band", 0.5), k("lock", 0.5), k("hiss", 0.3), k("drift", 0.4)]
+        case .current:
+            [k("pathways", 0.5), k("pulseRate", 0.4), k("glow", 0.5), k("branch", 0.5)]
+        case .veil:
+            [k("layers", 0.5), k("parallax", 0.5), k("legibility", 0.4), k("drift", 0.3)]
+        }
+    }
+
+    /// The four tuned values, in order.
+    public var characterDefaults: [Double] { characterKnobs.map(\.defaultValue) }
+}
+
+private func k(_ label: String, _ value: Double) -> MurmurKnob {
+    MurmurKnob(label: label, defaultValue: value)
+}
