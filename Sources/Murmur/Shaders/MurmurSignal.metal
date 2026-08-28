@@ -327,6 +327,40 @@ static inline float ms_containment(float2 uv, float reach) {
     return 1.0 - smoothstep(reach, reach + 0.31, r);
 }
 
+/// THE VALUE HIERARCHY, as one curve, and it replaces the dim ceiling this pack
+/// used to hold.
+///
+/// The old law kept every span at or under about 0.84 so nothing reached the
+/// rail's pale specular -- a deliberate ambient restraint, and on device it was
+/// exactly wrong. These are small objects in a chat UI, not surfaces someone
+/// lives beside, and a cell whose brightest pixel is rust is a cell nobody can
+/// parse. Three tiers or it fails: ink ground, amber body, CREAM PEAKS.
+///
+/// One number gets all three by spending the rail unevenly. The bottom
+/// seventy-eight per cent of the energy is compressed into the rail's first
+/// seventy-two, which is the whole amber body from shadow to tone, so most of
+/// the picture is warm and readable and none of it is near white. The last
+/// twenty-two per cent of the energy is spent on the rail's last twenty-eight,
+/// where the specular lives, so only the figure's key structure goes cream --
+/// and when it goes it goes decisively rather than creeping.
+///
+/// The join is smoothed over a fifth of the range, because a slope kink in a
+/// map this shallow shows up as a contour line in a smooth field. It is the
+/// same reason ms_shade eases its own segment joins.
+///
+/// What this asks of every species: normalise so the figure's SPINE reaches
+/// about 1.0 while its body sits between 0.35 and 0.7. The brightness tuning
+/// that used to live in per-species spans now lives in that normalisation,
+/// which is the more honest place for it -- a species should know how bright
+/// its own spine is.
+static inline float ms_tier(float e) {
+    float x = clamp(e, 0.0, 1.0);
+    const float K = 0.78;
+    float body = (x / K) * 0.72;
+    float peak = 0.72 + ((x - K) / (1.0 - K)) * 0.28;
+    return mix(body, peak, smoothstep(K - 0.10, K + 0.10, x));
+}
+
 /// THE ONE PLACE ENERGY BECOMES LIGHT. All six species compute a density in
 /// 0...1 and hand it here, which is most of what keeps the family reading as one
 /// family: there is exactly one relationship between how much material is at a
@@ -356,12 +390,18 @@ static inline float ms_containment(float2 uv, float reach) {
 static inline float3 ms_lit(MSPalette pal, float e, float glow,
                             float base, float span, float emis) {
     float G = max(glow, 0.0);
-    float en = clamp(ms_knee(max(e, 0.0) * (0.35 + 0.65 * G), 0.82), 0.0, 1.0);
-    float tRail = clamp(base + span * en, 0.0, 1.0);
+    // The knee sits at 0.92 rather than 0.82 now. At 0.82 it compressed the top
+    // of the range away before ms_tier could spend it, so a spine normalised to
+    // reach one arrived at the rail already flattened and its peak came out tone
+    // rather than cream: the knee was quietly enforcing the very ceiling this
+    // pass exists to lift. It still catches genuine overshoot.
+    float en = clamp(ms_knee(max(e, 0.0) * (0.35 + 0.65 * G), 0.92), 0.0, 1.0);
+    float tRail = clamp(base + span * ms_tier(en), 0.0, 1.0);
     float3 col = ms_shade(pal, tRail);
-    // Emission is gated high on the rail so the ground never lifts: only
-    // material that has actually reached the tone gives off light of its own.
-    return col * (1.0 + emis * G * smoothstep(0.55, 0.98, tRail));
+    // Emission is gated to the specular now, not to the tone: the rail reaches
+    // the top routinely, and emission from the whole amber body would put the
+    // ground back up and flatten the very hierarchy ms_tier just built.
+    return col * (1.0 + emis * G * smoothstep(0.72, 1.0, tRail));
 }
 
 /// A rotation, written out because three of the six species live in a frame that
@@ -485,6 +525,31 @@ static float4 ms_flourish(float t, float lane) {
     return float4(env, clamp(u, 0.0, 1.0), ms_hash1(slot + 1607.0, lane), slot);
 }
 
+/// A VEIN: distance to a gently bending line, tapered to nothing at both ends.
+/// The delta in ms_current is four of these and nothing else. A line with an end
+/// is the cheapest nameable figure there is, and unioning a few at different
+/// angles is a branching system a viewer can trace with a finger, which no
+/// amount of ridged noise ever was.
+static inline float ms_vein(float2 p, float ang, float bend, float freq,
+                            float phase, float halfw, float len) {
+    float2 r = ms_rot(p, ang);
+    float d = abs(r.y - bend * sin(r.x * freq + phase));
+    // Thick at the root, gone by the tip, and starting cleanly rather than
+    // arriving from off-frame: a branch has two ends and both of them matter.
+    float grow = smoothstep(-0.02, 0.09, r.x);
+    float end  = 1.0 - smoothstep(len * 0.55, len, r.x);
+    float w = halfw * (0.45 + 0.55 * end);
+    return (1.0 - smoothstep(w * 0.30, w, d)) * grow * end;
+}
+
+/// A PANE: the signed distance to a rounded rectangle, for ms_veil's sheets.
+/// Translucent layers only read as layers if they have EDGES; three noise fields
+/// with soft silhouettes read as one cloud, which is what the veil was.
+static inline float ms_pane(float2 p, float2 c, float ang, float2 halfSize, float rad) {
+    float2 q = abs(ms_rot(p - c, ang)) - (halfSize - rad);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+}
+
 /// The house finish, shared: ink underneath, the field composited into it by the
 /// containment, the same knee the route curtain puts on its surface colour, and
 /// the dither last. Every species ends on this line.
@@ -566,7 +631,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float seam = fSplit.z * 6.2831853;
     float2 snorm = float2(cos(seam), sin(seam));
     float side = 2.0 * smoothstep(-0.11, 0.11, dot(uv, snorm)) - 1.0;
-    q += snorm * (side * fSplit.x * 0.085 / S);
+    // The seam displacement is kept in uv as well as applied to the fold domain,
+    // because the figure arrived after this gesture did. Splitting only the
+    // texture and leaving the ribbon whole would have been a flock whose
+    // material tears while its silhouette sits still, which is a worse picture
+    // than either. The band itself parts and comes back.
+    float2 splitOff = snorm * (side * fSplit.x * 0.085);
+    q += splitOff / S;
 
     // THE TRAVEL. A flock does not hover, and at the family's lifted tempo the
     // fold has to be seen CROSSING the mass rather than boiling in place -- a
@@ -626,16 +697,38 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float grain = exp(k * 1.40 * (cos(6.2831853 * n * folds * 2.60) - 1.0));
     sheet *= 0.72 + 0.42 * grain;
 
-    // THE BODY. A flock has an outline and it is not the frame's. A super
-    // gaussian at 0.285 with a slowly wandering centre: broad enough that a 20 pt
-    // indicator is one clear gesture, tight enough that the containment below
-    // never has to cut anything that was still bright.
-    float2 bc = uv - 0.070 * float2(sin(t * 0.166), cos(t * 0.122));
-    float body = exp(-pow(length(bc) / 0.285, 2.3));
-    // A flock's density varies by about three to one across its own body, not
-    // by ten to one: it is a mass that thickens, never a mass with holes cut in
-    // it. The 0.34 floor is that ratio, written down.
-    float dens = body * (0.40 + 0.60 * sheet) * (0.46 + 0.54 * flock);
+    // THE RIBBON, and it is the figure. A murmuration cuts a SHAPE against the
+    // sky: a long band that curves, thick through its middle and tapering to
+    // nothing at both ends, with the birds piled up along its leading edge. The
+    // old body was a super-gaussian -- a circle -- so the species was a round
+    // cloud of texture, and a round cloud of texture inside a round frame is not
+    // an object, it is a fill. This is an object, and the fold field, which is
+    // unchanged, now lives ON it.
+    float2 ruv = ms_rot(uv + splitOff, 0.30 + 0.14 * sin(t * 0.15));
+
+    // The centreline: one broad wave with a smaller one riding it, so the band
+    // curves the way a flock's spine does and never reads as a drawn arc.
+    float spine = 0.085 * sin(ruv.x * 5.2 + t * 0.62) + 0.042 * sin(ruv.x * 9.4 - t * 0.35);
+
+    // Along the band: full through the middle, gone by either tip.
+    float along = clamp(ruv.x / 0.40, -1.0, 1.0);
+    float taper = pow(max(1.0 - along * along, 0.0), 0.62);
+
+    float halfw = 0.048 + 0.105 * taper;
+    float ribbon = (1.0 - smoothstep(halfw * 0.40, halfw, abs(ruv.y - spine))) * taper;
+
+    // THE LEADING EDGE is where the birds bunch, and it is what sends this
+    // species to cream: the value hierarchy wants the figure's key structure at
+    // the top of the rail, and on a flock that structure is the front.
+    float lead = smoothstep(-0.14, 0.36, ruv.x);
+
+    // Normalised so the dense leading edge of the band actually arrives at the
+    // top of the rail. The figure can be perfect and still fail the value law:
+    // the first cut of this ribbon peaked around 0.7 and read as rust, because
+    // its spine only reached one where the band's centre and a fold's crest
+    // happened to coincide, which is a small part of a small part.
+    float dens = ribbon * (0.34 + 0.66 * sheet) * (0.52 + 0.48 * flock)
+               * (0.58 + 0.85 * lead) * 1.42;
 
     float skyN = ms_fbm3(float3(q * 0.75, t * 0.047), 2, 2.00, 0.50);
     float dusk = sky * (0.055 + 0.075 * (0.5 + skyN)) * (1.0 - 0.55 * dens);
@@ -645,7 +738,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float eM = (dens + dusk) * (1.0 + 0.62 * st.complete + 0.16 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, eM, glow, 0.0, 0.78, 0.45);
+    float3 field = ms_lit(pal, eM, glow, 0.0, 1.0, 0.30);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -811,11 +904,23 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // Handed over uncapped: the crossings and the sheen together pass 1 in the
     // brightest places, and ms_lit's knee is where that is meant to be resolved.
-    float e = (cloth * bolt * (0.72 + 0.36 * taut) + sheen * 0.30 * spec * cloth)
+    // THE PATCH, and it is the figure. Cloth on a loom has a selvedge: it is a
+    // piece of something, not a wallpaper. The boundary is an ellipse perturbed
+    // by the drape field already in hand, so its edge is irregular and soft and
+    // costs no extra tap, and the weave lives INSIDE it with ink all round.
+    // Allover weave to the rim was the fill this pass exists to kill.
+    float2 pc = uv - 0.022 * float2(sin(t * 0.11), cos(t * 0.09));
+    float rr = length(pc * float2(1.0, 1.22)) + 0.085 * drapeB;
+    float patch = 1.0 - smoothstep(0.185, 0.315, rr);
+
+    // The taut crossings and the sheen are the key structure and take the top of
+    // the rail; the body of the cloth stays amber underneath them.
+    float e = (cloth * bolt * (0.56 + 0.26 * taut) + sheen * 1.05 * spec * cloth)
+            * patch * 1.55
             * (1.0 + 0.58 * st.complete + 0.15 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.60);
+    float3 field = ms_lit(pal, e, glow, 0.0, 1.0, 0.34);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);
@@ -906,8 +1011,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     ac += float2(cos(lookA), sin(lookA)) * (fLook.x * 0.135);
     // Tighter than it was, so the thing crossing reads as an attention with an
     // edge rather than as a general warming of the frame.
-    float rad = mix(0.205, 0.280, dwell);
-    float ad = length(uv - ac) / rad;
+    // THE ARC, and it is the figure. Attention was a round soft patch, which is
+    // a blob, nameable as nothing. It is now a BAND OF CONSTANT RADIUS about a
+    // centre that sits outside the frame, so what crosses the disc is an arc: a
+    // curved sweep with two ends and a direction, legible as a shape in itself.
+    // The centre swings around the outside, which is what makes the arc pass.
+    float arcAng = atan2(ac.y, ac.x);
+    float2 actr = 1.08 * float2(cos(arcAng), sin(arcAng));
+    float arcW = mix(0.090, 0.135, dwell);
+    float ad = (length(uv - actr) - 0.94) / arcW;
     float att = exp(-ad * ad);
 
     // The threshold. High everywhere by default -- almost nothing crosses it --
@@ -934,9 +1046,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // premise of the species: it is always there whether or not it is lit.
     e = max(e, (0.10 + 0.30 * scatter) * smoothstep(0.38, 0.92, psi));
 
+    // The arc carries light of its own and not only a threshold. It is the
+    // figure, and a figure the eye has to hunt for is not doing its job: its
+    // core is the key structure and goes cream while the mass it crosses stays
+    // amber underneath.
+    e = max(e, att * (0.52 + 0.62 * reveal) * (0.55 + 0.45 * psi));
+
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e * (1.0 + 0.42 * st.complete + 0.14 * st.settled),
-                          glow, 0.0, 0.70, 0.45);
+                          glow, 0.0, 1.0, 0.30);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -1129,7 +1247,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
             * (1.0 + 0.40 * st.complete + 0.15 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.50);
+    float3 field = ms_lit(pal, e, glow, 0.0, 1.0, 0.34);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);
@@ -1192,12 +1310,47 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 q = uv / S;
 
     // THE MEDIUM.
+    // THE DELTA, and it is the figure. Ridged noise gave a network in the sense
+    // that a mud flat is a network: everywhere, equally, with no trunk and no
+    // direction, and at 20 pt it was mush with a bright streak in it. A delta
+    // has ONE ARTERY and a few branches leaving it, which is a shape a person
+    // can name and trace with a finger. So the channels are DRAWN, not sampled:
+    // one trunk and three branches, each a bending line with two ends, unioned.
+    // The medium's noise is still here and still does the same job -- it now
+    // modulates the artery's density instead of being the whole picture.
+    // The branch roots are placed ON the trunk by construction rather than by
+    // eye. A vein's frame is a rotation, so a point at trunk-local (a, c(a)) is
+    // at world origin + rot((a, c(a)), -ang) -- three lines of arithmetic that
+    // guarantee each branch leaves the artery from a point that is actually on
+    // it. Guessing the offsets was the first cut and it drew four separate
+    // wedges, which is not a delta, it is debris.
+    const float A0 = -0.58, F0 = 6.2, B0 = 0.052;
+    float ph0 = t * 0.31;
+    // ms_vein's line runs in direction (cos ang, -sin ang), so a negative angle
+    // heads UP and to the right. The root therefore has to sit low and left for
+    // the artery to cross the frame; the first cut put it high and left, so the
+    // trunk left the disc almost immediately and all that survived was a stub.
+    float2 root = float2(-0.36, -0.26);
+    float bw = 0.050 + 0.028 * pathways;
+    float trunk = ms_vein(uv - root, A0, B0, F0, ph0, bw * 1.30, 0.92);
+
+    float a1 = 0.26, a2 = 0.44, a3 = 0.62;
+    float2 r1 = root + ms_rot(float2(a1, B0 * sin(a1 * F0 + ph0)), -A0);
+    float2 r2 = root + ms_rot(float2(a2, B0 * sin(a2 * F0 + ph0)), -A0);
+    float2 r3 = root + ms_rot(float2(a3, B0 * sin(a3 * F0 + ph0)), -A0);
+
+    float br1 = ms_vein(uv - r1, A0 - 0.78, 0.030, 10.0, ph0 + 2.1, bw * 0.72, 0.34);
+    float br2 = ms_vein(uv - r2, A0 + 0.66, 0.026, 11.5, ph0 + 4.3, bw * 0.64, 0.30);
+    float br3 = ms_vein(uv - r3, A0 - 0.52, 0.024, 12.5, ph0 + 1.2, bw * 0.56, 0.26);
+    // A max union: each branch keeps its own silhouette instead of brightness
+    // piling up wherever two of them happen to cross.
+    float tree = max(max(trunk, br1 * (0.72 + 0.28 * branch)),
+                     max(br2 * (0.62 + 0.38 * branch), br3 * (0.55 + 0.45 * branch)));
+
     float fq = mix(1.70, 3.30, pathways);
     float3 pm = float3(q * fq, t * 0.068);
     float n = ms_fbm3(pm, 3, 2.03, 0.55);
-    float open = clamp(0.5 + 1.30 * n, 0.0, 1.0);
-    float crease = 1.0 - clamp(abs(n) * 3.80, 0.0, 1.0);
-    float chan = mix(open, crease, branch);
+    float chan = tree * (0.62 + 0.52 * clamp(0.5 + 1.30 * n, 0.0, 1.0));
 
     // The same medium at half the frequency: what the light looks like once it
     // has scattered out of a channel and into the material either side. Not a
@@ -1242,13 +1395,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // something rather than onto nothing. A flat floor instead of chan * chan
     // gave a uniform warm wash with a blob moving over it, which is a lamp
     // behind a card and not a signal in a medium.
-    float e = (chan * (0.16 + 0.30 * chan)
-            + chan * pulse * 0.90
-            + afterglow * 0.28 * halo * pulse * chan)
+    // The spine of the artery under an impulse is the key structure and reaches
+    // cream; the branches and the resting delta stay amber below it.
+    float e = (chan * (0.26 + 0.34 * chan)
+            + chan * pulse * 1.15
+            + afterglow * 0.30 * halo * pulse * chan) * 1.18
             * (1.0 + 0.70 * st.complete + 0.16 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.74, 0.60);
+    float3 field = ms_lit(pal, e, glow, 0.0, 1.0, 0.34);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -1352,6 +1507,31 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         float n = ms_fbm3(float3(q * f + slide, t * 0.030 + fi * 7.3), 2, 2.03, 0.50);
         float d = clamp(0.5 + 1.35 * n, 0.0, 1.0);
 
+        // THE PANE, and it is the figure. Three soft-silhouetted noise fields
+        // read as one cloud however differently they slide, which is what the
+        // veil was and why "layers" never landed. A layer needs an EDGE. Each
+        // scrim is now a rounded rectangle, offset and turned a little from the
+        // one behind it and sliding on its own heading: a stacked-panes gestalt
+        // a viewer parses at a glance, with the noise living on the glass as its
+        // texture rather than being the sheet itself.
+        // The pane's position must be BOUNDED. `slide` grows without limit --
+        // it is the texture's scroll, and that is right for texture -- but using
+        // it for the sheet's centre walked all three panes clean out of the
+        // frame within a few seconds, which is why the first cut looked like
+        // debris rather than glass. The glass holds its place and drifts; the
+        // texture slides across it. Each pane drifts on its own pair of slow
+        // sines, which is what makes them slide against each other.
+        float2 pcen = float2(0.082, -0.068) * (fi - 1.0)
+                    + 0.050 * float2(sin(t * 0.31 + fi * 2.1),
+                                     cos(t * 0.24 + fi * 1.3));
+        float sd = ms_pane(uv, pcen, 0.20 - 0.26 * fi,
+                           float2(0.255 - 0.020 * fi, 0.185 - 0.014 * fi), 0.055);
+        float pane = 1.0 - smoothstep(0.0, 0.038, sd);
+        // The front pane's edge is the bright line. One crisp contour is what
+        // tells the eye there is glass in front of glass.
+        float rimZ = sd / 0.020;
+        float rim = exp(-rimZ * rimZ) * (1.0 - 0.55 * far);
+
         // THE SILHOUETTE, and this is the line the first cut did not have. A
         // soft threshold rather than a coverage floor: the scrim genuinely is
         // NOT THERE in its gaps, so there is somewhere for the thing behind to
@@ -1370,15 +1550,23 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
         // Each scrim has its own brightness plane, dimmer with depth: they are
         // veils catching a little light, not light sources.
-        float level = mix(0.22, 0.11, far);
+        // The glass has to have a body, not just a rim. With the fill this low
+        // the panes read as wireframe boxes: the edge did its job so well it
+        // became the whole object, and an outline is not a translucent sheet.
+        float level = mix(0.36, 0.19, far);
         float lum = level * (0.55 + 0.45 * d);
 
         // Thinning the scrims is how the thing behind gets nearer, which is
         // legibility's other half.
         float opacity = mix(0.72, 0.46, far) * (1.0 - 0.34 * legibility);
-        float alpha = body * opacity;
+        // The pane decides the shape and the noise only textures it. Letting the
+        // noise silhouette cut holes in the glass as well was the first cut, and
+        // three perforated rectangles overlapping read as debris rather than as
+        // panes -- the edge stopped being continuous, which is the one thing the
+        // edge was for.
+        float alpha = pane * opacity * (0.55 + 0.45 * body);
 
-        acc += lum * alpha * T;
+        acc += (lum * alpha + rim * 0.30 * (0.45 + 0.55 * legibility)) * T;
         T *= (1.0 - alpha);
     }
 
@@ -1402,10 +1590,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // not because anything was added on top.
     acc += behindLight * (1.0 - T) * st.complete * 0.90;
 
-    float e = acc * 1.35 * (1.0 + 0.34 * st.complete + 0.14 * st.settled);
+    float e = acc * 1.30 * (1.0 + 0.34 * st.complete + 0.14 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.55);
+    float3 field = ms_lit(pal, e, glow, 0.0, 1.0, 0.34);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.62), position, pixelScale);
@@ -1492,7 +1680,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // repetition lands on its source at once -- the series, which spends its
     // life spread out and fading, briefly coincides. That is what a completed
     // pattern is for a thing made of repetitions.
-    float step = (0.055 + 0.075 * offset) * (1.0 - 0.92 * st.complete);
+    // The step grew with the figure. A crescent nearly 0.2 across with the old
+    // 0.09 spacing simply overlapped itself into one thick crescent and the
+    // series vanished; the rule is still that the step stays under the form's
+    // size, but under is not the same as negligible.
+    float step = (0.085 + 0.110 * offset) * (1.0 - 0.92 * st.complete);
     // SLIGHTLY late, and slightly is the operative word. The lag has to be
     // small next to the time the form takes to change, or each ghost is a
     // different shape and the series reads as lumps rather than as one thing
@@ -1529,6 +1721,18 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // same threshold-of-noise the pack uses everywhere, read through a wide
         // shallow limit that keeps it off the rim and otherwise lets the
         // silhouette do all of the drawing.
+        // THE CRESCENT, and it is the figure. The mass had to become an object
+        // with a name, and every compact object tried in earlier waves came out
+        // an orb, because a filled round blob inside a round frame is one. A
+        // crescent is not: it has two horns, a concave side and a direction, and
+        // repeated down a trail it reads instantly as ONE SHAPE SAID THREE
+        // TIMES. It is a disc with a second disc bitten out of it -- two lengths
+        // and no new taps.
+        float2 pc = uv - c;
+        float cres = (1.0 - smoothstep(0.155, 0.235, length(pc)))
+                   * smoothstep(0.090, 0.185,
+                                length(pc - dir * 0.072 - float2(dir.y, -dir.x) * 0.042));
+
         float d = 0.5 + 1.35 * ms_fbm3(float3(p * 2.35, tk * 0.105), 2, 2.03, 0.55);
 
         // Softer with every repetition, and the softness is free: a blurred
@@ -1542,18 +1746,24 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // Wide and shallow. Its only job is to keep the ghost away from a rim
         // it should never reach; the moment it is tight enough to decide the
         // outline, the species is an orb again.
-        float body = 1.0 - smoothstep(0.16 + 0.03 * k, 0.46 + 0.03 * k, length(uv - c));
+        // The crescent IS the limit now. The wide shallow fall that used to keep
+        // an amorphous field off the rim has nothing left to keep off, because
+        // the figure carries its own boundary.
+        float body = cres;
 
         // 0.66 is the source's own ceiling. An echo is a quiet thing: if the
         // loudest member of the series is already at the top of the rail there
         // is nowhere for the answers to be quieter, and the series flattens.
-        acc += mass * body * 0.66 * pow(mix(0.74, 0.30, decay), k)
+        // The source's crescent is the key structure and reaches cream; each
+        // answer behind it is amber, then shadow, which is what makes the rhythm
+        // read as a trail rather than as three equal shapes.
+        acc += (0.32 + 0.68 * mass) * body * 1.34 * pow(mix(0.70, 0.26, decay), k)
                           * smoothstep(0.0, 1.0, live - k);
     }
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, acc * (1.0 + 0.62 * st.complete + 0.16 * st.settled),
-                          glow, 0.0, 0.76, 0.48);
+                          glow, 0.0, 1.0, 0.32);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -1667,8 +1877,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float m = ms_fbm3(float3(sq, t * 0.115), 2, 2.03, 0.52);
 
     // The crest, not the body: a mark, not a smear. Wet ink lays a fatter line.
+    // The stroke figure is kept as approved; what changes is that its SPINE now
+    // reaches the top of the rail. `core` is the centre line of the mark, where
+    // a brush presses hardest, raised to a high power so it is a thin bright
+    // filament inside an amber stroke rather than a general lightening of the
+    // whole thing -- which would flatten the three tiers back into two.
     float wet = mix(4.60, 2.60, ink);
-    float stroke = pow(1.0 - clamp(abs(m) * wet, 0.0, 1.0), 1.55);
+    float across = clamp(abs(m) * wet, 0.0, 1.0);
+    float stroke = pow(1.0 - across, 1.55);
+    float core = pow(1.0 - across, 6.5);
     // What the wet brush leaves either side of where it actually touched.
     float bleed = (1.0 - clamp(abs(m) * wet * 0.42, 0.0, 1.0)) * 0.22 * ink;
 
@@ -1701,11 +1918,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // of the writing and not a haze.
     float presence = max(rise * fall, 0.11 * smoothstep(0.10, 0.45, L));
 
-    float en = (stroke * (0.72 + 0.55 * ink) + bleed) * presence;
+    float en = (stroke * (0.62 + 0.48 * ink) + core * 0.75 + bleed) * presence;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, en * 1.70 * (1.0 + 0.26 * st.complete + 0.13 * st.settled),
-                          glow, 0.0, 0.74, 0.50);
+                          glow, 0.0, 1.0, 0.32);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);

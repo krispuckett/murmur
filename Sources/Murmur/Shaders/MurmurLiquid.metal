@@ -368,6 +368,28 @@ static inline half4 ml_write(MLPalette pal, float3 inkLin, float t, float hot,
     return ml_out(rgb, pixel);
 }
 
+/// THE THREE TIERS. Ink ground, amber body, cream peaks, and the whole point is
+/// that they are separate arguments rather than one number.
+///
+/// Every style in this file used to end with a soft cap somewhere around 0.74,
+/// put there to stop a bright field walking into the rail's pale specular and
+/// coming out grey. That cap was the right fix for the wrong quantity. It held
+/// the BODY at the tone, which is correct, and in doing so it also held the
+/// figure's key structure there, which is why the whole set read as murky rust
+/// on device: a cell whose brightest pixel is the tone has two tiers, and two
+/// tiers is a texture. Three is a picture.
+///
+/// So the body still passes through the knee and still stops at the tone, and
+/// the KEY is added afterwards, outside it, with a clear run to 1.0. The rule
+/// that makes this safe is that the key has to be NARROW: a crest, a shear line,
+/// the centre of a channel, the one lit arm. Broad cream is exactly the grey the
+/// cap was invented to prevent. A few per cent of the disc at the specular reads
+/// as light; a third of it reads as paper.
+static inline float ml_tier(float body, float key) {
+    float b = 0.74 * ml_knee(body / 0.74, 0.72);
+    return b + 0.30 * clamp(key, 0.0, 1.0);
+}
+
 /// The centred, aspect-preserved frame every function opens with. length(uv) is
 /// 0.5 at the view's circle whichever way the view is stretched.
 static inline float2 ml_uv(float2 position, float2 size) {
@@ -658,8 +680,16 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float t = 0.045 + 0.60 * dens;
-    float hot = smoothstep(0.58, 1.00, dens);
+    // THE LIT ARM. The spiral had four or five arms all at the same value, which
+    // is a pattern; a figure has a subject. A broad angular envelope turning with
+    // the material picks one arm as the lit one, and only the brightest core of
+    // THAT arm is allowed past the tone. Everything else stays amber, so the
+    // cream is a highlight along a single curve rather than a general glow.
+    float armSel = 0.5 + 0.5 * cos(atan2(q.y, q.x) - 0.34 * T);
+    float key = smoothstep(0.72, 0.99, dens * (0.52 + 0.78 * armSel));
+
+    float t = ml_tier(0.045 + 0.60 * dens, key);
+    float hot = smoothstep(0.58, 1.00, dens) + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -871,8 +901,13 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float t = 0.050 + 0.72 * bright;
-    float hot = smoothstep(0.66, 1.00, bright) * 0.70;
+    // THE RING GOES CREAM. The figure is a bright annulus around a dark mouth, so
+    // the key is exactly where the convergence is high and the material is
+    // dense: the inner ring's own strongest streams, and nothing further out.
+    float key = smoothstep(0.62, 0.97, bright) * smoothstep(0.06, 0.42, conv);
+
+    float t = ml_tier(0.050 + 0.72 * bright, key);
+    float hot = smoothstep(0.66, 1.00, bright) * 0.70 + 0.50 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -988,8 +1023,21 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float t = 0.045 + 0.50 * dens + 0.30 * crest + mist;
-    float hot = smoothstep(0.60, 1.00, dens) * 0.40 + crest * 0.95;
+    // THE FOAM LINE IS THE KEY, and it is already the narrowest thing in this
+    // style: a Gaussian a few points wide straddling the surface. Taking it to
+    // the specular gives the vessel a lit rim over an amber body over ink, which
+    // is the three-tier picture this figure was always shaped for.
+    // The key is taken from the foam line's SHAPE, not from `crest`, which has
+    // already been multiplied by the foam knob and by the wash speed. At the
+    // default foam of 0.3 that product tops out at 0.3 and a key thresholded
+    // above it never fired at all: the style kept its old rust ceiling while
+    // every number in it said otherwise. The knob scales how much cream, never
+    // whether there is any.
+    float lineT = exp(-(edge * edge) / (0.042 * 0.042));
+    float key = smoothstep(0.45, 0.95, lineT) * (0.35 + 0.65 * foam);
+
+    float t = ml_tier(0.045 + 0.50 * dens + 0.18 * crest + mist, key);
+    float hot = smoothstep(0.60, 1.00, dens) * 0.40 + crest * 0.70 + 0.45 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -1051,45 +1099,42 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float bias = clamp(c3, 0.0, 1.0);
     MLState st = ml_state(stateIndex, stateTau);
 
-    float iface = 0.52 * (bias - 0.5) + 0.030 * sin(T * 0.099);
-    float sfrac = (uv.y - iface) / 0.24;
-    float mUp = 1.0 - smoothstep(-1.0, 1.0, sfrac);
+    // THE INTERFACE IS AN S, AND THAT IS THE FIGURE. A straight horizontal split
+    // reads as a texture with a stripe through it; a curved one reads as two
+    // BODIES pressed against each other, which is what this species was always
+    // actually about. One gentle bend across the disc is enough, and it drifts,
+    // so the two currents look like they are still negotiating.
+    float sPhase = 0.085 * T;
+    float iface = 0.52 * (bias - 0.5)
+                + 0.115 * sin(uv.x * 4.2 + sPhase)
+                + 0.030 * sin(T * 0.099);
+    float slope = 0.115 * 4.2 * cos(uv.x * 4.2 + sPhase);
+    // Perpendicular distance, so the shear line keeps one width along its curve.
+    float across = (uv.y - iface) / sqrt(1.0 + slope * slope);
+    // A tighter handover. Blended over four tenths of the disc the two bodies
+    // spend most of their area mixed, which averages their values back together
+    // and undoes the separation above. A tenth is still soft enough that no edge
+    // appears anywhere, and it lets each body actually be its own value.
+    float mUp = 1.0 - smoothstep(-0.10, 0.10, across);
     float overlap = 4.0 * mUp * (1.0 - mUp);
 
     float u = 0.030 + 0.095 * slip;
     float f = 3.6 / S;
 
-    // THE TIC: THE SHEAR KICK. The two sheets take one extra step past each
-    // other and come back. Nothing about the sheets changes and nothing about
-    // the light does: it is a bounded offset on the two advections, equal and
-    // opposite, so what the eye actually sees is the SEAM churning harder for a
-    // couple of seconds and then settling. The braid is an interference pattern,
-    // and interference reacts to relative motion far more than to speed.
+    // THE TIC: THE SHEAR KICK. The two currents take one extra step past each
+    // other and come back. A bounded offset on the two advections, equal and
+    // opposite, so the seam churns harder for a couple of seconds and settles.
     float2 tic = ml_tic(T + 4.4, 29.0, 2.2);
     float kick = tic.x * 0.090;
-    // Two sheets of the same material at slightly different scales and different
-    // corners of the noise domain, so they are two sheets and not one sheet
-    // sampled twice.
-    // THE LAYERS ARE DRAWN OUT INTO STREAKS, and this is the motion fix. The
-    // seam was the whole picture, and a seam is an interference pattern: it
-    // does not travel, it only reshuffles. So the honest description of this
-    // style was "it kind of shifts around" while its NAME promised two layers
-    // sliding, and nothing on screen was sliding at all.
-    //
-    // The sheets are drawn out along the slide so each one has a direction, and
-    // then NOT drawn out any further, which is the part that took a measurement
-    // to find. The first attempt stretched them four or five to one, and the
-    // style promptly became the slowest thing in the pack: a long horizontal
-    // streak sliding horizontally looks the same at every instant, so there is
-    // nothing for the eye to track. That is the aperture problem, and it is the
-    // exact opposite of legible motion, arrived at by trying too hard for it.
-    //
-    // Just under two to one is the sweet spot: enough elongation to say which
-    // way the sheet runs, enough variation along the length to see it go. The
-    // top half's forms run right, the bottom half's run left, and either one can
-    // be followed. TWO OCTAVES, not three: the per-octave rotation would scramble
-    // the anisotropy doing the work, the lesson the glaze's shattered fronts
-    // already taught this file once.
+
+    // The currents are drawn out along the slide so each has a direction, and
+    // then NOT drawn out any further. An earlier pass stretched them four or
+    // five to one and the style became the slowest thing in the pack: a long
+    // horizontal streak sliding horizontally looks the same at every instant, so
+    // there is nothing to track. That is the aperture problem, reached by trying
+    // too hard to avoid it. Just under two to one says which way each body runs
+    // and still lets the eye follow it. TWO OCTAVES: the per-octave rotation
+    // would scramble the very anisotropy doing the work.
     float3 qa = float3((uv.x - u * T - kick - 0.75 * u * st.push) * f * 0.62,
                        uv.y * f * 1.15,  2.0 + 0.060 * T);
     float3 qb = float3((uv.x + u * T + kick + 0.75 * u * st.push) * f * 0.66,
@@ -1097,46 +1142,54 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float na = ml_fbm3(qa, 2, 2.03, 0.5);
     float nb = ml_fbm3(qb, 2, 2.03, 0.5);
 
-    float d = na - nb;
-    // The width is generous, and that is the correction that made this liquid.
-    // The first cut ran a tenth of this and drew hairlines: bright wires
-    // crossing a dark disc, which is lightning, not water. na - nb has a spread
-    // of about half a unit, so a width of 0.16 makes the seam a BAND about a
-    // third of that spread wide, which is a braid of soft channels rather than a
-    // wire diagram. Contrast still tightens it, but it can no longer reach a
-    // width where the material has an edge.
-    float wid = 0.075 + 0.170 * (1.0 - contrast);
-    float seam = (wid * wid) / (wid * wid + d * d);
+    // ONE LOBE SITS DARKER THAN THE OTHER, which is the cheapest and most
+    // reliable way to say "two". Identical twins either side of a line read as
+    // one mottled patch with a crease in it; a lighter body above a heavier one
+    // reads as two things at a glance, before any motion has been seen at all.
+    // Each body is a value PLATEAU with its texture riding on top, not a field
+    // swinging over the whole range. Given the full range, the two lobes overlap
+    // in value everywhere and the difference between them is lost inside the
+    // difference within them: what you see is one mottled patch with a crease.
+    // Compressed to the top half of their range and then separated, the upper
+    // body sits clearly lighter than the lower one at every point, and "two
+    // layers" is legible before anything has moved.
+    float bodyA = 0.52 + 0.48 * smoothstep(0.24 + 0.09 * st.drive, 0.94 - 0.09 * st.drive, 0.5 + 0.95 * na);
+    float bodyB = 0.52 + 0.48 * smoothstep(0.24 + 0.09 * st.drive, 0.94 - 0.09 * st.drive, 0.5 + 0.95 * nb);
+    float base = mUp * bodyA + (1.0 - mUp) * bodyB * 0.38;
 
-    float base = mUp * (0.5 + 0.95 * na) + (1.0 - mUp) * (0.5 + 0.95 * nb);
-    base = smoothstep(0.22 + 0.09 * st.drive, 0.95 - 0.09 * st.drive, base);
-
-    // SUCCESS: the surge runs the way the top sheet runs.
+    // SUCCESS: the surge runs the way the upper current runs.
     float crest = ml_crest(clamp(uv.x * 1.11 + 0.5, 0.0, 1.0), st, 0.32);
     base *= 1.0 + 1.90 * crest + 0.22 * st.lift;
 
+    // THE SHEAR LINE. Where the two fields agree, along an interface that is now
+    // a curve: a bright braid following the S. Contrast tightens it, and it can
+    // never reach a width at which the material would have an edge.
+    float d = na - nb;
+    float wid = 0.075 + 0.170 * (1.0 - contrast);
+    float seam = (wid * wid) / (wid * wid + d * d);
+    // Gated to the interface itself rather than to a broad band, so it reads as
+    // a LINE and not as a region that happens to be brighter.
+    // The line is a LINE first and an interference pattern second. Gating it
+    // entirely on `seam` broke it into a dashed run wherever the two fields
+    // happened to disagree, and a dashed shear line does not read as an
+    // interface at all. The seam now modulates a band that is always there.
+    float line = (0.38 + 0.62 * seam) * exp(-(across * across) / (0.072 * 0.072));
     float braid = seam * overlap * (0.30 + 0.55 * contrast);
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    // The two sheets carry more of the picture than they did, so the braid has
-    // mass on both sides of it to be born between rather than a void.
-    // The sheets now carry the picture and the braid trims it, where it used to
-    // be the other way round. That is the same rebalance in the light that the
-    // streaks are in the geometry: you cannot read two layers sliding if what
-    // you are looking at is mostly the thing between them.
-    float t = 0.045 + (0.30 + 0.44 * veil) * base + 0.24 * braid;
-    // THE WALK IS CAPPED BELOW THE PALE STOP, and this is the pour pack's
-    // pv_tint lesson arriving a second time. Of the species here this one keeps
-    // the most of its area near the tone, so the braid's peaks were the only
-    // places in the pack routinely crossing 0.78 into the specular segment,
-    // where the rail halves its chroma on the way to a pale highlight. The
-    // result was a grey-white tangle sitting next to five warm neighbours in the
-    // gallery. Kneed rather than clamped, so the top of the range compresses
-    // toward 0.77 instead of flattening onto it and drawing a contour.
-    t = 0.77 * ml_knee(t / 0.77, 0.70);
-    float hot = braid * 0.50 + smoothstep(0.74, 1.00, base) * 0.18;
+    // The two bodies carry the picture and the braid trims it. THE SHEAR LINE is
+    // the key, and it is the one place in this style allowed past the tone: a
+    // cream thread along the S, amber either side of it, ink beyond.
+    //
+    // The blanket cap at 0.77 that used to sit here is gone. It was put in to
+    // stop this style going grey, and it worked, but it was holding down the
+    // exact structure that had to be brightest. Capping the BODY and letting the
+    // KEY through is the same protection with the figure left intact.
+    float key = smoothstep(0.45, 0.95, line);
+    float t = ml_tier(0.045 + (0.30 + 0.44 * veil) * base + 0.20 * braid, key);
+    float hot = braid * 0.40 + smoothstep(0.74, 1.00, base) * 0.16 + 0.55 * key;
     // Emitting at 0.80, not the pack's usual 0.88: on a field already sitting at
     // the tone, pale light does not read as hotter amber, it reads as grey.
     return ml_write(pal, inkLin, t, hot, 0.80, glow, ml_bowl(uv), position * pixelScale);
@@ -1270,6 +1323,13 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // range is gentler than it was: a channel whose width swings by half its own
     // size grows vertical combs where the path is steep.
     float k = uu / (0.78 + 0.44 * water + 0.55 * surge);
+    // THREE WIDTHS, NOT TWO, AND THAT IS WHAT MAKES IT A DRAWN LINE. The channel
+    // used to be a soft glow with a halo, which is a patch of light shaped like
+    // a river. A calligraphic stroke has a core, a body and an edge: g0 is a
+    // narrow spine that only the middle of the water reaches, g1 is the water
+    // itself, g2 is its light in the air. The spine is the only part allowed
+    // past the tone, so the line reads as drawn rather than as spilled.
+    float g0 = exp(-7.0 * k * k);             // the spine
     float g1 = exp(-1.55 * k * k);            // the water
     float g2 = exp(-0.30 * k * k);            // its light in the air
 
@@ -1284,14 +1344,19 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // A standard deviation of about one whole channel width instead makes the
     // ground fall away either side of the river and come back, which is what a
     // cut bank looks like from above and has no edge anywhere in it.
+    // The banks cut deeper than they did. A drawn line needs its ground to fall
+    // away either side of it, or the stroke and the paper are the same value and
+    // there is no line, only a lighter region.
     float lip = abs(uu) - 1.90;
-    float cut = 1.0 - 0.55 * bank * exp(-0.42 * lip * lip);
+    float cut = 1.0 - 0.78 * bank * exp(-0.42 * lip * lip);
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float t = 0.045 + 0.20 * ground * cut + g1 * (0.12 + 0.38 * water) + g2 * (0.05 + 0.07 * water);
-    float hot = g1 * (0.20 + 0.80 * water) * 0.70;
+    float key = g0 * smoothstep(0.30, 0.85, water);
+    float t = ml_tier(0.045 + 0.17 * ground * cut
+                    + g1 * (0.12 + 0.38 * water) + g2 * (0.05 + 0.07 * water), key);
+    float hot = g1 * (0.20 + 0.80 * water) * 0.55 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -1431,7 +1496,13 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float armB = step(0.5, tic.y);
 
     // Responding closes the fork further: the two flows commit to being one.
-    float spread = mix(0.14, 0.55, angleK) * (0.45 + 0.55 * e) * (1.0 - 0.32 * st.drive);
+    // THE FORK STAYS OPEN. It used to close to 45 per cent of its birth spread,
+    // which made the settled state very nearly one channel: honest to the arc
+    // and fatal to the figure, because this species IS a Y and a Y that has
+    // healed over is a line. It now rests at 80 per cent, so the arrival still
+    // reads as two flows committing to each other while the shape stays legible
+    // at a glance for as long as the indicator is on screen.
+    float spread = mix(0.14, 0.55, angleK) * (0.80 + 0.20 * e) * (1.0 - 0.22 * st.drive);
     float sep = 0.018 + (0.030 + 0.120 * approach) * e;
     float sj = 0.22 * e;                         // the meeting, sliding upstream
     float conv = 1.0 - smoothstep(sj - 0.26, sj + 0.14, sAx);
@@ -1507,8 +1578,13 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float t = 0.045 + 0.12 * haze + 0.58 * chan + 0.05 * (gA2 + gB2) + churnUp;
-    float hot = chan * chan * 0.90 + churnUp * 0.80;
+    // THE JOIN IS THE BRIGHTEST POINT, which is the one thing a confluence must
+    // say: this is where they meet. `meet` is already a tight Gaussian on the
+    // junction, so gating the key with it puts cream exactly at the crotch of
+    // the Y and nowhere else along either arm.
+    float key = smoothstep(0.45, 0.95, chan) * (0.30 + 0.90 * meet);
+    float t = ml_tier(0.045 + 0.12 * haze + 0.58 * chan + 0.05 * (gA2 + gB2) + churnUp, key);
+    float hot = chan * chan * 0.75 + churnUp * 0.70 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -1609,7 +1685,9 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // chosen drip happens to be retracted does nothing at all, and half the
     // gestures were invisible. The body working harder is the part of the heave
     // that always shows.
-    float2 p = uv + float2(w1, w2) * ((0.055 + 0.085 * heat) * (1.0 + 0.55 * tic.x)) * S;
+    // The writhe is smaller than it was. A droplet has a smooth outline; at forty
+    // per cent of the body radius the silhouette was too lumpy to name.
+    float2 p = uv + float2(w1, w2) * ((0.035 + 0.055 * heat) * (1.0 + 0.55 * tic.x)) * S;
 
     // The body's radius, and it is set against the drip's reach below rather
     // than chosen on its own. The first cut had the reach at two thirds of R,
@@ -1617,7 +1695,7 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // formed: the whole mechanism was running and none of it was visible. The
     // reach has to clear R by about a third for the sum to cross its level in
     // the gap and draw the neck that is the point of the style.
-    float R = (0.165 + 0.075 * massK) * S;
+    float R = (0.185 + 0.075 * massK) * S;
 
     // The drips, and the ring the body makes when it takes one back.
     float ring = 0.0;
@@ -1635,30 +1713,47 @@ static inline float3 ml_join_law(float tau, float joinTime) {
         // of the cycle sit at zero, so the wrap is silent.
         ring += exp(-5.5 * ph) * sin(16.0 * ph);
 
-        // A new heading each cycle. floor(cyc) jumps, but it jumps at exactly
-        // the phase where g is zero and the drip has no extension, so nothing
-        // on screen moves when it does.
-        float a = fi * 2.094 + 0.09 * rate * T
-                + 2.4 * ml_vnoise1(floor(cyc) * 1.7 + fi * 9.0, 5.0);
+        // ONE DRIP HANGS, THE OTHERS ARE SWELLINGS. Three equal drips at hashed
+        // headings gave a lumpy potato: a mass with bumps, which names nothing.
+        // A droplet is a body with ONE heavy thing coming off it, and it comes
+        // off DOWNWARD, because that is the only direction weight has. So drip 0
+        // is pinned near vertical with a small wander and carries most of the
+        // reach, and the other two are reduced to slow bulges moving around the
+        // skin. The silhouette that leaves is a hanging mass with a thick neck,
+        // which is a shape a person can name.
+        float lead = (fi < 0.5) ? 1.0 : 0.0;
+        float a = mix(fi * 2.094 + 0.09 * rate * T
+                      + 2.4 * ml_vnoise1(floor(cyc) * 1.7 + fi * 9.0, 5.0),
+                      1.5708 + 0.42 * ml_vnoise1(floor(cyc) * 1.3, 5.0),
+                      lead);
         float2 dv = float2(cos(a), sin(a));
         // It thins as it stretches, and a thicker material thins less.
         float heavy = (abs(fi - heavyIdx) < 0.5) ? tic.x : 0.0;
-        float rr = R * (0.68 + 0.30 * heavy - 0.24 * g * (1.0 - 0.45 * visc));
+        // The drip is SMALLER than the body it hangs from. Sized near it, the two
+        // read as a stacked pair of blobs, which is a peanut and not a droplet.
+        float rr = R * ((0.30 + 0.20 * lead) + 0.26 * heavy - 0.18 * g * (1.0 - 0.45 * visc));
         // The reach clears the body by half again, up from a third. A drip that
         // barely clears its own body makes a bulge; one that clears it properly
         // hangs off a neck, and the neck is the thing that reads as weight.
-        float2 dp = p - dv * ((0.215 + 0.240 * absorb) * S * g * (1.0 + 0.95 * heavy));
+        float2 dp = p - dv * ((0.200 + 0.220 * absorb) * S * g
+                              * (0.38 + 0.62 * lead) * (1.0 + 0.95 * heavy));
         lobes += exp(-dot(dp, dp) / max(rr * rr, 1e-6));
     }
 
     float Rb = R * (1.0 + (0.09 + 0.20 * absorb) * ring * (1.0 + 1.10 * tic.x));
-    float body2 = dot(p, p) / max(Rb * Rb, 1e-6);
+    // Slightly taller than wide. A droplet is never a circle, and an ovoid body
+    // is most of what separates "hanging mass" from "ball".
+    float2 pb = float2(p.x, p.y * 0.86);
+    float body2 = dot(pb, pb) / max(Rb * Rb, 1e-6);
     float field = exp(-body2) + lobes;
 
     // The cut. Below it there is no iron; the crossing is soft over a wide
     // enough span that the skin never has an edge.
     float skin = smoothstep(0.34, 0.62, field);
-    float deep = smoothstep(0.34, 1.35, field);      // how far inside we are
+    // The interior reaches full depth well before the metaball's own peak. Cut at
+    // 1.35 the body never got past two thirds of the range, so the mass sat in
+    // the rail's shadow and read as a dull lump however hot its cracks were.
+    float deep = smoothstep(0.34, 1.02, field);      // how far inside we are
 
     // The heat it gives off. The same lobes at two and a half times their
     // radius, so the aura belongs to the mass's actual shape instead of being a
@@ -1689,17 +1784,22 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // material and only gets out where the skin has opened. Cut the base too
     // generously, as the first pass did, and the mass is a flat orange lump with
     // a few pale marks on it, which is a stone and not molten iron.
+    // THE INTERIOR GLOWS THROUGH A DARKER SKIN. The key is the deepest, hottest
+    // part of the mass and nothing else: cream at the core of the cracks, amber
+    // through the body, and the skin left dark so the light reads as coming from
+    // inside a solid rather than being painted on one.
+    float key = smoothstep(0.26, 0.60, cracks) * smoothstep(0.30, 0.80, deep);
     float t = 0.045
             + aura * (0.070 + 0.055 * heat)
-            + skin * (0.095 + 0.190 * deep)
-            + cracks * 0.33;
+            + skin * (0.150 + 0.290 * deep)
+            + cracks * 0.42;
     // Capped below the pale stop, the undertow's correction a third time. The
     // veins sit inside a mass that is already near the tone, so unchecked they
     // walk the rail into the specular and the iron comes out cream. Iron does
     // not go cream; it goes yellow-white only at temperatures this style is not
     // depicting, and the emission rail drops to 0.84 for the same reason.
-    t = 0.74 * ml_knee(t / 0.74, 0.72);
-    float hot = cracks * 0.90;
+    t = ml_tier(t, key);
+    float hot = cracks * 0.75 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.84, glow, ml_bowl(uv), position * pixelScale);
 }
 
@@ -1779,10 +1879,20 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float along = dot(uv, dv);
     float across = dot(uv, ev);
 
-    // THE FORM. Dark, slow, and only ever a surface for something else to run
-    // over. Two octaves: it needs relief, not detail.
+    // THE FORM IS A DOME, and it now has a silhouette. It used to be relief
+    // spread across the whole disc, which gives a texture something to pool in
+    // but gives the eye no object: a film sliding over an edge-to-edge mottle is
+    // a pattern, not a thing with light on it. A rounded mass with its own rim,
+    // perturbed off round so it reads as a form and not a ball, sitting in ink
+    // with dark all around it, is the figure this species was always described
+    // as having.
     float3 qf = float3(uv * (2.3 / S), 60.0 + 0.020 * T);
     float relief = saturate(0.5 + 1.0 * ml_fbm3(qf, 2, 2.03, 0.5));
+    float domeR = 0.375 + 0.055 * (relief - 0.5) * 2.0;
+    float dome = 1.0 - smoothstep(domeR - 0.085, domeR + 0.020, length(uv));
+    // Its own turn away from the light. The far side falls off, which is what
+    // makes a dome read as round rather than as a disc cut out of paper.
+    float turn = 0.62 + 0.38 * smoothstep(0.30, -0.34, uv.x * 0.72 + uv.y * 0.69);
 
     // THE FILM, squashed along the travel so its forms are wave fronts.
     // THE SLIDE IS SLOWER THAN IT LOOKS LIKE IT SHOULD BE, and measuring it is
@@ -1815,31 +1925,37 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // bands pass: that is a luminance pulse, which this family does not do. A
     // little variation along the front means some part of the disc is always
     // carrying film, and the total stays put while the picture keeps moving.
-    float3 qs = float3((along - travel) * (5.5 / S), across * (1.25 / S), 40.0 + 0.022 * T);
-    // Biased by the relief, so it pools in the hollows and thins on the ridges.
-    float wet = 0.5 + 1.15 * ml_fbm3(qs, 2, 2.03, 0.5) - 0.34 * (relief - 0.5);
-    // A HIGH cut, and this is the difference between a film and a camouflage
-    // pattern. Cut near the middle of the field's range and half the disc is wet
-    // at once: broad pale patches with the dry form showing between them, which
-    // is marbling and belongs to another pack. Cut in the upper fifth and two or
-    // three narrow bands cross a dark form, which is a sheet of liquid running
-    // over something.
-    // Responding narrows the fronts: fewer, cleaner, more deliberate.
-    float cut = mix(0.82, 0.52, sheetK) + 0.030 * st.drive;
+    // ONE RIBBON, DRAWN AS A RIBBON. Thresholding a noise field was the wrong
+    // instrument for this: the pitch sets the band's width and its count at the
+    // same time, so a band narrow enough to be a ribbon comes in threes, and one
+    // wide enough to be alone is a blob that covers the dome. Worse, whether a
+    // front is on screen at all was left to chance, and the cell went dark for
+    // seconds together.
+    //
+    // A wrapped Gaussian on a travelling phase decouples all of it. The period
+    // sets how often a ribbon comes, the sigma sets how wide it is, and because
+    // the phase wraps there is always exactly one on the dome. The noise is
+    // still here and still doing the organic work: it WARPS the coordinate, so
+    // the ribbon bends and varies along its length instead of being a ruled
+    // stripe, but it no longer decides whether the ribbon exists.
+    float3 qs = float3((along - travel) * (2.4 / S), across * (1.15 / S), 40.0 + 0.022 * T);
+    float wob = ml_fbm3(qs, 2, 2.03, 0.5);
 
-    // SUCCESS: the surge runs along the film's own heading, and it arrives as a
-    // WAVE OF WETTING rather than as extra light on the film that is already
-    // there. Multiplying `film` was the obvious move and it does almost nothing,
-    // because film is a smoothstep that spends its life at 0 or at 1: scaling a
-    // saturated mask can only touch the sliver in between. Dropping the cut
-    // where the crest is lets the front genuinely flood, which is both what more
-    // water looks like and the only lever with any range in it.
+    // SUCCESS: the surge runs along the film's own heading, and the ribbon FLARES
+    // as it passes: wider and brighter, then back. Rewriting the film as a drawn
+    // ribbon dropped the old surge on the floor and this style's arrival went
+    // completely flat, which the state sheet caught and nothing else would have.
     float surge = ml_crest(clamp(along * 1.15 + 0.5, 0.0, 1.0), st, 0.30);
-    float cutS = cut - 0.34 * surge - 0.05 * st.lift;
-    float film = smoothstep(cutS - 0.13, cutS + 0.17, wet);
 
-    // The meniscus: brightest exactly at the film's own boundary.
-    float edge = 4.0 * film * (1.0 - film);
+    const float RIB_P = 0.62;                  // one ribbon every 0.62 of a frame
+    float phase = (along + 0.085 * wob - travel) / RIB_P;
+    float w = phase - floor(phase) - 0.5;
+    float widthR = mix(0.155, 0.085, sheetK) * (1.0 - 0.10 * st.drive)
+                 * (1.0 + 0.95 * surge);
+    float rib = exp(-(w * w) / (widthR * widthR));
+    // It thins over the ridges and pools in the hollows, the same term that made
+    // the old fronts belong to the form rather than float over it.
+    float film = rib * (0.80 + 0.34 * (1.0 - relief)) * (1.0 + 0.85 * surge + 0.20 * st.lift);
 
     // The light inside it, outrunning it by a third. Stretched across the flow,
     // so these are broad sheens travelling along the front and never anything
@@ -1870,15 +1986,21 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // this family does not pulse. The residue keeps the hollows lit between
     // fronts, so what changes as the film passes is where the light IS, not how
     // much of it there is.
-    float t = 0.045
-            + 0.060 + 0.140 * smoothstep(0.18, 0.95, relief)  // the dark form
-            + 0.055 * (1.0 - relief)                          // still damp in the hollows
-            + film * (0.060 + 0.075 * (1.0 - relief))         // the wet sheet
-            + edge * (0.115 + 0.175 * sheenK) * (1.0 + 0.80 * st.drive)  // the meniscus
-            + spec * (0.060 + 0.160 * sheenK) * (1.0 + 0.70 * st.drive);
-    // Soft-capped below the rail's pale stop, the undertow's correction: a film
-    // is the brightest thing this pack draws and it should stay amber doing it.
-    t = 0.72 * ml_knee(t / 0.72, 0.72);
-    float hot = edge * (0.35 + 0.45 * sheenK) + spec * 0.55;
+    // Everything the film does is confined to the dome. A ribbon running off the
+    // form's edge into the ink would say the form was not there.
+    float onDome = dome * turn;
+    float filmD = film * dome;
+
+    // THE RIBBON'S CORE IS THE KEY, which for a ribbon of LIGHT is its middle
+    // and not its edges. The dome and the damp both stay under the tone, so what
+    // reads is a dark round form with one bright band lying across it.
+    float key = smoothstep(0.52, 0.94, rib) * dome * (0.55 + 0.60 * sheenK);
+
+    float t = ml_tier(0.045
+            + onDome * (0.145 + 0.235 * smoothstep(0.18, 0.95, relief))  // the dome
+            + onDome * 0.065 * (1.0 - relief)                  // damp in its hollows
+            + filmD * (0.150 + 0.170 * sheenK) * (1.0 + 0.45 * st.drive)  // the ribbon
+            + spec * dome * (0.055 + 0.145 * sheenK) * (1.0 + 0.70 * st.drive), key);
+    float hot = filmD * (0.22 + 0.30 * sheenK) + spec * dome * 0.45 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.86, glow, ml_bowl(uv), position * pixelScale);
 }

@@ -633,7 +633,12 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // THE TIDE. Pigment piles up where the front stalls, so a blot is darker at
     // its edge than in its middle. It is the single most recognisable thing
     // about ink on paper and it is one gaussian.
-    float wr = max(0.62 * w, 0.008);
+    // THE RING IS THE FIGURE, so it is sized to be SEEN and not to be correct.
+    // At 0.62 of the front's own softness the tide was about a pixel wide on a
+    // 20 pt cell, which is a figure that exists only at 300 pt. A fifteenth of
+    // the blot is thick for a real tide line and it is what makes the ring
+    // legible at every size in the roster.
+    float wr = 0.020 + 0.075 * Rinf;
     float tide = exp(-(sd * sd) / (wr * wr));
 
     // The interior, creeping outward forever at a vanishing rate. It is a
@@ -651,8 +656,13 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // whose middle is its highlight reads as a lit sphere, and the first cut of
     // this shader did exactly that.
     float dens = core * (0.62 + 0.26 * mott) + 0.45 * wash;
+    // THE THREE TIERS. Ink ground at 0.045, an amber body around 0.5, and the
+    // ring taken all the way to the rail's pale stop. 0.54 is not a taste
+    // choice: the body under the tide sits near 0.40, and the walk from the
+    // tone to the cream specular does not begin until 0.78, so anything less
+    // than this leaves the brightest pixel in the cell sitting in rust.
     float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.2)
-             + (0.16 + 0.14 * tearK) * tide;
+             + (0.54 + 0.14 * tearK) * tide;
     // SUCCESS: the blot drinks from where the drop landed out to its own tide
     // line, so the saturation arrives the way the ink did.
     tv += mi_drink(st, rr / max(Rf, 1e-4)) * clamp(dens, 0.0, 1.2) * 0.26;
@@ -736,10 +746,15 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // direction rather than merely folding harder everywhere.
     const float2 LAY = float2(0.2588, 0.9659);
     p -= LAY * (st.lean * 0.055);
+    // ONE DOMINANT FOLD SYSTEM. There used to be three rakes at 7.3, 12.9 and
+    // 21.7, and stacked at those pitches they made allover filigree: beautiful
+    // at 300 pt and, at 20, a busy grey nothing with no shape to name. The
+    // third is gone and the second is down to a quarter of the first, so what
+    // is left is one gesture with a hand's worth of variation on it, drawn at a
+    // coarser pitch so the folds are fewer and larger.
     float A = 0.050 + 0.075 * comb;
-    p = mi_rake(p, float2( 0.9563,  0.2924),  7.3, A * (1.0 + 0.55 * st.drive), t * 0.57);
-    p = mi_rake(p, float2(-0.4067,  0.9135), 12.9, A * 0.55, -t * 0.41 + 1.7);
-    p = mi_rake(p, float2( 0.6691, -0.7431), 21.7, A * 0.26,  t * 0.31 + 4.1);
+    p = mi_rake(p, float2( 0.9563,  0.2924),  5.4, A * (1.0 + 0.55 * st.drive), t * 0.57);
+    p = mi_rake(p, float2(-0.4067,  0.9135),  9.5, A * 0.28, -t * 0.41 + 1.7);
 
     // THE FLOURISH: a fourth comb stroke. The three rakes above are the ones
     // always in the bath. This is the marbler picking the comb up and drawing it
@@ -760,7 +775,31 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // Band phase in CYCLES, built from the sheet plus a gentle lay direction so
     // the laminae have a grain to run along instead of closing into rings.
-    float count = 1.0 + 2.2 * folds;
+    // THE STONE. The marbling is now an OBJECT floating in the cell rather
+    // than a pattern filling it: the sheet's own field against a radial well,
+    // the same construction the halation body uses, which guarantees a single
+    // closed outline (the pedestal keeps the centre inside it at any noise
+    // value) while leaving the noise to decide the shape. It combs with the
+    // rest of the bath, because a skin of ink on water does move when the comb
+    // goes through it.
+    // The stone's outline gets its OWN field, and that is not a luxury. Built
+    // from `sheet` it was a level set of the same scalar the band phase is
+    // built from, so the outline ran parallel to a vein: the edge of the object
+    // and the brightest line inside it were the same curve, and the result read
+    // as a hollow loop of bright scribble rather than as a body of ink. One raw
+    // octave on the UNRAKED frame keeps the two independent, and it costs eight
+    // hashes. It does not comb with the bath either, which is right: the skin
+    // of ink has a shape of its own that the comb moves through.
+    float stoneN = mi_noise3(float3(uv * 1.7, t * 0.030 + 61.0));
+    float stoneF = 0.46 + 0.55 * stoneN - 3.2 * dot(uv, uv);
+    float stone = smoothstep(-0.02, 0.14, stoneF);
+
+    // 1.65 at the default, not the 1.07 the first cut of the reshape used.
+    // "Fewer and larger" overshot into "one": at that count a single vein
+    // survived and a lone contour snaking through a blob is not a marbled mass,
+    // it is a doodle. Three or four folds is the count where the object still
+    // reads as folded at 20 pt and still has folds to look at at 300.
+    float count = 0.90 + 1.50 * folds;
     float u = (sheet * 2.1 + dot(p, float2(0.2588, 0.9659)) * 1.35) * count;
 
     float wpx = max(fwidth(u), 1e-5);                  // cycles per device pixel
@@ -772,14 +811,29 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // same derivative. A vein is then about 1.7 px of half-width at every size,
     // which is what keeps a drawn line looking drawn at 300 pt and stops it
     // becoming a strobe at 20.
-    float dpx = abs(fract(u + 0.5) - 0.5) / wpx;
-    float vein = exp(-dpx * dpx / 2.9) * att;
+    // THE VEIN IS A RIBBON, NOT A HAIRLINE, and this is a units correction. It
+    // used to be measured purely in PIXELS, which is right for an isoline on a
+    // survey sheet and wrong for a fold of ink: at 300 pt a fold's bright ridge
+    // came out two pixels wide and the whole species read as a contour drawing
+    // of marbling rather than as marbling. A fold's ridge is a fraction of the
+    // fold, so the width is now a fraction of the BAND, with a pixel floor
+    // underneath it so that at 20 pt, where a seventh of a band is a third of a
+    // pixel, it still has something to draw.
+    float dc = abs(fract(u + 0.5) - 0.5);           // cycles to the nearest crest
+    float halfW = max(0.145, 1.8 * wpx);            // in cycles, floored in pixels
+    float vein = exp(-(dc * dc) / (halfW * halfW)) * att;
 
-    float mass = mix(saturate(0.5 + 0.85 * sheet), body, att);
-    // The vein is the drawn line and the body is the ink it was drawn in, and
-    // the body has to win. Weighted the other way the picture is hairlines on
-    // black, which is a lightning storm rather than a bath of ink.
-    float tv = 0.055 + 0.62 * mass + (0.07 + 0.13 * contrast) * vein;
+    // A floor under the body so the stone reads as one filled mass with folds
+    // in it rather than as a set of separate stripes that happen to be near
+    // each other. The troughs stay well down the rail; they just stop being the
+    // ink ground, which is what makes the object cohere.
+    float mass = (0.20 + 0.80 * mix(saturate(0.5 + 0.85 * sheet), body, att)) * stone;
+    // The three tiers: ink outside the stone, amber in it, and the veins taken
+    // to the rail's cream stop. The vein is deliberately driven a little past
+    // 1.0 so that its crest saturates into the pale specular and its shoulders
+    // fall back through the tone, which is what puts a bright line on an amber
+    // body instead of a uniformly hot smear.
+    float tv = 0.055 + 0.62 * mass + (0.32 + 0.14 * contrast) * vein * stone;
     // SUCCESS: the folds take up pigment in sequence along the lay, so the
     // saturation reads as something moving through the bath rather than the
     // bath being turned up.
@@ -894,7 +948,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // exhausted at the front.
     float conc = mix(0.52, 1.0, saturate(sd / 0.42));
 
-    float wr = 0.010 + 0.026 * (1.0 - dry);
+    // The fringe line is this species' figure and it is widened for the same
+    // reason the blot's ring was: a cream line a pixel wide is not a figure.
+    float wr = 0.022 + 0.030 * (1.0 - dry);
     float tide = exp(-(sd * sd) / (wr * wr));
 
     // The foot of the sheet stands in the reservoir.
@@ -902,7 +958,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     float dens = wet * conc * (0.80 + 0.85 * fiber * grain) + pooling * 0.42 * src;
     float tv = 0.045 + 0.64 * clamp(dens, 0.0, 1.3)
-             + (0.14 + 0.18 * dry) * tide
+             + (0.70 + 0.20 * dry) * tide
              // Dry paper is not blank paper. A whisper of tooth above the line
              // is most of what makes this interesting at 300 pt and it costs
              // nothing: the grain tap is already paid for.
@@ -990,38 +1046,67 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float rip = mi_fbm3(float3(uv * (2.6 / S), t * 0.128 + 31.0), 2, 2.03, 0.5);
     float y = yUp + disturb * 0.045 * rip;
 
-    // The anisotropy the arc drives. At k = 1 both axes sit at 5.6, which is a
-    // cloud; at k = 0 the horizontal has fallen to 2.2 and the vertical has
-    // climbed past ten, which is a bed.
-    // RESPONDING: the bed compacts. The laminae draw closer together and the
-    // horizontal frequency drops further, which is this species' own arrival
-    // pushed past where it would have stopped: more settled than settled.
-    float fx = mix(2.2, 5.6, k) / S * (1.0 - 0.18 * st.drive);
-    float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S * (1.0 + 0.30 * st.drive);
-    // THE FLOURISH: a lens of the bed lifts and resettles. Something trapped
-    // under the sediment works its way out, one patch of the laminae bows up
-    // over it, and the layers come back down onto their level. It enters the
-    // BAND coordinate only: the bed's envelope below is left on the unlensed y,
-    // so the picture never brightens anywhere, it deforms and recovers.
+    // THE STACK, and this is the reshape. This species used to be one
+    // anisotropic field whose level sets happened to lie flat, which fills the
+    // circle with stripes; stripes are a texture and a texture has no
+    // silhouette. A settled bed is a THING with a top. So the surface is now
+    // built explicitly, the courses are measured DOWN FROM IT so they are
+    // parallel to it and move with it, and the line along it is the figure's
+    // key structure and the cell's cream.
+    //
+    // The arc drives the surface instead of driving an anisotropy: turbid, it
+    // sits high and is soft enough to be no surface at all, which is a cloud
+    // filling the vessel; settled, it drops to a low mound with a crisp top and
+    // the courses separate under it. Same exponential, a legible object.
+    float mound = exp(-(xAc * xAc) / 0.30);
+    float wob = mi_noise3(float3(xAc * (3.4 / S), 0.0, tau * 0.05 + 51.0));
+
+    // THE FLOURISH lifts the SURFACE now rather than the band coordinate, which
+    // is what "a lens of the bed lifts and resettles" actually looks like when
+    // the bed has a top to lift.
     MIBeat gs = mi_beat(t, 37.0, 2.4, 0.34);
     float xg = (gs.id * 2.0 - 1.0) * 0.30;
     float dxs = (xAc - xg) / 0.16;
-    float yb = y + gs.e * 0.055 * exp(-dxs * dxs);
+    float lens = gs.e * 0.055 * exp(-dxs * dxs);
 
-    float n = mi_fbm3(float3(xAc * fx, yb * fy, tau * 0.045 + 3.0), 2, 2.03, 0.5);
-    // Beds have edges. 1.55 rather than 1.15 is what separates one lamina from
-    // the next instead of leaving a smear that could be any horizontal field.
-    float dens = saturate(0.50 + 1.55 * n);
+    // RESPONDING: the heap draws itself in and settles lower, which is this
+    // species' own arrival pushed past where it would have stopped.
+    float surfY = mix(0.42, -0.02 + 0.13 * mound + 0.035 * wob, clear)
+                + lens - 0.035 * st.drive;
+    float below = surfY - y;                       // > 0 inside the bed
+    float ws = mix(0.30, 0.022, clear);            // the surface's own softness
+    float inBed = smoothstep(-ws, ws, below);
 
-    float bed = 1.0 - smoothstep(-0.22, 0.24, y);   // 1 low, 0 high
-    float env = mix(0.85, mix(0.16, 1.0, bed), clear);
+    // THE COURSES. Three or four of them across the depth of the heap, banded
+    // on a cosine so each one has a top and a bottom, perturbed by the field so
+    // no two are the same thickness. Band-limited by fwidth like the marbling's
+    // laminae, so at 20 pt they dissolve into the mass instead of aliasing.
+    float bandN = (2.6 + 2.4 * layers) / 0.45 * (1.0 + 0.22 * st.drive);
+    float nz = mi_fbm3(float3(xAc * (2.4 / S), y * (2.2 / S), tau * 0.045 + 3.0),
+                       2, 2.03, 0.5);
+    float bp = below * bandN + 0.42 * nz;
+    float wpx = max(fwidth(bp), 1e-5);
+    float att = exp(-4.9348 * wpx * wpx);
+    float band = 0.5 + 0.5 * cos(6.2831853 * bp) * att;
+    band = mix(0.5, pow(band, 1.0 + 1.6 * layers), clear);
 
-    // Compaction: the bottom of a settled bed carries more than its share,
-    // because everything above it is pressing down on it.
-    float tv = 0.045 + 0.62 * dens * env + 0.10 * bed * clear * dens;
-    // SUCCESS: the saturation rises through the bed, bottom layer first, the
-    // way a liquid wicks up through sediment that has already settled.
-    tv += mi_drink(st, saturate(0.5 - y * 1.6)) * dens * env * 0.26;
+    // The courses low in the stack carry more than their share, because
+    // everything above them is pressing down.
+    float comp = 1.0 + 0.45 * saturate(below / 0.40);
+    float dens = inBed * (0.40 + 0.60 * band) * comp * (0.72 + 0.28 * (0.5 + 0.8 * nz));
+
+    // The supernatant. Never clear, and it is where the turbidity lives while
+    // the arc is still running.
+    float haze = (1.0 - inBed) * (0.30 + 0.70 * k) * saturate(0.5 + 0.9 * nz);
+
+    // THE SURFACE LINE: the figure's silhouette, and the only thing in this
+    // cell that reaches the rail's pale stop. It arrives with the settling,
+    // because before there is a bed there is nothing for a surface to be.
+    float line = exp(-(below * below) / (0.030 * 0.030)) * clear;
+
+    float tv = 0.045 + 0.52 * clamp(dens, 0.0, 1.4) + 0.10 * haze + 0.72 * line;
+    // SUCCESS: the saturation rises through the stack, bottom course first.
+    tv += mi_drink(st, 1.0 - saturate(below / 0.45)) * clamp(dens, 0.0, 1.4) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -1186,7 +1271,8 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // drawn edge, which is the one thing a scattering effect never looks like.
     float w = 0.022 + 0.100 * corona;
     float halo = exp(-max(-d, 0.0) / w) * (1.0 - inside);
-    float wr = 0.005 + 0.013 * corona;
+    // The rim carries the cream, so it is wide enough to carry it at 20 pt.
+    float wr = 0.020 + 0.024 * corona;
     float rim = exp(-(d * d) / (wr * wr));
     // The body is dark but it is not a hole. It holds the rail's deep shadow at
     // its shoulder and gives even that up toward its middle, so there is ink in
@@ -1212,7 +1298,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float tv = 0.040
              + inside * core
              + (0.22 + 0.60 * corona) * halo * (0.62 + 0.38 * facing)
-             + (0.09 + 0.10 * corona) * rim  * (0.55 + 0.45 * facing);
+             + (0.36 + 0.24 * corona) * rim  * (0.35 + 0.65 * facing);
     // SUCCESS: the scatter drinks outward from the body's own edge, so the
     // arrival travels through the corona rather than switching it on.
     tv += mi_drink(st, saturate(-d / 0.20))
@@ -1326,7 +1412,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // Jurin from the other side: the liquid climbs the wall over its capillary
     // length, and that climb tips the surface outward.
-    float lambda = (0.008 + 0.024 * tension) * S * (1.0 - 0.22 * st.drive);
+    // Widened, because the meniscus is now the figure's key line and has to
+    // carry cream at 20 pt rather than merely exist at 300.
+    float lambda = (0.018 + 0.030 * tension) * S * (1.0 - 0.22 * st.drive);
     float men = exp(-max(R - rr, 0.0) / lambda) * pool;
     // Almost all of the meniscus goes into the SLOPE and only a little into the
     // brightness, and that split is the whole reason this shader is allowed to
@@ -1380,7 +1468,16 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float tv = 0.045
              + 0.30 * h * pool
              + (0.22 + 0.32 * sheenK) * spec * pool
-             + (0.10 + 0.12 * tension) * men
+             // THE CREAM LINE. Earlier this shader argued that light added at
+             // the wall paints a ring and a ring is a drawn circle, and it kept
+             // the meniscus almost entirely in the slope for that reason. The
+             // figure law overrules it: this species' one nameable structure IS
+             // the wetted edge, and a figure whose key structure never leaves
+             // rust is unreadable at 20 pt. The slope contribution stays, so
+             // the light still falls on the wall from a direction and the line
+             // is brighter where it faces the source; what changed is that the
+             // line now reaches the top of the rail where it is lit.
+             + (0.58 + 0.20 * tension) * men
              + 0.075 * dried;
     // SUCCESS: the dish takes up pigment from the middle out to the meniscus,
     // so the last thing to saturate is the wall, where the light already is.
@@ -1544,7 +1641,12 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // profile comes back, and the beam does not come back with it, because the
     // grain below breaks the middle into fibres so there is no smooth core left
     // to read as a beam.
-    float W = Wref * (0.90 + 0.55 * uN) * (0.72 + 0.56 * fibre);
+    // THE TEARDROP. The width used to GROW along the bleed, which fans and
+    // reads as a wedge; a feather is broad at the head and tapers to a tip.
+    // Widest just past the root and down to a third of that at the reach, which
+    // with the reach's own lateral falloff gives a plume with a rounded head, a
+    // clear orientation and a point.
+    float W = Wref * (1.22 - 0.86 * uN) * (0.72 + 0.56 * fibre);
     float across = exp(-(n * n) / max(W * W, 1e-8));
 
     // Each fibre's own reach, and it has to FALL OFF TO THE SIDES or the mark
@@ -1592,8 +1694,18 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // The grain modulates the ink DEEPLY, 0.30 to 1.15 rather than the first
     // cut's 0.78 to 0.93. A shallow modulation is a texture on a solid shape; a
     // deep one is the shape.
+    // THE SPINE. A feather's rachis: one bright line down the axis, brightest
+    // at the head and thinning toward the tip, and the only part of this
+    // species that reaches the rail's cream stop. It is what makes the plume
+    // read as oriented at 20 pt, where the fibrous edge has become a soft
+    // shoulder and the silhouette alone would be a smudge.
+    float ws = 0.30 * Wref;
+    float spine = exp(-(n * n) / max(ws * ws, 1e-8)) * front * back
+                * (0.34 + 0.66 * (1.0 - 0.75 * uN));
+
     float dens = front * back * across * sat * (0.30 + 0.85 * fibre);
     float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.3)
+             + (0.46 + 0.10 * bleed) * spine
              + (0.13 + 0.15 * dryness) * tip * across
              + 0.065 * hint * (0.30 + 0.70 * fibre);
     // SUCCESS: the stain drinks from the pen mark out to the reach, along the
@@ -1704,6 +1816,14 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // moment, so some part of the sheet is always surfaced while another is
     // being taken back, which is both the species and the reason the total never
     // goes away. The floor is 0.30 for the same reason halation's corona has one.
+    // THE PAGE. The writing used to run to the edge of the cell, which makes it
+    // a texture; a palimpsest is a SHEET, and a sheet has edges. An oval a
+    // little wider than tall reads as a page at a glance and gives the species
+    // the silhouette the figure law asks for, with ink ground around it. Soft
+    // shouldered, because nothing in this family owns a hard edge.
+    float pr = length(float2(p.x / 0.40, p.y / 0.27));
+    float page = 1.0 - smoothstep(0.78, 1.06, pr);
+
     // THE SWEEP, and this is the motion-pass correction. The envelope used to
     // drift slowly and evolve quickly, and a field whose z runs faster than it
     // travels BOILS: patches brightened and dimmed where they stood, which is
@@ -1755,7 +1875,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
         // THE ROWS. A wandering baseline, because a ruled one reads as a form to
         // fill in rather than as handwriting.
-        float lineFreq = (5.0 + 2.6 * fi * (0.4 + 0.6 * layers)) / S;
+        // Three or four lines inside the page, not five across the whole cell:
+        // the rhythm of ruled writing is the thing that says "a page of text"
+        // before any mark is read, and it only reads if you can count them.
+        float lineFreq = (6.4 + 3.0 * fi * (0.4 + 0.6 * layers)) / S;
         float yl = (e.y + 0.055 * sin(e.x * 2.3 + fi * 2.1)) * lineFreq;
         float wl = max(fwidth(yl), 1e-5);
         float attl = exp(-4.9348 * wl * wl);
@@ -1805,7 +1928,20 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // page, it is a background.
     float tooth = mi_noise3(float3(p * (26.0 / S), 3.0));
 
-    float tv = 0.048 + 0.84 * clamp(writing, 0.0, 1.2) + 0.045 * (0.5 + 0.5 * tooth);
+    writing *= page;
+    // The strokes are driven to the rail's cream stop at their most surfaced,
+    // so the page has a top tier instead of topping out in rust. Everything
+    // below them still falls back through amber into the ink of the sheet.
+    // 2.05 and not the 1.24 the first pass used. A stroke here is the product
+    // of two separately peaked functions, the ridge crest and the centre of its
+    // line, and the two rarely peak at the same pixel: the field's realistic
+    // maximum is under half of its arithmetic one, so a coefficient set from
+    // the arithmetic maximum leaves the whole page in rust. This is set from
+    // what the field ACTUALLY reaches, which puts the crest of a well surfaced
+    // stroke at the rail's cream stop and everything less than that back down
+    // through amber into the ink of the sheet.
+    float tv = 0.048 + 2.05 * clamp(writing, 0.0, 1.2)
+             + 0.045 * (0.5 + 0.5 * tooth) * page;
     // SUCCESS: the page takes up pigment line by line down the sheet, the way
     // it would have been written.
     tv += mi_drink(st, saturate(0.5 + p.y * 1.4)) * clamp(writing, 0.0, 1.2) * 0.30;

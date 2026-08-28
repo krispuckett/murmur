@@ -424,6 +424,64 @@ static inline float mg_hold(float2 uv, float reach) {
     return 1.0 - smoothstep(a, a + 0.30, r);
 }
 
+// MARK: - The value hierarchy
+//
+// Three tiers in every default render: the ink ground, an amber body, and cream
+// peaks. This is measured rather than asserted. Walking the house rail with the
+// default ink and tone gives:
+//
+//     0.00  #0A0A0B  ink
+//     0.20  #2E150D  ink barely lifted
+//     0.34  #4F1D0B  DEEP RUST
+//     0.45  #5A230C  DEEP RUST
+//     0.55  #82421A  amber, low
+//     0.65  #B86C2D  amber
+//     0.72  #D68338  amber
+//     0.78  #E08B3C  hot amber, the tone stop
+//     0.86  #EEA463  hot amber
+//     0.92  #FFC591  CREAM
+//     1.00  #FFDEB2  CREAM, the pale specular
+//
+// WHICH NAMES THE BUG THIS SECTION EXISTS TO FIX. The first eight styles capped
+// their rail walk near 0.88 and took their emission colour from 0.80, and 0.80
+// is #E18D3F: hot amber, not cream. So the brightest pixel in a cell was amber
+// laid over amber, while the bodies sat between 0.34 and 0.55, which is
+// #4F1D0B to #82421A, the murky rust the review rejected. There was no third
+// tier at all. The rail always had the cream in it; nothing was reaching it.
+//
+// mg_tier is the fix, and it takes a figure's own intensity (0 where the figure
+// is not, 1 at its hottest structure) and lands it on the three tiers:
+//
+//     v = 0.00  ->  0.00   ink, the ground
+//     v = 0.16  ->  0.34   the figure's dark edge, out of the ground
+//     v = 0.60  ->  0.72   the amber body, where most of the figure lives
+//     v = 1.00  ->  1.00   cream, reserved for the key structure
+//
+// The three segments are smoothstepped so their ends are flat and the joins are
+// C1, the same reason the rail itself is built that way: a kink in a value ramp
+// shows up as a contour line in a smooth field. The important property is that
+// the middle segment is WIDE and the top is NARROW. Most of a figure should be
+// amber; only its key structure earns cream. Spread the top tier wider and
+// everything goes pale at once, which is the opposite failure and just as bad.
+static inline float mg_tier(float v) {
+    v = clamp(v, 0.0, 1.0);
+    if (v < 0.16) { return 0.34 * smoothstep(0.0, 0.16, v); }
+    if (v < 0.60) { return 0.34 + 0.38 * smoothstep(0.0, 1.0, (v - 0.16) * (1.0 / 0.44)); }
+    return 0.72 + 0.28 * smoothstep(0.0, 1.0, (v - 0.60) * (1.0 / 0.40));
+}
+
+/// The rail stop every style's emission takes its colour from. 0.98 is #FFDDB0,
+/// the cream. The old 0.80 was #E18D3F and that is why nothing had a peak.
+///
+/// The pour's warning about pale stops still stands and is not being ignored:
+/// a pale stop takes blue up with red and green, and enough of it turns warm
+/// metal white. What changed is which failure is nearer. On a full-screen
+/// ambient card the risk was going white; in a 20 pt indicator the observed
+/// failure was a cell whose brightest pixel was rust. The knee at the end of
+/// every style is what keeps the cream from running away, and it is doing more
+/// work now than it was.
+constant float MG_PEAK = 0.98;
+
 // MARK: - The states
 //
 // Two of the host's five states are expressed in the shader. The other three
@@ -755,24 +813,42 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // The floor is not black between the threads. It is lit by the same light,
     // just unfocused, and the surface's own thickness modulates how much gets
     // through. Costs nothing: s0.x is already in hand.
-    float ambient = 0.115 + 0.085 * (0.5 + 0.5 * s0.x);
-    float lit = ambient + (0.44 + 0.16 * deepK) * fold;
+    // THE POOL, which is this style's figure and the figure wave's largest
+    // change to it. The web used to run edge to edge, and allover texture in a
+    // circle is not an object: there was nothing to name and nothing to parse at
+    // 20 pt. A caustic in the world is not allover either. It is a PATCH OF SUN
+    // on a floor, with a lit disc, a web inside it, and dark floor around it, so
+    // the object here is "a lit pool floor" and the web is what lives on it.
+    //
+    // The pool's edge is bent by the surface's own height field, which is free
+    // because s0.x is already in hand, and which is the right field to use: the
+    // boundary of a patch of sunlight on a pool floor IS drawn by the water
+    // above it, so the rim wanders and breathes with the same swell that moves
+    // the web.
+    float poolR = 0.300 * S;
+    float rp = length(uv) / max(poolR, 1e-4);
+    float pool = 1.0 - smoothstep(0.70, 1.06, rp * (1.0 + 0.16 * s0.x));
+
+    // THE THREE TIERS. The sunlit floor inside the pool is the amber body, the
+    // web's own folds are the cream peaks, and outside the pool there is ink.
+    float floorLit = 0.42 + 0.10 * (0.5 + 0.5 * s0.x);
+    float v = pool * (floorLit + (0.60 + 0.10 * deepK) * pow(fold, 1.15));
     // The flare's extra light lands mostly ON THE WEB rather than on the whole
     // floor, which is what brightening what exists means here: a brighter sun
     // makes brighter caustics, not a brighter photograph.
-    lit += (0.34 * flare + 0.11 * st.settle) * (0.30 + 0.70 * fold);
+    v += pool * (0.40 * flare + 0.13 * st.settle) * (0.30 + 0.70 * fold);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.88));
+    float3 body = mg_shade(pal, mg_tier(v));
     // The emission colour is taken NEAR THE TONE and not at the rail's pale
     // stop. The pour learned this the expensive way: once the knee has
     // saturated red and green, a pale stop takes blue up with them and warm
     // metal turns white. Sitting the emission at 0.80 lets the knee make its
     // own yellow out of the tone instead.
-    float3 em = mg_shade(pal, 0.80) * (0.42 * pow(fold, 3.2) * (1.0 + 1.8 * flare))
-              * max(glow, 0.0);
+    float3 em = mg_shade(pal, MG_PEAK)
+              * (0.30 * pool * pow(fold, 3.0) * (1.0 + 1.8 * flare)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -790,16 +866,25 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
 // place a curtain ever gets bright. There is no emission dial in this style at
 // all beyond the house one, because the brightening is geometry.
 //
-// Two facts about a real curtain carry most of the reading, and both are in the
-// vertical profile:
+// THE ARCHED RIBBON, which is the figure wave's change here and the largest
+// rebuild of the composition in the pack.
 //
-//   the lower border is SHARP. It is where the incoming particles finally run
-//   out of atmosphere to hit, and it is the crispest edge in the sky.
-//   the top is DIFFUSE. It fades over kilometres with nothing to end it.
+// The old profile was a sharp lower border with an exponential fade upward, on
+// the honest grounds that a real curtain's bottom edge is its crispest feature
+// and its top dissolves over kilometres. That is true of the sky and it was
+// wrong for a 20 pt badge: a shape with one edge and an open top is not a
+// silhouette, it is a gradient, and what the cell actually read as was a glow
+// dome. There was nothing to name.
 //
-// So the profile is a fast smoothstep up into the foot and an exponential decay
-// above it. Invert those two and the thing reads as fog, which is what the first
-// sketch of every aurora shader does.
+// So the curtain is now a RIBBON: a band with a top edge as well as a bottom
+// one, arched across the frame on a parabola that lifts it in the middle and
+// settles it at both sides. That is a shape a person can name at a glance, and
+// the arch is what makes it a ribbon rather than a bar.
+//
+// The physics did not have to be given up to get it. The bottom edge is still
+// the crisper of the two, and the top edge is a fast falloff rather than a hard
+// cut, so it is legible without ever being a drawn line. What the sky loses is
+// its infinite diffuse top, which the badge could not show anyway.
 //
 // THREE LAMINAE, feet 0.03 uv apart, each wandering on its own pair of 1D fBm
 // lanes at its own rate. They are not three curtains: they are one sheet seen
@@ -864,12 +949,21 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float x = uv.x / S - 0.32 * mg_driveDist(st);
     float up = -uv.y / S;
 
-    // The top's fade, and the lower border's softness. `thin` runs the border
-    // from 0.078 uv (a soft aurora behind cloud) to 0.020 (the crisp lower edge
-    // a clear night gives), and 0.020 is still four soft points at 46 pt: sharp
-    // for this family, never an edge.
-    float H = 0.09 + 0.22 * heightK;
-    float border = 0.078 - 0.058 * thin;
+    // THE ARCH. A parabola that lifts the ribbon in the middle of the frame and
+    // settles it at both sides, which is the whole reason this reads as a ribbon
+    // rather than as a bar lying across a circle. Clamped so the curve flattens
+    // off past the sides instead of diving out of the badge.
+    float ax = clamp(x * 1.90, -1.0, 1.0);
+    float arch = 0.132 * (1.0 - ax * ax);
+
+    // The ribbon's own cross section. `height` is now its THICKNESS rather than
+    // the scale of a fade upward, and both edges are real: the bottom is the
+    // crisper of the two, which is the physics, and the top is a fast falloff
+    // rather than the open dissolve it used to be, which is what gives the shape
+    // something to end at. `thin` runs the pair from soft to defined.
+    float halfT = 0.052 + 0.062 * heightK;
+    float lowEdge = 0.052 - 0.036 * thin;
+    float topEdge = 0.070 - 0.042 * thin;
 
     // THE WAVE. A ripple runs along the curtain and it settles. This is what a
     // real one does during a substorm and it is the most curtain-like thing a
@@ -901,11 +995,19 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
         // exactly nothing.
         float wd = xi - (wtravel - 0.10 * fi * wdir);
         float wave = wamp * exp(-(wd * wd) / (0.155 * 0.155));
-        float foot = 0.050 + 0.030 * fi + (big + fine) * (0.35 + 1.30 * foldK) + wave;
+        // The three laminae straddle the arch rather than stacking above a foot,
+        // so they are three depths of ONE ribbon and their sum is one band.
+        float centre = arch + 0.026 * (fi - 1.0)
+                     + (big + fine) * (0.35 + 1.30 * foldK) + wave;
 
-        float h = up - foot;
-        // Sharp below, diffuse above. Reverse these two and the species is fog.
-        float prof = smoothstep(-border, 0.0, h) * exp(-max(h, 0.0) / H);
+        float h = up - centre;
+        // TOP EDGE AND BOTTOM EDGE, which is what makes this a silhouette. The
+        // band is whole between them and falls off past each, the bottom the
+        // crisper of the two. Neither is ever a hard line: at the tightest
+        // setting the bottom takes 0.016 uv to go, which is still three soft
+        // points at 46 pt.
+        float prof = smoothstep(-halfT - lowEdge, -halfT + 0.004, h)
+                   * (1.0 - smoothstep(halfT - 0.004, halfT + topEdge, h));
 
         // THE PLEATS, AND THE FOLDING, which is the motion pass's largest
         // change in the pack.
@@ -956,13 +1058,15 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float flare = mg_flare(st, length(uv));
     sheet *= 1.0 + 1.55 * flare + 0.30 * st.settle;
 
-    // The pleats spend a little of the sheet's average brightness buying their
-    // structure, so the coefficient comes up to keep the curtain where it was.
-    float lit = 0.055 + 0.56 * sheet;
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
+    // THE THREE TIERS. The ribbon's body is amber and the pleat cores, where two
+    // laminae also happen to overlap, are the cream. sheet runs to about 2.2
+    // where everything lines up, so the divisor puts the body near 0.55 and
+    // leaves the top of the range for the folds.
+    float v = 0.035 + sheet * 0.46;
+    float3 body = mg_shade(pal, mg_tier(v));
     // Only the overlaps emit. sheet passes 1.0 where two laminae cross, and the
-    // cube makes that crossing the only thing on screen that glows.
-    float3 em = mg_shade(pal, 0.80) * (0.30 * pow(max(sheet - 0.55, 0.0), 2.0)) * max(glow, 0.0);
+    // square makes that crossing the only thing on screen that glows.
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(sheet - 0.55, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -1074,7 +1178,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // that reorganise as fast as the gas above them stop reading as fuel.
     float3 bp = float3(xs * 2.8, h * 1.2, t * 0.115);
     float bed = 0.5 + 0.5 * mg_fbm3(bp, 3, 2.03, 0.5);
-    float bedThick = 0.050 + 0.060 * floorK;
+    // Tightened from 0.050 + 0.060 so the bed reads as a LINE of fire rather
+    // than a low haze. The figure is the line; it needs an edge to be one.
+    float bedThick = 0.040 + 0.050 * floorK;
     float bedMask = smoothstep(-0.085, -0.004, h) * exp(-max(h, 0.0) / bedThick);
 
     // THE PLUME. Domain scrolls down so structure travels up; horizontal
@@ -1101,11 +1207,16 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float2 fireAt = float2(0.0, floorY);
     float flare = mg_flare(st, length(uv - fireAt));
     float coals = bedMask * (0.30 + 0.62 * bed) * (1.0 + 1.45 * flare + 0.28 * st.settle);
-    float lit = 0.045 + 0.86 * coals + (0.20 + 0.34 * heat) * rise * (1.0 + 1.15 * flare);
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
+    // THE THREE TIERS. The figure is the glowing floor line and its core is the
+    // cream: coals reaches about 0.92 at the hottest fuel, so the coefficient
+    // lands that on 1.0 and the plume above stays in the amber body where it
+    // belongs. Gas that glows as hard as the fuel is what makes a fire shader
+    // read as a cartoon, and it is also what would flatten the value hierarchy.
+    float v = 0.040 + 1.04 * coals + (0.20 + 0.28 * heat) * rise * (1.0 + 1.15 * flare);
+    float3 body = mg_shade(pal, mg_tier(v));
     // Only the coals themselves emit. Gas glowing as hard as the fuel is what
     // makes a fire shader read as a cartoon.
-    float3 em = mg_shade(pal, 0.80) * (0.55 * pow(coals, 2.6)) * max(glow, 0.0);
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(coals, 2.6)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -1318,8 +1429,13 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float3 body = mg_shade(pal, clamp(0.05 + 1.05 * lit, 0.0, 0.90));
-    float3 em = mg_shade(pal, 0.80) * (0.50 * pow(clamp(lit, 0.0, 1.0), 2.2)) * max(glow, 0.0);
+    // THE THREE TIERS. The glow's outskirts are the amber body and the heart of
+    // the source is the cream. lit runs to about 1.6 where a thick wisp sits on
+    // the lamp and down to 0.44 where the fog near it is thin, so the heart
+    // reaches the pale specular on the fog's own terms rather than on a dial:
+    // the source is cream when there is something there to light.
+    float3 body = mg_shade(pal, mg_tier(0.055 + 0.92 * lit));
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(lit, 0.0, 1.0), 2.2)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -1507,12 +1623,16 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // the exact shape this style was rebuilt to stop being.
     float veil = exp(-(ys * ys) / (0.145 * 0.145)) * exp(-0.18 * gx * gx)
                * haze * 0.24 * (0.45 + 0.55 * (0.5 + 0.5 * band));
-    float lit = 0.030 + 0.95 * img
-              + 0.24 * halo * (0.40 + 0.60 * (0.5 + 0.5 * band)) * (1.0 + 1.30 * flare)
-              + veil;
+    // THE THREE TIERS. Both images' cores are cream, the halo around them is the
+    // amber body, and the veil in the hot layer between them is lifted enough to
+    // stay legible: the refraction band is the thing that explains why there are
+    // two lights at all, so it cannot be allowed to fall into the ground.
+    float v = 0.030 + 1.00 * img
+            + 0.26 * halo * (0.40 + 0.60 * (0.5 + 0.5 * band)) * (1.0 + 1.30 * flare)
+            + 1.45 * veil;
 
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
-    float3 em = mg_shade(pal, 0.80) * (0.45 * pow(clamp(img, 0.0, 1.0), 2.2)) * max(glow, 0.0);
+    float3 body = mg_shade(pal, mg_tier(v));
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(img, 0.0, 1.0), 2.2)) * max(glow, 0.0);
 
     // Pulled in tighter than the rest of the pack. The old bar ran the full
     // width and its ends were still lit where the clip landed; a compact source
@@ -1723,11 +1843,26 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float flare = mg_flare(st, length(uv));
     float surge = 1.0 + 1.70 * flare + 0.30 * st.settle;
 
+    // THE INNER RIM, which is the figure wave's addition here. The aperture disc
+    // was already an object, but its brightest place was a broad interior, and a
+    // broad interior has no key structure for the top tier to land on. A real
+    // opening is brightest just INSIDE its own edge, where the material's
+    // thickness stops cutting the light and the full width of what is beyond
+    // first comes through. That band is narrow, it follows the torn edge, and it
+    // is exactly the structure this figure was missing.
+    float inLg = (r - Ra * 0.84) / (0.030 * S);
+    float innerRim = exp(-inLg * inLg) * pass * lean;
+
     float through = pass * lean * (0.42 + 0.58 * inner) * surge;
     float spill = beam * (0.35 + 0.65 * lean) * surge;
-    float lit = 0.04 + 0.84 * through + 0.30 * spill + 0.34 * lip * surge;
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.92));
-    float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(through, 0.0, 1.0), 2.0)) * max(glow, 0.0);
+    // THE THREE TIERS. The medium outside is the ground, the admitted light is
+    // the amber body, and the inner rim is the cream.
+    float v = 0.035 + 0.66 * through + 0.26 * spill + 0.30 * lip * surge
+            + 0.62 * innerRim * surge;
+    float3 body = mg_shade(pal, mg_tier(v));
+    float3 em = mg_shade(pal, MG_PEAK)
+              * (0.16 * pow(clamp(through, 0.0, 1.0), 2.0) + 0.30 * innerRim * surge)
+              * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -1896,11 +2031,31 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // Shade under a canopy is never black: it is filled with light bounced off
     // every leaf and trunk around it, and a dapple whose shade goes to ink reads
     // as spotlights on a stage instead of as a wood.
-    float lit = (0.050 + 0.130 * crown) + (0.58 + 0.32 * crown) * trans;
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
+    // THE POOL, which is the figure wave's change here. Dapple was allover
+    // patches, and allover is not an object: at 20 pt it was speckle. Real
+    // dappled light is not evenly distributed either, because the canopy above
+    // it is not: there is a thin place in the crown and the ground under it
+    // carries one dominant pool of light with lesser patches scattered around
+    // its edge. So the object is "light through leaves on ONE spot of ground",
+    // and it is built by weighting the transmission with a soft off-centre pool.
+    // Satellites keep a fifth of the weight, which is enough to read as patches
+    // of the same light and not enough to compete with the pool.
+    float2 poolAt = float2(-0.045, 0.030) * S;
+    float2 pd = uv - poolAt;
+    float rp = length(pd) / (0.270 * S);
+    float pool = 1.0 - smoothstep(0.52, 1.34, rp);
+    float lift = 0.20 + 0.92 * pool;
+
+    // THE THREE TIERS. The shaded ground is the dark end, the lit floor under
+    // the pool is the amber body, and the fully aligned gaps are the cream.
+    float v = (0.045 + 0.100 * crown) * (0.35 + 0.65 * pool)
+            + trans * lift * (0.78 + 0.46 * crown);
+    float3 body = mg_shade(pal, mg_tier(v));
     // Only the fully aligned gaps carry the sun itself. The cube is what keeps
-    // the emission on the few brightest patches rather than on all of them.
-    float3 em = mg_shade(pal, 0.80) * (0.50 * pow(clamp(trans, 0.0, 1.0), 3.0)) * max(glow, 0.0);
+    // the emission on the few brightest patches rather than on all of them, and
+    // the pool weight keeps it inside the figure.
+    float3 em = mg_shade(pal, MG_PEAK)
+              * (0.30 * pool * pow(clamp(trans, 0.0, 1.0), 3.0)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -2103,10 +2258,15 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // The mass keeps a trace of scattered light so it stays a body rather than
     // a hole. The number is small enough to read as unlit and large enough that
     // the edge is a falling off and not a boundary.
-    float lit = 0.026 + 0.88 * lightRaw * (1.0 - cover) + corona
-              + cover * 0.042 * (0.40 + 0.60 * lgrain);
-    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
-    float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(corona, 0.0, 1.0), 2.0)) * max(glow, 0.0);
+    // THE THREE TIERS. The mass is the ground, the uncovered light around it is
+    // the amber body, and the CORONA'S BRIGHTEST ARC is the cream: the crescent
+    // is this species' figure, so the crescent is what earns the pale specular.
+    // The 1.35 is what carries the corona's peak past the top tier's threshold,
+    // since after the occlusion fix it sits around 0.7 on its own.
+    float v = 0.026 + 0.86 * lightRaw * (1.0 - cover) + 1.35 * corona
+            + cover * 0.042 * (0.40 + 0.60 * lgrain);
+    float3 body = mg_shade(pal, mg_tier(v));
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(corona, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));

@@ -50,6 +50,16 @@ per-pixel generative fields. Never a clone of the pour and never a stranger.
   brightness multiplier.
 - Must read at 20 pt and at 300 pt. Test both. Small must stay legible
   (one clear gesture), large must stay interesting (structure, not blur).
+- THE FIGURE LAW (added Aug 28 from Kris's device review): every species is a
+  FIGURE against ground, never a texture filling a circle. Each style has a
+  nameable shape (a spiral, a vessel, a Y, a crescent, a stroke) whose
+  silhouette is readable at 20 pt; the material's field lives ON that figure.
+  The reference indicator parses instantly because it is an object; Murmur
+  species must pass the same test.
+- THE VALUE HIERARCHY (same review: "colors are too hard to read"): three
+  tiers in every default render: the ink ground, an amber body, and CREAM
+  PEAKS: the figure's key structure must reach the rail's pale specular (s3),
+  not hover at the tone stop. A cell whose brightest pixel is rust fails.
 
 ## Repository layout and file ownership
 
