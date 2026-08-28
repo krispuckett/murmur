@@ -542,14 +542,6 @@ static inline float ms_vein(float2 p, float ang, float bend, float freq,
     return (1.0 - smoothstep(w * 0.30, w, d)) * grow * end;
 }
 
-/// A PANE: the signed distance to a rounded rectangle, for ms_veil's sheets.
-/// Translucent layers only read as layers if they have EDGES; three noise fields
-/// with soft silhouettes read as one cloud, which is what the veil was.
-static inline float ms_pane(float2 p, float2 c, float ang, float2 halfSize, float rad) {
-    float2 q = abs(ms_rot(p - c, ang)) - (halfSize - rad);
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
-}
-
 /// The house finish, shared: ink underneath, the field composited into it by the
 /// containment, the same knee the route curtain puts on its surface colour, and
 /// the dither last. Every species ends on this line.
@@ -1507,30 +1499,66 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         float n = ms_fbm3(float3(q * f + slide, t * 0.030 + fi * 7.3), 2, 2.03, 0.50);
         float d = clamp(0.5 + 1.35 * n, 0.0, 1.0);
 
-        // THE PANE, and it is the figure. Three soft-silhouetted noise fields
-        // read as one cloud however differently they slide, which is what the
-        // veil was and why "layers" never landed. A layer needs an EDGE. Each
-        // scrim is now a rounded rectangle, offset and turned a little from the
-        // one behind it and sliding on its own heading: a stacked-panes gestalt
-        // a viewer parses at a glance, with the noise living on the glass as its
-        // texture rather than being the sheet itself.
-        // The pane's position must be BOUNDED. `slide` grows without limit --
-        // it is the texture's scroll, and that is right for texture -- but using
-        // it for the sheet's centre walked all three panes clean out of the
-        // frame within a few seconds, which is why the first cut looked like
-        // debris rather than glass. The glass holds its place and drifts; the
-        // texture slides across it. Each pane drifts on its own pair of slow
-        // sines, which is what makes them slide against each other.
-        float2 pcen = float2(0.082, -0.068) * (fi - 1.0)
-                    + 0.050 * float2(sin(t * 0.31 + fi * 2.1),
-                                     cos(t * 0.24 + fi * 1.3));
-        float sd = ms_pane(uv, pcen, 0.20 - 0.26 * fi,
-                           float2(0.255 - 0.020 * fi, 0.185 - 0.014 * fi), 0.055);
-        float pane = 1.0 - smoothstep(0.0, 0.038, sd);
-        // The front pane's edge is the bright line. One crisp contour is what
-        // tells the eye there is glass in front of glass.
-        float rimZ = sd / 0.020;
-        float rim = exp(-rimZ * rimZ) * (1.0 - 0.55 * far);
+        // THE SHEET, and it is the figure. It was a rounded rectangle for one
+        // pass and that was too literal by half: a drawn rect with a stroked
+        // outline reads as a stacked UI card, and hard geometric edges have no
+        // business on an organic material. What was right about it was the
+        // GESTALT -- offset planes you can count -- and that is kept. What is
+        // wrong is that a veil is cloth, so the boundary is now torn silk.
+        //
+        // The boundary is an ellipse whose radius is eaten into by the sheet's
+        // OWN noise, the same field that textures its surface. That matters: a
+        // shape perturbed by an unrelated field looks like a shape with a wobble
+        // applied, while a shape perturbed by its own texture looks like a piece
+        // torn off something, because the tear follows the weave. An ellipse has
+        // no corners at all, so none of them can be sharp or uniform.
+        //
+        // The pane's position is BOUNDED. `slide` grows without limit -- it is
+        // the texture's scroll, and that is right for texture -- but using it
+        // for the sheet's centre walked all three sheets clean out of frame
+        // within seconds. The cloth holds its place and drifts; the texture
+        // slides across it. Each sheet drifts on its own pair of slow sines,
+        // which is what makes them slide against each other.
+        // THE SHEETS ARE BIGGER THAN THE FRAME, and that is the difference
+        // between cloth and bubbles. Sized to sit inside the circle, each one
+        // showed its whole closed boundary and three closed loops overlapping
+        // read as soap film, not as veils. Hung larger than the disc, what
+        // crosses the frame is a piece of each sheet with its hem running
+        // through -- which is what standing near a hanging veil looks like.
+        // The OFFSET has to be large next to the sheet, or three sheets simply
+        // cover one another and the picture is one cloth again -- which is what
+        // happened when they were hung this size at a tenth of a frame apart.
+        // Each sheet hangs from its own quarter of the compass so that in any
+        // part of the disc you are looking through a different subset of them,
+        // and it is the subset changing that draws the boundaries.
+        float pang = 0.60 + 1.95 * fi;
+        float2 pcen = 0.185 * float2(cos(pang), sin(pang))
+                    + 0.085 * float2(sin(t * 0.44 + fi * 2.1),
+                                     cos(t * 0.35 + fi * 1.3));
+        float2 ep = ms_rot(uv - pcen, 0.24 - 0.34 * fi);
+        float er = length(ep * float2(1.0, 1.16 + 0.10 * fi));
+        float tear = (0.272 - 0.016 * fi) + 0.070 * n;
+        float pane = 1.0 - smoothstep(tear - 0.070, tear + 0.055, er);
+
+        // THE HEM, and this is the honest version of the bright edge. It is not
+        // an outline stroke laid on the shape: it is MATERIAL DENSITY. Cloth
+        // gathers and doubles where it falls away, so there is more fabric in
+        // the light path just inside the edge than anywhere else on the sheet,
+        // and a hem is bright for the same reason a fold is. So this multiplies
+        // the sheet's own luminance rather than adding light of its own, and it
+        // sits INSIDE the boundary rather than centred on it -- which is where
+        // gathered cloth actually is. The nearest sheet gathers most, so its hem
+        // is the brightest line: light catching the hem of a veil.
+        // And the hem is DIRECTIONAL. A hem that is equally bright the whole way
+        // round is a ring, and a ring is a drawn outline by another route --
+        // which is the note this pass is answering. Cloth catches light along
+        // the edge that faces it and goes dark where it turns away, so the
+        // brightness falls off with the angle to one fixed direction. What is
+        // left is a bright run of hem with two ends that fade, not a loop.
+        float hz = (er - (tear - 0.040)) / 0.042;
+        float2 en2 = ep / max(er, 1e-4);
+        float facing = 0.16 + 0.84 * smoothstep(-0.35, 0.85, dot(en2, float2(-0.42, -0.91)));
+        float hem = exp(-hz * hz) * facing * (1.0 - 0.52 * far);
 
         // THE SILHOUETTE, and this is the line the first cut did not have. A
         // soft threshold rather than a coverage floor: the scrim genuinely is
@@ -1566,7 +1594,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // edge was for.
         float alpha = pane * opacity * (0.55 + 0.45 * body);
 
-        acc += (lum * alpha + rim * 0.30 * (0.45 + 0.55 * legibility)) * T;
+        // The hem multiplies the cloth's own light instead of adding a stroke,
+        // so it can only be bright where there IS cloth -- it cannot draw an
+        // outline into empty ink the way the rim did.
+        acc += lum * (1.0 + (1.85 + 1.10 * legibility) * hem) * alpha * T;
         T *= (1.0 - alpha);
     }
 
@@ -1590,7 +1621,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // not because anything was added on top.
     acc += behindLight * (1.0 - T) * st.complete * 0.90;
 
-    float e = acc * 1.30 * (1.0 + 0.34 * st.complete + 0.14 * st.settled);
+    float e = acc * 1.48 * (1.0 + 0.34 * st.complete + 0.14 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 1.0, 0.34);
