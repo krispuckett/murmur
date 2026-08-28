@@ -23,7 +23,7 @@ struct RootView: View {
             NavigationStack(path: $path) {
                 Gallery()
             }
-            .tint(LabTheme.tone)
+            .tint(.white)
 
             if model.isExporting {
                 ExportCard()
@@ -31,15 +31,19 @@ struct RootView: View {
         }
         .environment(model)
         .preferredColorScheme(.dark)
-        // -openStyle <case> jumps straight to a studio. Screenshot rigs and
-        // agents drive the lab through launch arguments because HID events do
-        // not reliably reach a headless simulator; arguments always arrive.
-        .onAppear {
-            let args = ProcessInfo.processInfo.arguments
-            if let flag = args.firstIndex(of: "-openStyle"), flag + 1 < args.count,
-               let style = MurmurStyle(rawValue: args[flag + 1]) {
+        .task {
+            if let style = Self.launchStyle {
                 path.append(style)
             }
         }
+    }
+
+    /// `simctl launch <sim> com.krispuckett.MurmurLab -openStyle eddy` opens
+    /// that studio directly. UserDefaults reads `-key value` launch arguments
+    /// into the argument domain, which is how an agent drives this app without
+    /// having to find a cell and tap it.
+    private static var launchStyle: MurmurStyle? {
+        guard let raw = UserDefaults.standard.string(forKey: "openStyle") else { return nil }
+        return MurmurStyle(rawValue: raw)
     }
 }

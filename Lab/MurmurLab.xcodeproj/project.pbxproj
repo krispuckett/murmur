@@ -21,7 +21,7 @@
 		79C035D3E2C85C3CFFAF2EC3 /* Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gallery.swift; sourceTree = "<group>"; };
 		79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabModel.swift; sourceTree = "<group>"; };
 		9B3BB78A3408F885D7F05C4E /* GlassRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassRow.swift; sourceTree = "<group>"; };
-		A9F65C77AD90D697809F1000 /* MurmurLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MurmurLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A9F65C77AD90D697809F1000 /* MurmurLab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MurmurLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8E066182E45FCD74A226894 /* MurmurLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MurmurLabApp.swift; sourceTree = "<group>"; };
 		C3334A325326201996012D23 /* Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Studio.swift; sourceTree = "<group>"; };
 		F2B820B20BDF827B6FC3100C /* murmur */ = {isa = PBXFileReference; lastKnownFileType = folder; name = murmur; path = ..; sourceTree = SOURCE_ROOT; };
@@ -159,6 +159,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWJNMWT2B9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Lab";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -302,6 +303,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWJNMWT2B9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Lab";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

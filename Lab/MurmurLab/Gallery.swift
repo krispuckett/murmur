@@ -33,7 +33,7 @@ struct Gallery: View {
             .padding(.top, 4)
             .padding(.bottom, 48)
         }
-        .background(LabTheme.ink.ignoresSafeArea())
+        .background(LabTheme.stage.ignoresSafeArea())
         .navigationDestination(for: MurmurStyle.self) { style in
             Studio(style: style)
         }
@@ -44,7 +44,7 @@ struct Gallery: View {
             Text("Murmur")
                 .font(LabTheme.mono(30, .medium))
                 .foregroundStyle(.white)
-            Text("24 thinking indicators")
+            Text("\(MurmurStyle.allCases.count) thinking indicators")
                 .font(LabTheme.mono(12))
                 .foregroundStyle(.white.opacity(0.42))
         }

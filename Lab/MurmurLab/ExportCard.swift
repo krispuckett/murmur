@@ -69,8 +69,12 @@ struct ExportCard: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 30))
     }
 
+    /// Three separate chips rather than one unioned bar. The union rendered
+    /// them as a single continuous piece of glass, which looked right while
+    /// selection was a tint, but selection is an edge now and a capsule stroke
+    /// inside merged glass comes out as a refracted squiggle across the bar.
     private var surfacePicker: some View {
-        GlassEffectContainer(spacing: 8) {
+        GlassEffectContainer(spacing: 4) {
             HStack(spacing: 8) {
                 ForEach(MurmurExportSurface.allCases, id: \.self) { surface in
                     ChipButton(
@@ -87,19 +91,16 @@ struct ExportCard: View {
     }
 
     private var promptView: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.black.opacity(0.38))
-            ScrollView {
-                Text(displayedPrompt)
-                    .font(LabTheme.mono(10.5))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-            }
+        ScrollView {
+            Text(displayedPrompt)
+                .font(LabTheme.mono(10.5))
+                .foregroundStyle(.white.opacity(0.85))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
         }
         .frame(maxHeight: 400)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var copyButton: some View {
