@@ -1701,10 +1701,14 @@ static inline float3 mg_open_law(float tau, float openTime) {
 // still a mass; a mass at zero is a hole cut in the picture, and the eye reads
 // the hole's edge as a drawn curve no matter how soft it is.
 //
-//   c0 occlude   how much of the light the mass takes: its radius and how far
-//                it wanders. More coverage is more limb against bright light,
-//                so more corona, which is why an eclipse gets more dramatic
-//                rather than dimmer as it deepens.
+//   c0 occlude   how much of the light the mass takes, as a fraction of the
+//                light's actual flux rather than as a radius in the abstract:
+//                the mass grows and its wander tightens together, so at 0 it
+//                takes about a sixth and at 1 about a half, and at the 0.5
+//                default it wanders between roughly a quarter and two fifths
+//                with a mid around a third. More coverage is more limb against
+//                bright light, so more corona, which is why an eclipse gets more
+//                dramatic rather than dimmer as it deepens.
 //   c1 corona    the corona's brightness and how far its plumes reach.
 //   c2 drift     how fast the mass travels its path, which is the rate at which
 //                the bright crescent swings around the limb.
@@ -1744,7 +1748,18 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // purpose: the corona is weighted by whatever light stands behind the limb,
     // and a tight source would leave the far side of the limb with nothing
     // behind it at all and the corona would read as half a ring.
-    const float2 lp = float2(0.030, -0.022);
+    // THE MASS OWNS THE MIDDLE AND THE LIGHT IS THE THING OFFSET, which is the
+    // second half of this style's calibration fix and is a composition decision
+    // rather than a physical one. The first cut had it the other way round: the
+    // light sat near the centre and the mass swept a circle around it, so for
+    // half of every sweep the mass was off to one side and the middle of the
+    // badge showed bare light. Measured over a sweep, the centre's brightness
+    // swung from 0.06 to 0.72, and at the bright end the badge was an open warm
+    // disc, which is mg_oculus. The mass is the subject of this species, so it
+    // gets the centre: it wanders inside a radius well under its own, the light
+    // sits off to the upper right, and their separation still swings enough to
+    // move coverage because the wander carries the mass toward and away from it.
+    float2 lp = float2(0.119, -0.073) * S;
     float sigL = 0.210 * S;
     float2 dl = uv - lp;
     float3 lq = float3(uv * (5.5 / S) + float2(0.0, -t * 0.060), t * 0.12);
@@ -1755,6 +1770,17 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // the mass never retraces the same loop and never comes to rest, and its
     // offset from the light stays inside a band by construction: it cannot
     // leave the light and it cannot centre on it.
+    //
+    // THE PATH IS NOW A SWEEP WITH A BREATHING RADIUS rather than a Lissajous.
+    // The Lissajous was wrong twice: its radius passed close to zero, which let
+    // the mass very nearly centre on the light, and its radius never got far
+    // enough out to let much of the light back, so coverage barely moved. Here
+    // the ANGLE sweeps steadily, which is what swings the crescent round the
+    // limb, and the RADIUS breathes on an incommensurate rate between 0.30 and
+    // 1.00 of its amplitude, which is what makes coverage wander. Integrated
+    // against the light's own Gaussian, that puts coverage at the default
+    // between 0.26 and 0.41 of the light's flux, a mid of 0.34, and it never
+    // reaches either end of its own range.
     // THE SCOOT. The mass makes one quicker run along its path and settles back.
     // It is added to the PHASE and not to the position, which matters: the phase
     // only moves the mass along the path it was already on, so the bounded
@@ -1765,8 +1791,13 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float scoot = g.env * (0.42 + 0.30 * fract(g.seed * 7.31))
                 * ((g.seed < 0.5) ? -1.0 : 1.0);
     float th = t * (0.18 + 0.36 * driftK) + scoot;
-    float2 orbit = float2(cos(th), sin(th * 0.77) * 0.72) * (0.062 + 0.070 * occK) * S;
-    float2 op = lp + orbit;
+    // The wander TIGHTENS as occlude rises while the mass grows, so both moves
+    // push coverage the same way and the knob reads as one idea rather than two
+    // fighting each other. The radius breathes a little on an incommensurate
+    // rate so the path is not a clean circle.
+    float wander = (0.090 - 0.028 * occK) * S;
+    float breathe = 0.86 + 0.14 * sin(th * 0.41 + 1.7);
+    float2 op = float2(cos(th), sin(th)) * wander * breathe;
     float2 dO = uv - op;
     float ro = length(dO);
     float angO = atan2(dO.y, dO.x);
@@ -1776,8 +1807,12 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // changing size.
     float2 ring = float2(cos(angO), sin(angO)) * 1.25;
     float tearN = mg_fbm3(float3(ring, t * 0.26), 2, 2.03, 0.5);
-    float Rocc = (0.115 + 0.075 * occK) * S * (1.0 + (0.07 + 0.09 * softK) * tearN);
-    float w = (0.030 + 0.055 * softK) * S;
+    float Rocc = (0.120 + 0.104 * occK) * S * (1.0 + (0.09 + 0.11 * softK) * tearN);
+    // The edge is a fifth of the radius rather than two fifths of it. The old
+    // width made the mass almost entirely transition, so there was no body to
+    // see even where the corona was not already washing it out; it has to be a
+    // soft edge ON something.
+    float w = (0.018 + 0.034 * softK) * S;
     float cover = 1.0 - smoothstep(Rocc - w, Rocc + w, ro);
 
     // THE PLUMES. A second field on the same circle, displaced in the plane so
@@ -1788,9 +1823,21 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float plumeN = 0.5 + 0.5 * mg_fbm3(float3(cring, t * 0.22), 2, 2.03, 0.5);
     float hC = (0.022 + 0.070 * coronaK) * S * (0.35 + 1.45 * plumeN);
     float limb = exp(-max(ro - Rocc, 0.0) / max(hC, 1e-4));
-    // Weighted by the light standing behind this stretch of limb, which is where
-    // the crescent comes from and why it swings as the mass wanders.
-    float corona = limb * lightRaw * (0.85 + 1.55 * coronaK);
+    // AND THE CORONA IS BLOCKED BY THE MASS, which is the whole reason this
+    // style failed its first calibration. `max(ro - Rocc, 0)` is zero at every
+    // pixel INSIDE the limb, so `limb` was 1.0 across the entire interior and the
+    // corona was being drawn at full strength over the very thing it is supposed
+    // to be bleeding around. The mass was painting itself out, the frame read as
+    // one bright warm disc, and that made it a twin of mg_oculus at every size.
+    // The corona is light passing BESIDE the mass, so the mass occludes it like
+    // everything else, and the gate below is not a cosmetic fix but the missing
+    // half of the physics.
+    // The weighting by the light standing behind this stretch of limb is where
+    // the crescent comes from and why it swings as the mass wanders. The
+    // coefficient is down from 1.6 to 0.8 because with the interior no longer
+    // flooded the corona no longer has to compete with itself, and at the old
+    // strength it simply clamped against the rail everywhere it appeared.
+    float corona = limb * (1.0 - cover) * lightRaw * (0.40 + 0.75 * coronaK);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
@@ -1798,8 +1845,8 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // The mass keeps a trace of scattered light so it stays a body rather than
     // a hole. The number is small enough to read as unlit and large enough that
     // the edge is a falling off and not a boundary.
-    float lit = 0.028 + 0.88 * lightRaw * (1.0 - cover) + corona
-              + cover * 0.050 * (0.40 + 0.60 * lgrain);
+    float lit = 0.026 + 0.88 * lightRaw * (1.0 - cover) + corona
+              + cover * 0.042 * (0.40 + 0.60 * lgrain);
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
     float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(corona, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 

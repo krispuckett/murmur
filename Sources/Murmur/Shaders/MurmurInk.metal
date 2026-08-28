@@ -1286,10 +1286,20 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // frame.
     const float T = 1.45;
     float L0 = 0.05 * S;
-    float Linf = (0.34 + 0.26 * bleed) * S;
+    // THE PROPORTIONS, and they are a correction. The first cut ran four times
+    // as long as it was wide from a source pushed right out to the edge of the
+    // frame, and a long thin bright thing entering from off-stage is a comet
+    // however it is textured: the eye reads elongation plus a leading edge as
+    // SPEED before it reads anything else. A stain is not much longer than it is
+    // wide and it sits where it started. So the reach came in, the width went
+    // out, and the source moved toward the middle of the frame. The species is
+    // still directional, because the ink still runs along the grain and barely
+    // across it, but the direction is now a bias in a spreading mark rather than
+    // a trajectory through empty space.
+    float Linf = (0.28 + 0.21 * bleed) * S;
     float L = Linf + (L0 - Linf) * exp(-tau / T);
 
-    float sSrc = -0.24 * S;
+    float sSrc = -0.15 * S;
     float u = s - sSrc;                            // 0 at the source, forward is +
     float uN = saturate(u / max(Linf, 1e-4));      // 0 at the root, 1 at full reach
 
@@ -1302,11 +1312,11 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // read, so the whole plume bends: teeth, striation and edges together, and
     // not a rigid rotation of a finished picture.
     MIBeat gf = mi_beat(tau, 5.0, 2.2, 0.30);
-    n += (gf.id * 2.0 - 1.0) * gf.e * 0.115 * uN * uN * S;
+    n += (gf.id * 2.0 - 1.0) * gf.e * 0.075 * uN * uN * S;
 
     // The width the fan settles at, needed before the comb because the comb is
     // measured against it.
-    float Wref = (0.085 + 0.075 * bleed) * S;
+    float Wref = (0.115 + 0.085 * bleed) * S;
 
     // THE COMB. One slice of the 3D field taken across the fibres, with time in
     // the third coordinate so the teeth work in place instead of sliding along
@@ -1318,57 +1328,93 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // the noise and its leading edge becomes three enormous blocks; measured
     // against its own width it always carries the same number of teeth however
     // wide it has grown, which is what a fibre count actually means.
-    float pitch = 2.0 + 4.5 * fiber;
+    float pitch = 3.2 + 6.5 * fiber;
     float hair = mi_fbm3(float3(n * (pitch / max(Wref, 1e-4)), 0.0, tau * 0.22 + 3.0),
                          2, 2.03, 0.5);
-    float Lh = L * (1.0 + (0.09 + 0.24 * fiber) * hair);
+    float Lh = L * (1.0 + (0.05 + 0.13 * fiber) * hair);
 
-    // The striation inside the wetted mass: high frequency across the fibres,
-    // low along them, so the texture runs WITH the bleed. Same anisotropy the
-    // wick uses on its climb, in this species' own rotated frame. It is
-    // evaluated up here rather than with the rest of the shading because the
-    // plume's own outline is built out of it.
-    float fib = mi_fbm3(float3(n * (13.0 / S), s * (2.0 / S), 21.0 + tau * 0.050),
-                        2, 2.03, 0.55);
+    // THE GRAIN, and this is the rebuild. The first cut treated the sheet as a
+    // faint texture painted inside a smooth silhouette, and that is backwards:
+    // ink feathering has no silhouette. It advances along individual fibres, and
+    // what looks like an edge is only the place where fewer and fewer of them
+    // are still carrying anything. So this field is not decoration on the form,
+    // it IS the form. One value, deep, in 0 to 1, and it decides three things at
+    // once: how far this fibre carries ink, how far out to the side the plume
+    // reaches here, and how much ink is at this point at all.
+    //
+    // That is what makes the boundary fibrous in EVERY direction rather than
+    // only at the leading edge. A fibre with capacity runs on past its
+    // neighbours and a starved one falls short, at the flanks exactly as much as
+    // at the tip, so no part of the outline is a curve anybody drew.
+    // The anisotropy is 4:1 and not the 12:1 the first rebuild used. Paper fibre
+    // is SHORT. Stretched twelve to one the grain becomes continuous channels
+    // running the whole length of the mark, and parallel lines along the
+    // direction of travel are motion blur: the texture that was supposed to say
+    // "this ink is in a sheet" said "this thing is moving fast" instead. Broken
+    // into short lengths it reads as what it is.
+    float grain = mi_fbm3(float3(n * (26.0 / S), s * (7.0 / S), 21.0 + tau * 0.050),
+                          2, 2.03, 0.55);
+    float fibre = saturate(0.5 + 0.95 * grain);
 
-    float w = 0.012 + 0.055 * Linf;
-    float front = smoothstep(-w, w, Lh - u);
-    // Behind the source the ink also creeps, but barely: fibre runs both ways
-    // and the reservoir is in front of it. The trailing edge is carried on the
-    // same striation as the sides, because a pen lifting off does not leave a
-    // ruled line and the first cut's straight diagonal cut across the root was
-    // the one hard edge left in this pack.
-    float bw = 0.075 * S;
-    float back = smoothstep(-bw, bw, u + (0.10 + 0.035 * fib) * S);
-    float along = front * back;
+    // The lateral envelope is a plain gaussian again. The super-gaussian that
+    // was here traded one fault for a worse one: it flattened the axial beam by
+    // steepening the shoulders, and steep shoulders on a long form are precisely
+    // the straight flanks that made this read as a brush stroke. The soft
+    // profile comes back, and the beam does not come back with it, because the
+    // grain below breaks the middle into fibres so there is no smooth core left
+    // to read as a beam.
+    float W = Wref * (0.90 + 0.55 * uN) * (0.72 + 0.56 * fibre);
+    float across = exp(-(n * n) / max(W * W, 1e-8));
 
-    // The plume fans as it goes, because no two fibres are quite parallel, and
-    // its sides wander on the striation for the same reason: fibre is not a
-    // ruler. The root is already a mark, not a point, because a pen laid down
-    // has width before it has bled anywhere. Starting the fan near zero instead
-    // drew a bright hairline with a haze on it, which reads as a comet.
-    float W = Wref * (0.85 + 0.65 * uN) * (1.0 + 0.16 * fib);
-    // A super-gaussian, exp(-(n/W)^4), and the fourth power is the point. A
-    // plain gaussian cross-section peaks on the axis, and a plume with a peak
-    // running down its middle reads as a beam with a haze on it: the first cut
-    // of this looked like a comet, which is a body this family does not own.
-    // The flat top spreads the ink across the plume the way a wetted channel
-    // actually holds it, and the shoulders still fall off soft.
-    float x2 = (n * n) / max(W * W, 1e-8);
-    float across = exp(-x2 * x2);
+    // Each fibre's own reach, and it has to FALL OFF TO THE SIDES or the mark
+    // never closes. Cutting the front at a constant distance along the grain
+    // makes the boundary a level set of one coordinate: a straight line with
+    // teeth on it, which is a serrated blade however finely the teeth are cut,
+    // and it was the last hard edge in this species. The fibres out at the
+    // flanks are further from where the pen touched down and carry ink less far,
+    // so the reach is weighted by how far out the fibre sits. That single term
+    // turns the outline from a cut end into a closed curve, and the grain then
+    // makes the whole of that curve ragged instead of only its front.
+    float lateralFall = exp(-(n * n) / max(2.6 * Wref * Wref, 1e-8));
+    float reach = Lh * (0.82 + 0.30 * fibre) * (0.40 + 0.60 * lateralFall);
+    float w = 0.028 + 0.095 * Linf;
+    float front = smoothstep(-w, w, reach - u);
+    // Behind the source the ink creeps too. It is given more room than the first
+    // cut allowed, because a mark that only spreads forward is a jet: a stain
+    // wets the paper it started on as well as the paper in front of it.
+    float bw = 0.10 * S;
+    float back = smoothstep(-bw, bw, u + (0.16 + 0.05 * fibre) * S);
 
-    // Chromatography again: the solvent reaches further than the pigment, so the
-    // root is saturated and the reach is thin.
-    float sat = mix(1.0, 0.66, uN);
+    // Chromatography, but gently. A strong fall from root to tip is a fade along
+    // the direction of travel, which the eye reads as a motion streak; the real
+    // gradient in a feathered mark is mild, because the whole point is that the
+    // ink got carried.
+    float sat = mix(1.0, 0.82, uN);
 
-    // The tip, where each hair stalls and its pigment piles up.
-    float dTip = Lh - u;
-    float wt = (0.012 + 0.030 * (1.0 - dryness)) * S;
+    // The tip, where a fibre stalls and its pigment piles up. It rides the
+    // fibre's own reach, so the tide line is as ragged as the front is.
+    float dTip = reach - u;
+    float wt = (0.014 + 0.032 * (1.0 - dryness)) * S;
     float tip = exp(-(dTip * dTip) / max(wt * wt, 1e-8)) * back;
 
-    float dens = along * across * sat * (0.78 + 0.55 * fiber * fib);
-    float tv = 0.045 + 0.74 * clamp(dens, 0.0, 1.3)
-             + (0.16 + 0.18 * dryness) * tip * across;
+    // THE SUBSTRATE. A wider, softer copy of the same envelope carrying the same
+    // grain, so the sheet is faintly legible just past where the ink got to.
+    // Without it the plume hangs in an empty black field and reads as an object
+    // flying through a void; with it the ink is in a piece of paper, and the
+    // paper is what it is spreading through. It is kept far down the rail: this
+    // is a hint that the substrate is there, not a second material.
+    float Wh = W * 2.0;
+    float hint = exp(-(n * n) / max(Wh * Wh, 1e-8))
+               * smoothstep(-0.13 * S, 0.13 * S, (Lh + 0.14 * S) - u)
+               * smoothstep(-0.16 * S, 0.16 * S, u + 0.34 * S);
+
+    // The grain modulates the ink DEEPLY, 0.30 to 1.15 rather than the first
+    // cut's 0.78 to 0.93. A shallow modulation is a texture on a solid shape; a
+    // deep one is the shape.
+    float dens = front * back * across * sat * (0.30 + 0.85 * fibre);
+    float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.3)
+             + (0.13 + 0.15 * dryness) * tip * across
+             + 0.065 * hint * (0.30 + 0.70 * fibre);
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
