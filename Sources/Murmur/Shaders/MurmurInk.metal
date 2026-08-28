@@ -434,9 +434,9 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // The live edge. Two octaves, not three: fingering wants to be a handful of
     // broad tongues at 20 pt, and a third octave on a ring of this radius puts
     // detail below the sample spacing where it can only shimmer.
-    float ring = 0.9 + 1.1 * tearK;               // lobes around the front
+    float ring = 0.8 + 1.0 * tearK;               // lobes around the front
     float fringe = mi_fbm3(float3(dir * ring, tau * 0.10 + 2.0), 2, 2.03, 0.5);
-    float Rf = R * aniso * (1.0 + (0.09 + 0.30 * tearK) * fringe);
+    float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * fringe);
 
     float sd = Rf - rr;                            // > 0 inside the front
     // The front is a boundary in a wet porous medium, so it is never a rule: a
@@ -457,13 +457,23 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float wr = max(0.62 * w, 0.008);
     float tide = exp(-(sd * sd) / (wr * wr));
 
-    // The interior, creeping outward forever at a vanishing rate.
-    float2 mp = dir * ((rr - 0.16 * R) / S);
+    // The interior, creeping outward forever at a vanishing rate. It is a
+    // DILATION of the domain and not a radial pullback: pulling the sample
+    // radius back by a fixed distance folds the domain at that radius, and the
+    // fold draws a ring and a pinched knot at the centre of the blot. Dividing
+    // the whole plane instead stretches the texture as the blot grows, which is
+    // both artefact-free and the truer statement: the paper's mottling is not
+    // sliding under the ink, the wetted region is getting bigger.
+    float2 mp = d2 / (S * (1.0 + 0.62 * R));
     float mott = mi_fbm3(float3(mp * 5.2, tau * 0.045 + 12.0), 3, 2.03, 0.5);
 
-    float dens = core * (0.80 + 0.30 * mott) + 0.45 * wash;
+    // The interior sits mid-rail and the TIDE is the brightest thing in the
+    // picture. That ordering is the difference between ink and fruit: a blot
+    // whose middle is its highlight reads as a lit sphere, and the first cut of
+    // this shader did exactly that.
+    float dens = core * (0.62 + 0.26 * mott) + 0.45 * wash;
     float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.2)
-             + (0.10 + 0.10 * tearK) * tide;
+             + (0.16 + 0.14 * tearK) * tide;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -561,7 +571,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float vein = exp(-dpx * dpx / 2.9) * att;
 
     float mass = mix(saturate(0.5 + 0.85 * sheet), body, att);
-    float tv = 0.045 + 0.60 * mass + (0.10 + 0.16 * contrast) * vein;
+    // The vein is the drawn line and the body is the ink it was drawn in, and
+    // the body has to win. Weighted the other way the picture is hairlines on
+    // black, which is a lightning storm rather than a bath of ink.
+    float tv = 0.055 + 0.62 * mass + (0.07 + 0.13 * contrast) * vein;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -632,9 +645,12 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float wet = smoothstep(-wEdge, wEdge, sd);
 
     // The tooth of the paper: high frequency across the fibres, low along them,
-    // which is what makes the texture read as fibre rather than as noise. The y
-    // term carries the transport.
-    float3 gp = float3(q.x * (11.0 / S), (q.y - t * 0.030) * (2.6 / S), 9.0);
+    // which is what makes the texture read as fibre rather than as noise. The
+    // ratio is the whole effect and it wants to be severe, about seven to one;
+    // at two to one the climb is mottled rather than striated, which is what
+    // the first cut looked like and it could have been any of the other five.
+    // The y term carries the transport.
+    float3 gp = float3(q.x * (15.0 / S), (q.y - t * 0.030) * (2.2 / S), 9.0);
     float grain = mi_fbm3(gp, 2, 2.03, 0.55);
 
     // The concentration gradient a chromatogram has: strong at the source,
@@ -647,9 +663,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // The foot of the sheet stands in the reservoir.
     float src = 1.0 - smoothstep(-0.42, -0.12, q.y);
 
-    float dens = wet * conc * (0.80 + 0.42 * fiber * grain) + pooling * 0.42 * src;
-    float tv = 0.045 + 0.58 * clamp(dens, 0.0, 1.3)
-             + (0.10 + 0.16 * dry) * tide
+    float dens = wet * conc * (0.80 + 0.85 * fiber * grain) + pooling * 0.42 * src;
+    float tv = 0.045 + 0.64 * clamp(dens, 0.0, 1.3)
+             + (0.14 + 0.18 * dry) * tide
              // Dry paper is not blank paper. A whisper of tooth above the line
              // is most of what makes this interesting at 300 pt and it costs
              // nothing: the grain tap is already paid for.
@@ -731,7 +747,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float fx = mix(2.2, 5.6, k) / S;
     float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S;
     float n = mi_fbm3(float3(xAc * fx, y * fy, tau * 0.030 + 3.0), 2, 2.03, 0.5);
-    float dens = saturate(0.52 + 1.15 * n);
+    // Beds have edges. 1.55 rather than 1.15 is what separates one lamina from
+    // the next instead of leaving a smear that could be any horizontal field.
+    float dens = saturate(0.50 + 1.55 * n);
 
     float bed = 1.0 - smoothstep(-0.22, 0.24, y);   // 1 low, 0 high
     float env = mix(0.85, mix(0.16, 1.0, bed), clear);
@@ -799,18 +817,46 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float morph  = clamp(c2, 0.0, 1.0);
     float offset = clamp(c3, 0.0, 1.0);
 
-    const float F = 2.3;                            // domain scale, cycles a frame
+    // 1.8 cycles a frame, not 2.3: at the higher pitch the level set breaks
+    // into four or five separate islands and the picture is a maze of lit
+    // edges, which is not a mass wearing light. One body with two or three
+    // lobes is the whole subject, and the pitch is what decides it.
+    const float F = 1.8;                            // domain scale, cycles a frame
     float2 p = uv / S;
     float3 q = float3(p * F + float2(0.020, -0.014) * t,
                       t * (0.020 + 0.055 * morph) + 6.0);
     float4 Fd = mi_fbmd3(q, 3, 2.03, 0.5);
-    float f = Fd.x;
+    // THE BIAS, and without it this style does not exist. The level set of a
+    // plain fBm is a winding curve that crosses the whole frame, so lighting
+    // its edge draws a long lit ribbon: the picture has a bright thing in it
+    // and no body. A radial well makes the field highest at the centre, which
+    // turns that same level set into a closed, lobed silhouette sitting where
+    // the eye already is.
+    //
+    // The three constants are a guarantee and not a taste. 0.42 is the pedestal
+    // and 0.55 scales the noise to about +/- 0.30 against it, so the field at
+    // the centre can never fall to the threshold however the noise lands: there
+    // is ALWAYS a mass. Without that the body would blink out whenever the fBm
+    // happened to be low at the middle of the frame, and it did, which is a
+    // thinking indicator that stops having a subject. B = 4.5 then sets the
+    // size: the radius runs between about 0.16 and 0.40 of the frame, so the
+    // body is always inside the shore and always big enough to read at 20 pt.
+    // The noise still owns the shape, moving the boundary by forty per cent of
+    // its own radius, which is a lobed mass rather than a circle with texture.
+    const float B = 4.5;
+    float f = 0.42 + 0.55 * Fd.x - B * dot(uv, uv);
     // The chain rule, and it is not optional: the gradient comes back in the
     // noise domain, and a distance measured there is not a distance on screen.
-    float2 g = Fd.yz * (F / S);
+    // The well's own gradient is carried with it, or the distance estimate is
+    // wrong by exactly the term that makes the body a body.
+    float2 g = 0.55 * Fd.yz * (F / S) - 2.0 * B * uv;
     float gl = max(length(g), 1e-3);
 
-    float thr = mix(0.18, -0.16, massK);
+    // The threshold sits ABOVE the field's mean, so the body is the minority of
+    // the frame: about a quarter of it at the default. Sitting it at the mean,
+    // which is where it started, splits the frame half and half and the eye
+    // cannot tell which half is the mass.
+    float thr = mix(0.26, -0.20, massK);
     float d = (f - thr) / gl;                       // signed distance, in frames
     float inside = smoothstep(-0.004, 0.010, d);
 
@@ -818,19 +864,25 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float a = offset * 6.2831853;
     float facing = 0.5 + 0.5 * dot(nOut, float2(cos(a), sin(a)));
 
-    float w = 0.018 + 0.085 * corona;
+    // Halation is a GLOW and not an outline, so the corona is wide and the rim
+    // is only the hot core of it. Weighted the other way round the mass wears a
+    // drawn edge, which is the one thing a scattering effect never looks like.
+    float w = 0.022 + 0.100 * corona;
     float halo = exp(-max(-d, 0.0) / w) * (1.0 - inside);
-    float wr = 0.006 + 0.016 * corona;
+    float wr = 0.005 + 0.013 * corona;
     float rim = exp(-(d * d) / (wr * wr));
     // The body is dark but it is not a hole. It holds the rail's deep shadow at
-    // its shoulder and gives even that up toward its middle, so at 300 pt there
-    // is a body in there and not an absence.
-    float core = 0.17 * exp(-max(d, 0.0) / 0.11);
+    // its shoulder and gives even that up toward its middle, so there is ink in
+    // there and not an absence. The 0.20 falloff is measured against the body's
+    // own radius rather than chosen: much tighter and the shadow lives only in
+    // the few points nearest the edge, which at 46 pt is a stroked ring with
+    // nothing inside it. A mass has to have an inside.
+    float core = 0.20 * exp(-max(d, 0.0) / 0.20);
 
     float tv = 0.040
              + inside * core
-             + (0.10 + 0.52 * corona) * halo * (0.35 + 0.65 * facing)
-             + (0.12 + 0.14 * corona) * rim  * (0.30 + 0.70 * facing);
+             + (0.16 + 0.62 * corona) * halo * (0.35 + 0.65 * facing)
+             + (0.07 + 0.10 * corona) * rim  * (0.30 + 0.70 * facing);
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -900,19 +952,24 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // moving through the third coordinate at a fiftieth of a cycle a second:
     // slower than anything else in this file, which is the point of the style.
     float rimN = mi_fbm3(float3(dir * 1.35, t * 0.020 + 17.0), 2, 2.03, 0.5);
-    float R = (0.225 + 0.070 * tension) * S * (1.0 + 0.14 * rimN);
+    float R = (0.225 + 0.070 * tension) * S * (1.0 + 0.20 * rimN);
 
-    // A spherical cap, leaned. Depth is what carries the warmth: a shallow
-    // liquid is dark at its edges and full of light where it is deep.
+    // A spherical cap, leaned, raised to 1.6. The exponent is the difference
+    // between a dish of ink and a lit disc: a plain cap is bright almost all
+    // the way out and its edge is the only event in the picture, whereas the
+    // steeper falloff leaves a DARK ANNULUS of shallow ink for the meniscus to
+    // be seen against. The light in this style is supposed to be at the wall
+    // and in the reflection, not spread evenly over the middle.
     float x = clamp(rr / max(R, 1e-4), 0.0, 1.0);
-    float h = sqrt(max(1.0 - x * x, 0.0)) * (1.0 + 0.28 * dot(dv, low) / max(R, 1e-4));
+    float cap = sqrt(max(1.0 - x * x, 0.0));
+    float h = pow(cap, 1.6) * (1.0 + 0.28 * dot(dv, low) / max(R, 1e-4));
     h = max(h, 0.0);
 
     // The surface, and its slope, in one tap.
     const float SF = 3.1;
     float4 Sf = mi_fbmd3(float3(uv * (SF / S), t * (0.030 + 0.070 * tremor) + 41.0),
                          3, 2.03, 0.5);
-    float2 slope = Sf.yz * (SF / S) * (0.014 + 0.050 * tremor);
+    float2 slope = Sf.yz * (SF / S) * (0.024 + 0.060 * tremor);
 
     // The shore, anti-aliased by the same derivative the marbling uses, so the
     // edge of the pool is one pixel at 20 pt and one pixel at 300 pt.
@@ -921,9 +978,16 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // Jurin from the other side: the liquid climbs the wall over its capillary
     // length, and that climb tips the surface outward.
-    float lambda = (0.010 + 0.030 * tension) * S;
+    float lambda = (0.008 + 0.024 * tension) * S;
     float men = exp(-max(R - rr, 0.0) / lambda) * pool;
-    slope += dir * (men * (0.22 + 0.30 * tension));
+    // Almost all of the meniscus goes into the SLOPE and only a little into the
+    // brightness, and that split is the whole reason this shader is allowed to
+    // have a rim at all. Light added directly at the wall paints a ring, and a
+    // ring is a drawn circle. Tipping the surface there instead lets the same
+    // overhead light decide: the wall catches a bright ARC where it faces the
+    // source and stays dark where it turns away, which is what a dish of ink on
+    // a table actually looks like and is not a shape anybody drew.
+    slope += dir * (men * (0.34 + 0.40 * tension));
 
     // The light sits nearly overhead, a little to the upper left. Nearly is
     // load bearing: put it out at forty degrees and a flat surface returns
@@ -941,9 +1005,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float dried = exp(-dq * dq) * (1.0 - pool);
 
     float tv = 0.045
-             + 0.44 * h * pool
-             + (0.13 + 0.20 * sheenK) * spec * pool
-             + (0.12 + 0.16 * tension) * men
+             + 0.30 * h * pool
+             + (0.22 + 0.32 * sheenK) * spec * pool
+             + (0.10 + 0.12 * tension) * men
              + 0.075 * dried;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);

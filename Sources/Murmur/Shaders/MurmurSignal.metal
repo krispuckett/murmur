@@ -445,10 +445,34 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float warp = ms_fbm3(float3(q * 1.35 + float2(9.7, 3.1), t * 0.055), 2, 2.00, 0.50);
     float2 qw = q + tangent * (warp * (0.22 + 0.30 * flock) / S);
 
-    // The sheet.
+    // The sheet, and the level sets are taken PERIODICALLY. One zero level is a
+    // single surface, and a single surface through a slice is one bright thread
+    // -- the first cut of this shader drew exactly that, a wire in a haze, which
+    // is a filament and not a flock. Several level sets at once give a stack of
+    // soft bands that split, merge and vanish across the frame, which is a sheet
+    // folded back over itself and is what a flock's density actually looks like.
+    // exp(k(cos - 1)) is the smooth way to say "near a level set": periodic, no
+    // discontinuity anywhere, and thickness is one number.
     float n = ms_fbm3(float3(qw * 2.85, t * 0.085), 3, 2.03, 0.52);
-    float thick = mix(0.46, 0.13, cohesion);
-    float sheet = exp(-abs(n) / thick);
+    // Two numbers do the work. `folds` is how many level sets the slice cuts:
+    // two or three, because a flock is a sheet folded a few times and not a
+    // pastry. `k` is how sharply the density peaks at each one, and it is kept
+    // LOW -- a high k draws the level sets as bright filaments on black, which
+    // is a vein and not a flock, and was what the second cut of this shader did.
+    float folds = 1.8 + 1.5 * flock;
+    float k = mix(0.30, 1.30, cohesion);
+    float sheet = exp(k * (cos(6.2831853 * n * folds) - 1.0));
+
+    // THE GRAIN. A second, much finer set of the SAME level sets, and it costs a
+    // cosine rather than a noise tap because it reads the field that is already
+    // in hand. This is where the mass gets its interior: a flock at any distance
+    // has texture inside its body, and without this a 300 pt indicator is one
+    // smooth lobe with a crease in it. It MULTIPLIES the sheet rather than
+    // adding to it, so the grain exists only where there is material to have a
+    // grain -- texture in empty sky would be the tell that this is a shader and
+    // not a flock.
+    float grain = exp(k * 1.40 * (cos(6.2831853 * n * folds * 2.60) - 1.0));
+    sheet *= 0.72 + 0.42 * grain;
 
     // THE BODY. A flock has an outline and it is not the frame's. A super
     // gaussian at 0.285 with a slowly wandering centre: broad enough that a 20 pt
@@ -456,13 +480,16 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // never has to cut anything that was still bright.
     float2 bc = uv - 0.070 * float2(sin(t * 0.083), cos(t * 0.061));
     float body = exp(-pow(length(bc) / 0.285, 2.3));
-    float dens = body * (0.20 + 0.80 * sheet) * (0.42 + 0.58 * flock);
+    // A flock's density varies by about three to one across its own body, not
+    // by ten to one: it is a mass that thickens, never a mass with holes cut in
+    // it. The 0.34 floor is that ratio, written down.
+    float dens = body * (0.40 + 0.60 * sheet) * (0.46 + 0.54 * flock);
 
     float skyN = ms_fbm3(float3(q * 0.75, t * 0.031), 2, 2.00, 0.50);
     float dusk = sky * (0.055 + 0.075 * (0.5 + skyN)) * (1.0 - 0.55 * dens);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, dens + dusk, glow, 0.0, 0.80, 0.55);
+    float3 field = ms_lit(pal, dens + dusk, glow, 0.0, 0.78, 0.45);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -529,10 +556,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 d1 = float2(cos(a), sin(a));
     float2 d2 = float2(cos(a + 1.6406), sin(a + 1.6406));
 
-    // The pitch. 14 to 34 puts between two and five and a half cycles across the
+    // The pitch. 18 to 44 puts between three and seven cycles across the
     // indicator, which is the band where a weave reads as cloth at 20 pt and
     // still has structure worth looking at across 300 pt. Higher is a comb.
-    float K = mix(14.0, 34.0, threads);
+    float K = mix(17.0, 42.0, threads);
     float aa = ms_aa(K / S, size, pixelScale);
 
     // THE LOOM'S BEAT: taut, then eased, then taut. Fifty five seconds.
@@ -547,25 +574,42 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // Time enters as a slow crawl of the phases, which is the cloth being fed
     // through the loom, not a brightness on a timer.
-    float ph1 = dot(q, d1) * K + w1 * wander * 2.6 - t * 0.34;
-    float ph2 = dot(q, d2) * K + w2 * wander * 2.6 + t * 0.27;
+    // The wander is worth several radians, not a fraction of one: at K around
+    // thirty the phase runs to thirty radians across the frame, so a displacement
+    // under a radian is invisible and the weave comes out as machine-ruled. Seven
+    // is where a thread visibly bends over its length and still never crosses its
+    // neighbour.
+    float ph1 = dot(q, d1) * K + w1 * wander * 5.5 - t * 0.34;
+    float ph2 = dot(q, d2) * K + w2 * wander * 5.5 + t * 0.27;
 
-    float s1 = sin(ph1), s2 = sin(ph2);
-    float b1 = mix(0.5, 0.5 + 0.5 * s1, aa);
-    float b2 = mix(0.5, 0.5 + 0.5 * s2, aa);
-    float cloth = 0.5 * (b1 + b2) + taut * 0.62 * (b1 * b2 - 0.25);
+    float warp = mix(0.5, 0.5 + 0.5 * sin(ph1), aa);
+    float weft = mix(0.5, 0.5 + 0.5 * sin(ph2), aa);
+
+    // THE FACE. Cloth has one, and the two families are NOT equal partners: the
+    // warp is what the eye reads and the weft is what it feels. Two earlier cuts
+    // gave them equal weight and got, in order, a lattice of round blobs (from
+    // their SUM, which is bright where both crest and dark where both trough)
+    // and then a waffle iron (from their union). Weighting the warp at twice the
+    // weft, over a substantial body of cloth, gives a surface with a direction,
+    // which is what every woven thing has.
+    //
+    // The last term is the over and under: at a crossing one thread passes
+    // beneath the other and takes a little light down with it, so a crossing
+    // DIPS instead of piling up. The sign of that is most of the difference
+    // between cloth and a grid.
+    float cloth = 0.32 + 0.52 * warp + 0.20 * weft - taut * 0.26 * warp * weft;
 
     // The bolt is not uniform: a slow broad field thickens and thins it, so the
     // cloth has weight in some places and is nearly sheer in others.
     float bolt = 0.62 + 0.55 * (0.5 + ms_fbm3(float3(q * 1.05, t * 0.036), 2, 2.00, 0.50));
 
     // THE SHEEN. cos(phase) is the slope; the fixed vector is the light.
-    float slope = 0.72 * cos(ph1) * aa - 0.58 * cos(ph2) * aa;
+    float slope = 0.78 * cos(ph1) * aa - 0.46 * cos(ph2) * aa;
     float spec = pow(clamp(0.5 + 0.5 * slope, 0.0, 1.0), 5.0);
 
     // Handed over uncapped: the crossings and the sheen together pass 1 in the
     // brightest places, and ms_lit's knee is where that is meant to be resolved.
-    float e = cloth * bolt * (0.78 + 0.42 * taut) + sheen * 0.34 * spec * cloth;
+    float e = cloth * bolt * (0.72 + 0.36 * taut) + sheen * 0.30 * spec * cloth;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.60);
@@ -633,8 +677,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // THE ATTENTION. Slower and wider as dwell rises.
     float rate = mix(0.46, 0.13, dwell);
-    float2 ac = 0.24 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
-    float rad = mix(0.235, 0.315, dwell);
+    float2 ac = 0.16 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
+    float rad = mix(0.245, 0.320, dwell);
     float ad = length(uv - ac) / rad;
     float att = exp(-ad * ad);
 
@@ -642,14 +686,23 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // and pulled down where attention is. The 0.30 band above it is the softness
     // of the coastline: narrower and the islands get a hard edge, which organic
     // forms are never allowed.
-    float thr = mix(0.88, 0.28, clamp(reveal * att + scatter * 0.20, 0.0, 1.0));
-    float e = smoothstep(thr, thr + 0.30, psi);
+    float thr = mix(0.72, 0.30, clamp(reveal * att + scatter * 0.18, 0.0, 1.0));
+    // The 0.34 band above the threshold is the softness of the coastline, and it
+    // is wide on purpose twice over: narrower and the islands get an edge, which
+    // organic forms may never have, and narrower also means the interior
+    // saturates flat, which walked the rail into its pale specular and turned an
+    // amber island white.
+    float e = smoothstep(thr, thr + 0.34, psi);
 
-    // The residue, so the dark is a field and not a hole.
-    e = max(e, scatter * 0.22 * smoothstep(0.52, 0.96, psi));
+    // THE RESIDUE, and it is not decoration. Without it the parts of the disc
+    // that attention has not reached are flat ink, and a flat-ink indicator
+    // reads as switched off rather than as thinking about something else. The
+    // floor is present even at scatter zero, because the latent field is the
+    // premise of the species: it is always there whether or not it is lit.
+    e = max(e, (0.10 + 0.30 * scatter) * smoothstep(0.38, 0.92, psi));
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.82, 0.65);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.70, 0.45);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -709,7 +762,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // real seconds, so a slower field still settles when it says it will.
     float tau = max(time - epoch, 0.0);
     float3 law = ms_settle_law(tau, 6.0);
-    float coh = clamp((1.0 - law.z) * (0.34 + 0.66 * lock), 0.0, 1.0);
+    float coh = clamp((1.0 - law.z) * (0.45 + 0.55 * lock), 0.0, 1.0);
     float scroll = law.y * max(speed, 0.0);
 
     // Six degrees off level. A station is a line, but a line at exactly zero
@@ -723,13 +776,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float across = pq.y - needle;
 
     // THE PASSBAND. Wide at birth, one octave wide when locked.
-    float centre = 0.35 + 2.10 * band;
+    float centre = 0.20 + 1.70 * band;
     float width = mix(2.30, 0.55, coh);
     // The squeeze along the station's axis: at birth the domain is isotropic and
     // the field has no direction; locked, x barely moves it and every octave is
     // a striation running along the line.
     float xs = mix(1.0, 0.09, coh);
-    float f0 = mix(3.2, 8.4, band);
+    float f0 = mix(2.2, 5.2, band);
 
     // The passband, octave by octave, each one gated on whether this frame can
     // actually resolve it. Without the gate a 20 pt indicator puts the top
@@ -749,15 +802,20 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // THE ENVELOPE. Broadband energy fills the frame; a station does not. As
     // coherence rises the energy collects into a band 0.17 wide about the line.
-    float ax = across / 0.17;
-    float env = mix(1.0, exp(-ax * ax), coh);
+    float ax = across / 0.19;
+    // Not a mix toward the band but a HANDOVER to it: the broadband term is
+    // multiplied down by (1 - coh) while the band's own term is multiplied up,
+    // so energy that was spread across the frame ends up in one place instead of
+    // the frame keeping a share of it. Mixing left a third of the static behind
+    // at full lock and the picture read as an ember rather than a station.
+    float env = (1.0 - coh) * 0.55 + coh * exp(-ax * ax);
 
     // THE HISS. A fine field, gated on the same resolution test, so it stays a
     // noise FLOOR at every size: audible under the station, never a grain of
     // sand on the glass and never a mote.
-    float hz = ms_noise3(float3(pq * 11.0, scroll * 1.7 + 41.0));
+    float hz = ms_noise3(float3(pq * 8.5, scroll * 1.7 + 41.0));
     float floorHiss = hiss * (0.055 + 0.075 * (0.5 + hz))
-                    * mix(1.0, 0.62, coh) * ms_aa(6.2831853 * 11.0 / S, size, pixelScale);
+                    * mix(1.0, 0.62, coh) * ms_aa(6.2831853 * 8.5 / S, size, pixelScale);
 
     // The band brightens as it locks -- energy that was spread over the whole
     // frame is now in one place, which is what a receiver actually does with it.
@@ -765,7 +823,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
                   * (0.55 + 0.45 * coh) + floorHiss;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.84, 0.70);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.55);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);
@@ -829,7 +887,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float3 pm = float3(q * fq, t * 0.045);
     float n = ms_fbm3(pm, 3, 2.03, 0.55);
     float open = clamp(0.5 + 1.30 * n, 0.0, 1.0);
-    float crease = 1.0 - clamp(abs(n) * 3.10, 0.0, 1.0);
+    float crease = 1.0 - clamp(abs(n) * 3.80, 0.0, 1.0);
     float chan = mix(open, crease, branch);
 
     // The same medium at half the frequency: what the light looks like once it
@@ -842,20 +900,26 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // that follow the medium read as transport through it, and a straight front
     // reads as a wipe.
     float bend = ms_fbm3(float3(q * 1.15, t * 0.030), 2, 2.00, 0.50);
-    float phase = dot(q, float2(0.62, 0.38)) * 3.20 + bend * 5.60;
+    float phase = dot(q, float2(0.62, 0.38)) * 4.20 + bend * 9.00;
 
     float rate = mix(0.30, 1.25, pulseRate);
     float th = phase - t * rate * 2.0;
     float skew = th + 0.55 * sin(th);                 // steep front, long wake
-    float k = mix(4.20, 1.75, afterglow);             // and how long
+    float k = mix(3.40, 1.50, afterglow);             // and how long
     float pulse = exp(k * (cos(skew) - 1.0));
 
-    // The 0.13 floor is the medium at rest: dark, but a material and not a hole,
-    // so an impulse arrives INTO something instead of onto nothing.
-    float e = chan * (0.13 + 0.87 * pulse) + afterglow * 0.30 * halo * pulse * chan;
+    // Three terms, and the first one matters more than it looks. The medium is
+    // lit BY ITS OWN CONDUCTANCE even where no impulse is passing, so the
+    // pathways are faintly legible at all times and an impulse arrives INTO
+    // something rather than onto nothing. A flat floor instead of chan * chan
+    // gave a uniform warm wash with a blob moving over it, which is a lamp
+    // behind a card and not a signal in a medium.
+    float e = chan * (0.16 + 0.30 * chan)
+            + chan * pulse * 0.90
+            + afterglow * 0.28 * halo * pulse * chan;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.82, 0.75);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.74, 0.60);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -915,7 +979,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
         // Deeper sheets: finer on screen, slower across it, and each on its own
         // heading, so this is parallax and not one translation of three copies.
-        float f = 2.10 * (1.0 + 0.55 * fi * sep);
+        float f = 1.55 * (1.0 + 1.35 * fi * sep);
         float rate = base / (1.0 + 1.70 * fi * parallax);
         float head = 0.30 - 0.34 * fi;
         float2 slide = float2(cos(head), sin(head)) * (rate * t);
@@ -926,7 +990,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // The back sheet carries the contrast; the two in front are films, and
         // legibility is only allowed to sharpen the one behind.
         float far = fi * 0.5;                       // 0, 0.5, 1 front to back
-        float contrast = mix(0.70, 1.20 + 0.75 * legibility, far);
+        float contrast = mix(0.55, 1.45 + 0.80 * legibility, far);
         float lum = clamp((d - 0.5) * contrast + 0.5, 0.0, 1.0);
 
         // A veil is mostly present even where it is thin, so the coverage floor
@@ -935,7 +999,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // Thinning the two in front is how the thing behind gets nearer, which
         // is legibility's other half.
         float opacity = mix(0.36 * (1.0 - 0.38 * legibility), 0.46, far * far);
-        float alpha = mix(0.25, 1.0, smoothstep(0.20, 0.85, d)) * opacity;
+        float alpha = mix(0.15, 1.0, smoothstep(0.26, 0.80, d)) * opacity;
 
         acc += lum * alpha * T;
         T *= (1.0 - alpha);
@@ -943,10 +1007,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // Normalised against what a single fully present sheet would give, so the
     // stack does not read dimmer than one veil merely because it is three.
-    float e = acc * 2.10;
+    float e = acc * 1.35;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.50);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.70, 0.42);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.62), position, pixelScale);
