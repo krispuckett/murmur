@@ -1,0 +1,360 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1F13A6AEA9E4831D216AE6AF /* Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3334A325326201996012D23 /* Studio.swift */; };
+		2080B14C356A47DFD8475C63 /* Murmur in Frameworks */ = {isa = PBXBuildFile; productRef = 03DDF037052889804599E0F5 /* Murmur */; };
+		3DC1DC5FC25AD55FCEDEBFDC /* ExportCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F71CF16074527DEC56316CE /* ExportCard.swift */; };
+		47DD2C0A3AB03DFAB7B048EA /* Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C035D3E2C85C3CFFAF2EC3 /* Gallery.swift */; };
+		51C80CCFE599FA7CD4A73BFD /* LabModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */; };
+		5E132CF8DD6AEF9A8B008282 /* MurmurLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E066182E45FCD74A226894 /* MurmurLabApp.swift */; };
+		65EC3961EEE83B1610F8BD4E /* GlassRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3BB78A3408F885D7F05C4E /* GlassRow.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		2F71CF16074527DEC56316CE /* ExportCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportCard.swift; sourceTree = "<group>"; };
+		79C035D3E2C85C3CFFAF2EC3 /* Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gallery.swift; sourceTree = "<group>"; };
+		79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabModel.swift; sourceTree = "<group>"; };
+		9B3BB78A3408F885D7F05C4E /* GlassRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassRow.swift; sourceTree = "<group>"; };
+		A9F65C77AD90D697809F1000 /* MurmurLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MurmurLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B8E066182E45FCD74A226894 /* MurmurLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MurmurLabApp.swift; sourceTree = "<group>"; };
+		C3334A325326201996012D23 /* Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Studio.swift; sourceTree = "<group>"; };
+		F2B820B20BDF827B6FC3100C /* murmur */ = {isa = PBXFileReference; lastKnownFileType = folder; name = murmur; path = ..; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		67B867672E59D1E62D020C17 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2080B14C356A47DFD8475C63 /* Murmur in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		645E761F19202369FB27B27A /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				F2B820B20BDF827B6FC3100C /* murmur */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		91FEF8A99397FE28D6F1E2BE = {
+			isa = PBXGroup;
+			children = (
+				E27AAD979B3826F6B4862AD9 /* MurmurLab */,
+				645E761F19202369FB27B27A /* Packages */,
+				E2256EEC41AC4F130B44670C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E2256EEC41AC4F130B44670C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A9F65C77AD90D697809F1000 /* MurmurLab.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E27AAD979B3826F6B4862AD9 /* MurmurLab */ = {
+			isa = PBXGroup;
+			children = (
+				2F71CF16074527DEC56316CE /* ExportCard.swift */,
+				79C035D3E2C85C3CFFAF2EC3 /* Gallery.swift */,
+				9B3BB78A3408F885D7F05C4E /* GlassRow.swift */,
+				79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */,
+				B8E066182E45FCD74A226894 /* MurmurLabApp.swift */,
+				C3334A325326201996012D23 /* Studio.swift */,
+			);
+			path = MurmurLab;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		94C69C9A6B4B50E431A4A3CB /* MurmurLab */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 57E5BC5B5B61565C5FE0BEC1 /* Build configuration list for PBXNativeTarget "MurmurLab" */;
+			buildPhases = (
+				72649325705037989A37B659 /* Sources */,
+				67B867672E59D1E62D020C17 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MurmurLab;
+			packageProductDependencies = (
+				03DDF037052889804599E0F5 /* Murmur */,
+			);
+			productName = MurmurLab;
+			productReference = A9F65C77AD90D697809F1000 /* MurmurLab.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2C3422DB486215BE651DC379 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					94C69C9A6B4B50E431A4A3CB = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 0F792D9C84FB4778B13BEAB7 /* Build configuration list for PBXProject "MurmurLab" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 91FEF8A99397FE28D6F1E2BE;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E9BBC755A334BF36C7139E76 /* XCLocalSwiftPackageReference "..//" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E2256EEC41AC4F130B44670C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				94C69C9A6B4B50E431A4A3CB /* MurmurLab */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		72649325705037989A37B659 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3DC1DC5FC25AD55FCEDEBFDC /* ExportCard.swift in Sources */,
+				47DD2C0A3AB03DFAB7B048EA /* Gallery.swift in Sources */,
+				65EC3961EEE83B1610F8BD4E /* GlassRow.swift in Sources */,
+				51C80CCFE599FA7CD4A73BFD /* LabModel.swift in Sources */,
+				5E132CF8DD6AEF9A8B008282 /* MurmurLabApp.swift in Sources */,
+				1F13A6AEA9E4831D216AE6AF /* Studio.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		6BEA7D827D9AEDCF7A933184 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Lab";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.krispuckett.MurmurLab;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		7313E1D88B3C5BB689E4EF6A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		777506D27187847A56294EA0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		9C9DE61BF7984A9E33D35C9F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Lab";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.krispuckett.MurmurLab;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0F792D9C84FB4778B13BEAB7 /* Build configuration list for PBXProject "MurmurLab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7313E1D88B3C5BB689E4EF6A /* Debug */,
+				777506D27187847A56294EA0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		57E5BC5B5B61565C5FE0BEC1 /* Build configuration list for PBXNativeTarget "MurmurLab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9C9DE61BF7984A9E33D35C9F /* Debug */,
+				6BEA7D827D9AEDCF7A933184 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E9BBC755A334BF36C7139E76 /* XCLocalSwiftPackageReference "..//" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "..//";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		03DDF037052889804599E0F5 /* Murmur */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Murmur;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 2C3422DB486215BE651DC379 /* Project object */;
+}
