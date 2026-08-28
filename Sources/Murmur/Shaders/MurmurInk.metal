@@ -879,10 +879,23 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // nothing inside it. A mass has to have an inside.
     float core = 0.20 * exp(-max(d, 0.0) / 0.20);
 
+    // THE FLOOR ON THE FACING TERM, and it is a correction from the calibration
+    // pass. Weighting the corona 0.35 to 1.0 by how much the boundary faces the
+    // light is the right instinct and it was too deep: over the reforming cycle
+    // there are states where little of the silhouette faces the source, and in
+    // those the whole ring went soft and the cell nearly disappeared beside its
+    // siblings in the gallery. 0.62 to 1.0 keeps the asymmetry (the lit shoulder
+    // is still two thirds brighter than the far one) while making a complete
+    // corona the MINIMUM rather than the average. The species is a mass wearing
+    // its own light; the light is never allowed to leave it.
+    //
+    // Note what this is not. The lift is on the floor and not on the peak, so
+    // nothing about it is a pulse: the bright side is exactly as bright as it
+    // was, and no term here varies with time that did not vary before.
     float tv = 0.040
              + inside * core
-             + (0.16 + 0.62 * corona) * halo * (0.35 + 0.65 * facing)
-             + (0.07 + 0.10 * corona) * rim  * (0.30 + 0.70 * facing);
+             + (0.22 + 0.60 * corona) * halo * (0.62 + 0.38 * facing)
+             + (0.09 + 0.10 * corona) * rim  * (0.55 + 0.45 * facing);
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));

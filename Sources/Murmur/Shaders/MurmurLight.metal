@@ -11,8 +11,9 @@
 //               through their own rising shimmer.
 //   mg_lantern  one lamp of CONSTANT brightness behind drifting fog. What moves
 //               is the fog, and the shadows it throws across its own light.
-//   mg_mirage   the desert road: layered air bending a distant light, folded
-//               below the inversion into its own mirrored second image.
+//   mg_mirage   the desert road: one small distant light, its image sliced and
+//               doubled by layered air and folded below the inversion into an
+//               inverted second copy. The bands themselves are never drawn.
 //   mg_oculus   an aperture admitting light, opening as the thought completes.
 //               Open is the rest state, and rest is not a freeze.
 //
@@ -595,22 +596,38 @@ static inline float mg_hold(float2 uv, float reach) {
     for (int i = 0; i < 3; i++) {
         float fi = float(i);
         float lane = 4.0 + 13.0 * fi;
-        // Each lamina drifts at its own rate, and the two fBm terms inside it
-        // travel in OPPOSITE directions. That is the difference between a fold
-        // and a slide: two counter-moving components sum to a shape that
-        // changes, while one component only translates.
+        // Each lamina drifts at its own rate and reads its OWN stretch of sky,
+        // and the two fBm terms inside it travel in OPPOSITE directions. That is
+        // the difference between a fold and a slide: two counter-moving
+        // components sum to a shape that changes, while one component only
+        // translates. The 0.17 offset is what stops the three laminae stacking
+        // into a single mass, which is how the first cut of this read as a dome
+        // rather than as a curtain.
+        float xi = x + 0.17 * fi;
         float rate = (0.055 + 0.115 * wander) * (1.0 + 0.42 * fi);
-        float big = mg_fbm1(x * 3.4 + t * rate, 2, lane) * 0.115;
-        float fine = mg_fbm1(x * 7.5 - t * rate * 0.63, 2, lane + 7.0) * 0.030;
+        float big = mg_fbm1(xi * 3.4 + t * rate, 2, lane) * 0.115;
+        float fine = mg_fbm1(xi * 7.5 - t * rate * 0.63, 2, lane + 7.0) * 0.030;
         float foot = 0.050 + 0.030 * fi + (big + fine) * (0.35 + 1.30 * foldK);
 
         float h = up - foot;
         // Sharp below, diffuse above. Reverse these two and the species is fog.
         float prof = smoothstep(-border, 0.0, h) * exp(-max(h, 0.0) / H);
 
-        // The rays. One quintic octave, leaning with height, drifting slowly.
-        float ray = 0.74 + 0.26 * (0.5 + 0.5 * mg_vnoise1(x * 5.2 + h * 1.15 + t * rate * 0.8,
-                                                          lane + 23.0));
+        // THE PLEATS, and this is what makes a curtain a curtain instead of a
+        // glow with a shaped foot. A hanging sheet is not evenly bright across
+        // its width: where it turns edge on to the eye the path through it is
+        // longest, and those turns are NARROW. So the brightness rides a ridged
+        // field, 1 - |n|, whose bright lines are the zero crossings of a
+        // wandering scalar. That puts four to six pleats across the disc,
+        // irregularly spaced, each a soft peak about 0.06 uv wide, and the
+        // squaring keeps their flanks soft so none of them is ever an edge.
+        // They lean with height because a curtain's structure follows field
+        // lines and field lines are not vertical in the picture plane, and each
+        // set travels with its own lamina, so the three slide across each other
+        // and the vertical structure is never a static comb.
+        float pn = mg_fbm1(xi * 3.8 + h * 0.90 + t * rate * 0.85, 2, lane + 23.0);
+        float pleat = 1.0 - min(abs(pn) * 2.2, 1.0);
+        float ray = 0.62 + 0.70 * pleat * pleat;
         // The far laminae are dimmer, the way the far side of a fold is.
         sheet += prof * ray * (1.0 - 0.24 * fi);
     }
@@ -620,7 +637,9 @@ static inline float mg_hold(float2 uv, float reach) {
 
     // The sky is not empty above the curtain: airglow, at the bottom of the
     // rail, so the disc never goes to a dead flat ink where the sheet is not.
-    float lit = 0.055 + 0.52 * sheet;
+    // The pleats spend a little of the sheet's average brightness buying their
+    // structure, so the coefficient comes up to keep the curtain where it was.
+    float lit = 0.055 + 0.56 * sheet;
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
     // Only the overlaps emit. sheet passes 1.0 where two laminae cross, and the
     // cube makes that crossing the only thing on screen that glows.
@@ -750,6 +769,33 @@ static inline float mg_hold(float2 uv, float reach) {
 
 // MARK: - 4. Lantern
 
+/// The fog, as one law that the pixel, the lamp and the four march samples all
+/// read, so the medium is the same medium everywhere in the picture.
+///
+/// THE SHAPE OF IT IS THE WHOLE FIX. The first cut of this style used an evenly
+/// dense fog, and an evenly dense fog is worthless here: the optical depth along
+/// a path is then just the mean density times the path LENGTH, so exp(-ext tau)
+/// is a smooth function of distance from the lamp, the shadow term collapses
+/// into a second inverse-square falloff, and the render comes out as a bare
+/// radial gradient with the medium nowhere in it. That is exactly what it did.
+///
+/// So the density is a thin even haze with sparse THICK WISPS drifting through
+/// it, and the smoothstep is what makes them sparse: below 0.40 of the noise
+/// range there is only haze, and the wisp term climbs from there. The mean stays
+/// low, so path length contributes little, while crossing a wisp costs several
+/// times a clear path. Now the optical depth answers to WHAT the light passed
+/// through rather than to how far it came, the shadows are shaped like the fog,
+/// and they sweep as it drifts.
+///
+/// The domain is compressed 2.2x across, because fog in still air lies in
+/// horizontal sheets, and the anisotropy is a second reason nothing here ever
+/// comes out circular.
+static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK) {
+    float2 q = (p + flow) * float2(ff / 2.2, ff);
+    float n = 0.5 + 0.5 * mg_fbm3(float3(q, fz), 2, 2.03, 0.5);
+    return (0.16 + 0.30 * fogK) + (0.55 + 1.45 * fogK) * smoothstep(0.40, 0.95, n);
+}
+
 // LANTERN. One light behind moving fog.
 //
 // This is the style the family law was written for, so it is worth being exact.
@@ -766,12 +812,13 @@ static inline float mg_hold(float2 uv, float reach) {
 //     L(p) = rho(p) * Lamp(|p - lamp|) * exp(-ext * integral of rho from lamp to p)
 //
 // The integral is four samples along the line from the pixel toward the lamp,
-// which with the pixel's own density is five field taps and the whole budget of
-// this style. What that integral buys is the thing that makes the picture: a
-// thick wisp standing between the lamp and one side of the frame throws a soft
-// SHADOW across it, and as the fog drifts those shadows sweep. Nothing in the
-// frame is drawn as a ray and there is not a single hard edge anywhere, and yet
-// the light visibly comes from a place.
+// which with the pixel's own density and the lamp's own is six field taps and
+// the whole budget of this style. What that integral buys is the thing that
+// makes the picture: a thick wisp standing between the lamp and one side of the
+// frame throws a soft SHADOW across it, and as the fog drifts those shadows
+// sweep. Nothing in the frame is drawn as a ray and there is not a single hard
+// edge anywhere, and yet the light visibly comes from a place. It only works
+// because the fog is lumpy, which is the point mg_fog above is making.
 //
 // The lamp is never drawn. There is no disc, no core, no falloff sprite: the
 // brightest pixel on screen is bright because the fog is dense THERE, so the
@@ -779,13 +826,11 @@ static inline float mg_hold(float2 uv, float reach) {
 // orb. Watch the middle of it drift off round as a wisp crosses. That is the
 // species.
 //
-// The fog domain is compressed 2.2x across, because fog in still air lies in
-// horizontal sheets, and the anisotropy is a second reason the halo never comes
-// out circular.
-//
-//   c0 fog     density and extinction together. Low is a clear night with a
-//              lamp a long way off; high is weather, where the light barely
-//              gets out of its own halo.
+//   c0 fog     density and extinction together, and it moves both the haze
+//              floor and the wisps. Low is a clear night with a lamp a long way
+//              off and only a suggestion of structure; high is weather, where
+//              the light barely gets out of its own halo and the shadows across
+//              it are the loudest thing in the frame.
 //   c1 reach   how far the light carries: the softening radius of the inverse
 //              square. This is also the dial that decides whether the indicator
 //              reads as one presence or as a lit field.
@@ -826,32 +871,32 @@ static inline float mg_hold(float2 uv, float reach) {
     // Its position does not scale with formScale: it is a location, not a form.
     float2 lamp = float2(-0.155, -0.115) * offset;
 
-    // The fog. Sheets, so the domain is compressed across. Two octaves at
-    // f = 5.2 puts the finest cell at 0.095 uv, four points at 46 pt.
+    // The fog's frame. Two octaves at f = 4.6 puts the finest cell at 0.11 uv,
+    // which is eight points across in the gallery's 76 pt cell: a wisp whose
+    // shape you can actually see. Finer than this and the medium turns back into
+    // an even grey, which is the failure this style already had once.
     float2 flow = float2(0.072, -0.026) * t * (0.32 + 1.30 * driftK);
-    float ff = 5.2 / S;
+    float ff = 4.6 / S;
     float fz = t * (0.045 + 0.150 * driftK);
 
-    // The pixel's own density: this is what the eye is actually looking at.
-    float2 q0 = (uv + flow) * float2(ff / 2.2, ff);
-    float d0 = 0.5 + 0.5 * mg_fbm3(float3(q0, fz), 2, 2.03, 0.5);
-    d0 = pow(d0, 1.15) * (0.30 + 1.45 * fogK);
+    // The density HERE, which is the thing the eye is actually looking at, and
+    // the density AT THE LAMP, which is the thickness the light has to get out
+    // of before it can light anything at all.
+    float rho0 = mg_fog(uv, flow, ff, fz, fogK);
+    float rhoL = mg_fog(lamp, flow, ff, fz, fogK);
 
-    // The occlusion between the lamp and here. Four samples, trapezoid-ish, and
-    // the fixed count is the point: the loop bound never depends on the distance
-    // to the lamp, so a pixel in the corner costs exactly what a pixel at the
-    // centre costs.
+    // The occlusion between the lamp and here. Four samples, and the fixed count
+    // is the point: the loop bound never depends on the distance to the lamp, so
+    // a pixel in the corner costs exactly what a pixel at the centre costs.
     float2 ray = lamp - uv;
     float len = length(ray);
     float tau = 0.0;
     for (int i = 1; i <= 4; i++) {
         float s = (float(i) - 0.5) * 0.25;
-        float2 q = (uv + ray * s + flow) * float2(ff / 2.2, ff);
-        float d = 0.5 + 0.5 * mg_fbm3(float3(q, fz), 2, 2.03, 0.5);
-        tau += pow(d, 1.15) * (0.30 + 1.45 * fogK);
+        tau += mg_fog(uv + ray * s, flow, ff, fz, fogK);
     }
     tau *= len * 0.25;
-    float shade = exp(-tau * (2.6 + 7.0 * fogK));
+    float shade = exp(-(2.4 + 5.0 * fogK) * tau);
 
     // THE LAMP'S POWER, and this is the constant the whole style rests on. The
     // softening radius keeps the inverse square finite at the source, and it is
@@ -862,10 +907,23 @@ static inline float mg_hold(float2 uv, float reach) {
     float dist2 = dot(uv - lamp, uv - lamp);
     float lampL = (sig * sig) / (dist2 + sig * sig);
 
-    // What the eye sees. The second term is the multiply-scattered haze that
-    // survives even where the direct path is blocked, without which the
-    // shadows read as holes cut in the picture rather than as shadow.
-    float lit = d0 * lampL * (0.20 + 0.80 * shade) + 0.16 * lampL * lampL * (0.25 + 0.75 * d0);
+    // THE PASSING THICKNESS. When a wisp drifts across the lamp itself, less
+    // light leaves the source at all and the whole picture eases down for a few
+    // seconds. This is the only global dimming anywhere in the pack, and it is
+    // still not a brightness animation: the lamp's power does not move, rhoL
+    // does, and rhoL is a coordinate being read. The coefficient is small on
+    // purpose, about a fifth at the very thickest, because a lantern going dark
+    // is an EVENT and this family does not have events.
+    float escape = exp(-(0.10 + 0.12 * fogK) * rhoL);
+
+    // What the eye sees: the fog here, lit by the lamp, shadowed by whatever fog
+    // stands between, and eased by whatever sits on the lamp. The second term is
+    // the multiply-scattered haze that survives where the direct path is
+    // blocked, and it carries the local density too, because scattered light
+    // still needs something to scatter off. Without it the shadows read as holes
+    // cut in the picture rather than as shadow.
+    float lit = rho0 * lampL * escape * (0.14 + 0.86 * shade) * 1.30
+              + 0.15 * lampL * sqrt(lampL) * (0.25 + 0.75 * rho0);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
@@ -882,43 +940,59 @@ static inline float mg_hold(float2 uv, float reach) {
 
 // MIRAGE. Layered air bending a distant light.
 //
-// An inferior mirage is one specific piece of optics and it is worth building
-// the actual thing rather than a shimmer effect. Air just above hot tarmac is
-// less dense than the air above it, so rays that would have passed into the road
-// bend back up, and below a certain angle the eye receives a SECOND, INVERTED
-// image of whatever is far away. That is why a hot road looks wet: what you are
-// seeing is the sky, folded.
+// THERE IS A SUBJECT, and the first cut of this did not have one. It windowed a
+// field into a band across the whole frame, which meant the picture was a bar of
+// light, the bands were bars of light, and the render came out as a smeared
+// loading indicator. A mirage is not made of bands. A mirage is a LIGHT, and
+// bands of air that bend its image.
 //
-// So the geometry is a fold, and the fold is the species:
+// So there is now a small, compact, off-centre source sitting just above the
+// horizon, and everything else in this style is optics performed on its image.
+// The bands are never drawn. You see them only in what they do to the light,
+// which is the honest way and also the only way this reads as refraction.
 //
-//     above the inversion   the distant field is sampled straight
-//     below it              it is sampled at -d * m, mirrored and compressed
+// THE OPTICS. A mirage is a one-dimensional remapping of the vertical angle: the
+// row of screen at height d shows whatever the far field holds at height ys(d),
+// and everything interesting follows from the shape of that one function.
 //
-// blended across a narrow band so the map is C1 and no crease is ever an edge.
-// Where the two branches meet, the far field is sampled twice at nearly the same
-// height and the light there doubles: that bright line along the horizon is the
-// mirage's own caustic, and it comes out of the mapping for free rather than
-// being drawn.
+//     ys(d) = fold(d) + A * band(x, d, t) * grip(d)
 //
-// The shimmer is a vertical DISPLACEMENT of the sampling height, from a field
-// whose domain is stretched wide and squeezed tall so it comes out in layers,
-// travelling sideways with time. That is what heat does: it stratifies, and the
-// strata slide along the road. Both branches take the displacement, but at
-// different strengths, so the mirrored image tears differently from the real one
-// and the pair never reads as a literal reflection.
+//   the fold      above the inversion ys runs straight; below it the map turns
+//                 over to -d * m, so the eye receives the SECOND, INVERTED image
+//                 that makes a hot road look wet. m > 1 squashes that copy,
+//                 which is what distance does to it. The two branches are
+//                 blended over a narrow band so the map stays C1 and the seam is
+//                 never an edge.
+//   the bands     the layered air, stretched wide and squeezed tall, sliding
+//                 sideways with time. Where its slope makes ys non-monotone the
+//                 image FOLDS again: a slice of the light appears twice, once
+//                 the right way up and once inverted, which is the stacking and
+//                 tearing a distant car does over summer tarmac.
+//   the grip      refraction is a hot-layer phenomenon, so it is zero above the
+//                 horizon and full below. The top of the light therefore stays
+//                 clean while its bottom stretches and breaks up, which is what
+//                 a real one looks like and is most of the composition.
 //
-// The distant subject is a field, not a bar of light: a horizontally stretched
-// fBm windowed by a Gaussian in the sampling height, so the far glare has bright
-// stretches and dim ones the way a real horizon does.
+// A IS LOAD-BEARING AND IT WAS THE BUG. The image only folds where |A * dband/dd|
+// passes 1, which with the band's vertical frequency near 8 needs A above about
+// 0.125. The first cut set it at 0.038, well under the threshold, so the map
+// stayed monotone, nothing ever doubled, and no refraction structure was visible
+// at any size. It sits at 0.155 now, which puts the strongest strata just past
+// folding at the default and every stratum past it with `bend` up. If this ever
+// reads flat again, that number is the one to check first.
 //
-//   c0 bands     how finely the air is stratified.
-//   c1 bend      displacement amplitude. Zero is a still hot day, one is the
-//                road boiling.
-//   c2 distance  how far away the subject is. Far means a thin compressed band
-//                and a hard-squashed mirror; near means a tall open one. It is
-//                the dial that changes the composition most.
-//   c3 haze      the veiling glare that fills the space between the layers.
-//                Without some of it the frame reads as two lights in a void.
+//   c0 bands     how finely the air is stratified: two thick layers across the
+//                light, or four thin ones.
+//   c1 bend      the displacement amplitude, which is the fold threshold above.
+//                Low is a still hot day where the light only wavers; high is the
+//                road boiling and the image coming apart in slices.
+//   c2 distance  how far away the light is. Far is small and tight with a
+//                hard-squashed mirror sitting close under it; near is broad and
+//                open with the two images well separated. The dial that changes
+//                the composition most.
+//   c3 haze      the veiling glare lying in the hot layer, carrying the bands'
+//                own density so the strata stay faintly legible away from the
+//                light. Without some of it the frame reads as a lamp in a void.
 [[ stitchable ]] half4 mg_mirage(
     float2 position,
     half4  currentColor,
@@ -950,55 +1024,70 @@ static inline float mg_hold(float2 uv, float reach) {
 
     // The horizon sits a little above centre so the road has room. It is fixed
     // in the circle; only the field's scale answers to formScale.
-    const float hor = -0.045;
+    const float hor = -0.055;
     float x = uv.x / S;
     float d = (uv.y - hor) / S;          // positive below the horizon, on the road
 
-    // THE LAYERS. Domain stretched 4x across and squeezed down, travelling
-    // sideways with time. Two octaves rather than three, because a third puts
-    // the finest band under three points at 46 pt and horizontal bands at that
-    // pitch are the first thing in this pack that would alias.
-    float3 bp = float3((x + t * 0.105) * 0.80, d * (2.8 + 5.0 * bands), t * 0.19);
+    // THE LAYERS. Stretched wide and squeezed tall, travelling sideways with
+    // time. The vertical frequency is what decides how many strata cross the
+    // light: at 8.0 the finest octave's cell is 0.062 uv, which puts two to four
+    // of them over the source's own height and sits right on this pack's scale
+    // floor. Two octaves and no more, because horizontal strata are the first
+    // thing in the pack that would alias. The 1.6 across is deliberately enough
+    // to vary within the light's width, so a stratum SHEARS the image instead of
+    // sliding all of it together.
+    float3 bp = float3((x + t * 0.085) * 1.6, d * (5.5 + 5.0 * bands), t * 0.17);
     float band = mg_fbm3(bp, 2, 2.03, 0.5);
 
-    // THE FOLD. m > 1 squashes the mirrored copy, which is what distance does to
-    // it. The blend band is narrow enough to read as a seam and wide enough that
-    // the slope never breaks.
-    float m = 1.15 + 0.90 * dist;
-    float fold = smoothstep(-0.035, 0.035, d);
-    float yy = mix(d, -d * m, fold);
+    // THE FOLD, and then THE BEND, which together are the whole mapping.
+    float m = 1.20 + 0.90 * dist;
+    float mirror = smoothstep(-0.025, 0.040, d);
+    float yy = mix(d, -d * m, mirror);
+    float grip = smoothstep(-0.055, 0.115, d);
+    float ys = yy + band * (0.075 + 0.160 * bend) * grip;
 
-    // The bending is strongest in the hot layer and dies above the horizon, and
-    // the mirrored branch gets more of it because its rays spent longer near the
-    // road. That asymmetry is what stops the pair reading as a mirror.
-    float grip = smoothstep(-0.070, 0.150, d);
-    float ys = yy + band * (0.012 + 0.052 * bend) * grip * (1.0 + 0.55 * fold);
+    // THE LIGHT. Small, compact and off to the left, because a source on the
+    // axis reads as a target and this wants to read as something a long way down
+    // a road. Its position is in the circle's own frame and does not scale, the
+    // way the lantern's lamp does not: it is a place, not a form.
+    const float sx = -0.115;
+    const float sy = -0.062;
+    float wx = 0.090 + 0.050 * (1.0 - dist);
+    float wy = 0.070 + 0.050 * (1.0 - dist);
+    float gx = (x - sx) / wx;
+    float gy = (ys - sy) / wy;
+    float core = exp(-(gx * gx + gy * gy));
+    float halo = exp(-0.30 * (gx * gx + gy * gy));
 
-    // THE SUBJECT. Stretched 3x across so it reads as distance rather than as
-    // texture, and crawling almost imperceptibly in its third axis so the far
-    // light is never a frozen backdrop.
-    float3 dp = float3(x * 1.35, ys * (2.2 + 2.6 * dist) + 5.7, t * 0.045);
-    float far = 0.5 + 0.5 * mg_fbm3(dp, 3, 2.03, 0.5);
-
-    // The glare's window. Gaussian, so there is no edge on it anywhere.
-    float sig = 0.052 + 0.078 * (1.0 - dist);
-    float g = ys / sig;
-    float win = exp(-g * g);
-    float veil = exp(-0.25 * g * g);
+    // The light is not a smooth blob. Two octaves of slow field give it internal
+    // structure, so at 300 pt there is something to look at inside it and the
+    // slices the bands cut off it are not all identical.
+    float3 sp = float3(x * 3.2, ys * 3.2 + 5.7, t * 0.045);
+    float grain = 0.5 + 0.5 * mg_fbm3(sp, 2, 2.03, 0.5);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float lit = win * (0.26 + 0.62 * far) + veil * haze * 0.26 * (0.55 + 0.45 * far);
-    // The layers of air do not only bend the light, they carry different amounts
-    // of it. A light touch: this is the difference between layered air and a
-    // striped filter over the frame.
-    lit *= 0.80 + 0.20 * (0.5 + 0.5 * band);
+    float img = core * (0.42 + 0.78 * grain);
+    // The hot layer's veiling glare: the one place the strata are visible in
+    // their own right rather than through what they do to the light, which is
+    // why it carries the band field. It is gated in BOTH axes, and the
+    // horizontal gate is the important one: glare belongs around its source, and
+    // an ungated version of this is a faint bar across the whole frame, which is
+    // the exact shape this style was rebuilt to stop being.
+    float veil = exp(-(ys * ys) / (0.145 * 0.145)) * exp(-0.18 * gx * gx)
+               * haze * 0.24 * (0.45 + 0.55 * (0.5 + 0.5 * band));
+    float lit = 0.030 + 0.95 * img
+              + 0.24 * halo * (0.40 + 0.60 * (0.5 + 0.5 * band))
+              + veil;
 
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
-    float3 em = mg_shade(pal, 0.80) * (0.40 * pow(clamp(lit, 0.0, 1.0), 2.6)) * max(glow, 0.0);
+    float3 em = mg_shade(pal, 0.80) * (0.45 * pow(clamp(img, 0.0, 1.0), 2.2)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    // Pulled in tighter than the rest of the pack. The old bar ran the full
+    // width and its ends were still lit where the clip landed; a compact source
+    // does not need the room, so it does not get it.
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.52));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }

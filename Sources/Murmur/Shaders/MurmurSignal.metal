@@ -13,8 +13,9 @@
 //                   one coherent line. Coherent is rest; the hiss never leaves.
 //   ms_current      impulses travelling a soft conducting medium, felt as light
 //                   moving through it. No wires, no nodes, no junction dots.
-//   ms_veil         three translucent sheets sliding at different rates. What is
-//                   behind stays almost legible: parallax as depth of thought.
+//   ms_veil         three translucent scrims sliding at different rates over a
+//                   brighter thing behind them, which stays almost legible.
+//                   Parallax as depth of thought.
 //
 // WHAT THIS FAMILY IS NOT. The inspiration piece these indicators replace is a
 // fibonacci dot sphere, and the single easiest way to fail here is to draw
@@ -27,9 +28,11 @@
 // THE VERBS ARE FLOW AND SETTLE. Nothing here pulses its brightness to say it is
 // alive. Time enters where the coordinates are READ -- an advected domain, a
 // travelling phase, a rotating frame, a narrowing passband -- so what the eye
-// sees is material moving, not a light being turned up and down. Two species
-// have a slow structural cycle (the loom's tautness, the tuning's lock) and in
-// both the cycle IS the concept, not a lamp on a timer.
+// sees is material moving, not a light being turned up and down. One species has
+// a slow structural cycle -- the loom's tautness, which resolves cloth and eases
+// it off again -- and that cycle moves the WEAVE, not the luminance: its mean
+// brightness barely changes across the whole beat, which is the difference
+// between a loom and a blinking light.
 //
 // THE CIRCLE. These mount at 20 to 300 points inside a Circle clip. The view
 // clips; the shader must never lean on that. Every function brings its light all
@@ -567,20 +570,40 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float taut = clamp(tension * (0.42 + 0.58 * beat), 0.0, 1.0);
     float wander = mix(1.15, 0.20, taut);
 
+    // THE DRAPE, and it is the first thing that happens because everything else
+    // is read against it. One slow two-dimensional warp displaces the domain
+    // BOTH families are read in, so the whole cloth folds together the way a
+    // bolt lying on a table does. Warping the families separately would have
+    // been cheaper and wrong: two independently wandering thread sets are not a
+    // fold, they are a mistake in the weaving.
+    float3 dq = float3(q * 0.85, t * 0.028);
+    float drapeA = ms_fbm3(dq, 2, 2.00, 0.50);
+    float drapeB = ms_fbm3(dq + 21.7, 2, 2.00, 0.50);
+    float2 qd = q + float2(drapeA, drapeB) * 0.30;
+
     // Each family wanders along its OWN threads, so threads bend over their
     // length instead of the whole sheet sliding.
-    float w1 = ms_fbm1(dot(q, d2) * 1.9 + t * 0.055, 3, 4.0);
-    float w2 = ms_fbm1(dot(q, d1) * 1.9 - t * 0.041, 3, 61.0);
+    float w1 = ms_fbm1(dot(qd, d2) * 1.9 + t * 0.055, 3, 4.0);
+    float w2 = ms_fbm1(dot(qd, d1) * 1.9 - t * 0.041, 3, 61.0);
+
+    // THE SPACING BREATHES, and this is what stops the weave reading as a
+    // printed grid. A cloth beaten by hand is not evenly spaced: the reed packs
+    // some picks tighter than others across the width of the bolt. The local
+    // wavenumber is K plus the GRADIENT of whatever else is in the phase, so a
+    // very slow field with a large amplitude is not a wobble -- it is a slow
+    // change of spacing, which is exactly the irregularity a hand loom leaves.
+    // Nine radians over the frame moves the pitch by about a third at its
+    // extremes, which is visible as cloth and never as an error.
+    float br1 = ms_fbm1(dot(qd, d2) * 0.50 - t * 0.023, 2, 91.0);
+    float br2 = ms_fbm1(dot(qd, d1) * 0.50 + t * 0.019, 2, 137.0);
 
     // Time enters as a slow crawl of the phases, which is the cloth being fed
     // through the loom, not a brightness on a timer.
     // The wander is worth several radians, not a fraction of one: at K around
     // thirty the phase runs to thirty radians across the frame, so a displacement
-    // under a radian is invisible and the weave comes out as machine-ruled. Seven
-    // is where a thread visibly bends over its length and still never crosses its
-    // neighbour.
-    float ph1 = dot(q, d1) * K + w1 * wander * 5.5 - t * 0.34;
-    float ph2 = dot(q, d2) * K + w2 * wander * 5.5 + t * 0.27;
+    // under a radian is invisible and the weave comes out as machine-ruled.
+    float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 + br1 * 7.0 - t * 0.34;
+    float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.27;
 
     float warp = mix(0.5, 0.5 + 0.5 * sin(ph1), aa);
     float weft = mix(0.5, 0.5 + 0.5 * sin(ph2), aa);
@@ -597,11 +620,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // beneath the other and takes a little light down with it, so a crossing
     // DIPS instead of piling up. The sign of that is most of the difference
     // between cloth and a grid.
-    float cloth = 0.32 + 0.52 * warp + 0.20 * weft - taut * 0.26 * warp * weft;
+    float cloth = 0.32 + 0.50 * warp + 0.26 * weft - taut * 0.26 * warp * weft;
 
-    // The bolt is not uniform: a slow broad field thickens and thins it, so the
-    // cloth has weight in some places and is nearly sheer in others.
-    float bolt = 0.62 + 0.55 * (0.5 + ms_fbm3(float3(q * 1.05, t * 0.036), 2, 2.00, 0.50));
+    // The bolt is not uniform: it has weight in some places and is nearly sheer
+    // in others. This is the drape field read a second time rather than a third
+    // noise tap, which is also the truer statement -- where the cloth folds is
+    // where it doubles, and where it doubles is where it is heaviest.
+    float bolt = 0.62 + 0.55 * (0.5 + drapeA);
 
     // THE SHEEN. cos(phase) is the slope; the fixed vector is the light.
     float slope = 0.78 * cos(ph1) * aa - 0.46 * cos(ph2) * aa;
@@ -712,35 +737,57 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
 // TUNING. Static finding the station.
 //
-// This is the pack's arc, and the arc is a SPECTRUM narrowing. Four octaves are
-// summed with gaussian weights over octave index -- a passband. At birth the
-// band is wide, all four octaves are present at once, and the field is
-// broadband: hiss, isotropic, no direction and no scale of its own. As the
-// settle law runs, the band narrows onto one octave and the domain is squeezed
-// along the station's axis until the field varies almost only ACROSS it. Wide
-// band plus isotropic domain is static. Narrow band plus anisotropic domain is a
-// line. Nothing is faded in or out; what changes is which spatial frequencies
-// the field is allowed to contain, which is exactly what tuning a receiver does.
+// THE FIRST CUT OF THIS SHADER WAS MUD, and the reason is worth writing down
+// because it is a general trap. It built the picture as ONE term: a broadband
+// field inside an envelope that narrowed. But a noise field inside an envelope
+// is still a noise field -- its value wanders over the whole range everywhere,
+// including inside the band, so the band had no edge, no continuity along its
+// length, and no contrast against a surround that never fully gave up its
+// energy. The result was an out-of-focus rust smudge with faint banding in it,
+// which is what "static and a station added together" looks like when they are
+// the same term.
+//
+// So the station and the noise are now TWO SEPARATE TERMS, and the arc is the
+// handover between them.
+//
+//   THE STATION  a soft luminous ridge along a gently wandering line. Its
+//                half-width is the arc: 0.46 at birth, which is wider than the
+//                whole disc and therefore invisible AS a line, down to about
+//                0.05 at rest, which is unmistakably one. Its brightness along
+//                its length is modulated by the field, so it is alive and
+//                textured, but the modulation never takes it below 0.58 -- a
+//                station that breaks into pieces is not a station.
+//   THE SPREAD   broadband energy still distributed over the whole frame. The
+//                arc drains it. This is the static, and at birth it is the
+//                entire picture.
+//   THE FLOOR    hiss that never leaves, because a receiver locked onto a
+//                station still hisses underneath it and an indicator that
+//                reaches silence has stopped thinking.
+//
+// The spectrum still narrows underneath all three: four octaves under a gaussian
+// passband, wide at birth and one octave wide at rest, with the domain squeezed
+// along the station's axis so the surviving octave becomes a striation running
+// ALONG the line rather than a texture across it.
 //
 // THE ARC IS A LAW, NOT AN ANIMATION. ms_settle_law states the scramble SPEED
 // and hands back its exact integral, so the domain's position at any t is the
 // position it would have reached, and the shader is deterministic under a
-// screenshot rig or a scrubbed slider. `epoch` restarts it. The still-moving
-// fraction e drives the coherence directly: coherence is 1 - e, so the picture
-// and the motion arrive together instead of being two timelines that have to be
-// kept in step.
+// screenshot rig or a scrubbed slider. `epoch` restarts it.
 //
-// SETTLED IS NOT STOPPED, and this species says so three ways. The law's floor
-// keeps the field boiling at a twentieth of its birth rate forever. The station
-// line is not straight -- it is displaced by a one-dimensional fBm that keeps
-// wandering, so the band breathes along its length like a needle holding a
-// signal. And the HISS never goes: a receiver locked onto a station still hisses
-// underneath it, and a thinking indicator that reaches perfect silence has
-// stopped thinking.
+// WHAT `lock` NOW MEANS, and this changed. It used to cap the arc itself, which
+// meant that at the default of 0.5 the station never actually arrived -- half a
+// lock is a smudge, and "coherent is rest" was not being honoured at the setting
+// most people would see. The arc now always completes; `lock` sets how NARROW
+// and how PURE the settled station is: a hair-fine line over almost nothing at
+// 1, a broader warm band with more of the broadband still around it at 0. Both
+// ends are a station. Neither end is mud.
 //
-// LOCK is how narrow the band is allowed to get. At zero the station never quite
-// arrives and the field stays broad, which is a legitimate and rather beautiful
-// setting; at one it locks hard.
+// SETTLED IS NOT STOPPED. The law's floor keeps the field boiling at a twentieth
+// of its birth rate forever; the line itself is displaced by a one-dimensional
+// fBm that never stops wandering, so a held station breathes like a needle
+// holding a signal; and the ends of the line taper away well before the rim, so
+// what the circle contains is a soft line of light and never a rule drawn
+// across it.
 [[ stitchable ]] half4 ms_tuning(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -752,7 +799,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float t = time * max(speed, 0.0);
 
     float band  = clamp(c0, 0.0, 1.0);   // which scale the station sits on
-    float lock  = clamp(c1, 0.0, 1.0);   // how completely it narrows
+    float lock  = clamp(c1, 0.0, 1.0);   // how narrow and how pure, once settled
     float hiss  = clamp(c2, 0.0, 1.0);   // the floor that never leaves
     float drift = clamp(c3, 0.0, 1.0);   // the settled needle's wander
 
@@ -762,26 +809,44 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // real seconds, so a slower field still settles when it says it will.
     float tau = max(time - epoch, 0.0);
     float3 law = ms_settle_law(tau, 6.0);
-    float coh = clamp((1.0 - law.z) * (0.45 + 0.55 * lock), 0.0, 1.0);
+    float arc = clamp(1.0 - law.z, 0.0, 1.0);   // 0 at birth, 1 at rest
     float scroll = law.y * max(speed, 0.0);
 
     // Six degrees off level. A station is a line, but a line at exactly zero
     // degrees inside a circle reads as a rule someone drew in the UI.
-    float2 pq = ms_rot(uv, 0.105) / S;
+    // The station's GEOMETRY is measured in uv and not in the form-scale domain:
+    // a line is a line at any zoom, and only its texture and its wavelength
+    // belong to the form scale.
+    float2 ruv = ms_rot(uv, 0.105);
+    float2 pq = ruv / S;
 
-    // THE NEEDLE. The band's centre line is displaced along its length by a
-    // one-dimensional fBm that never stops moving, so a locked station still
-    // breathes. drift sets how far.
-    float needle = ms_fbm1(pq.x * 1.35 + t * 0.085, 3, 17.0) * (0.020 + 0.055 * drift);
-    float across = pq.y - needle;
+    // THE NEEDLE. The line is displaced along its length by a one-dimensional
+    // fBm that never stops moving, so a locked station still breathes. `drift`
+    // sets how far. This is also why the line can never read as a UI rule: a
+    // rule is straight and this is not, at any setting.
+    float needle = ms_fbm1(ruv.x * 3.10 + t * 0.085, 3, 17.0) * (0.022 + 0.062 * drift);
+    float across = ruv.y - needle;
 
-    // THE PASSBAND. Wide at birth, one octave wide when locked.
+    // THE HALF-WIDTH, which is the whole arc in one number. At birth it is wider
+    // than the disc, so the "band" is a flat wash and the picture is whatever
+    // the noise is doing -- static. At rest it is a line. `lock` chooses how
+    // fine a line.
+    float sigma = mix(0.46, mix(0.115, 0.042, lock), arc);
+    float prof = exp(-(across * across) / (sigma * sigma));
+
+    // The ends taper well before the rim. Without this the settled state is a
+    // chord across a circle, which is a rule someone drew, and the brief's one
+    // absolute for this species is that it must never become that.
+    float along = 1.0 - smoothstep(0.26, 0.46, abs(ruv.x));
+    prof *= along;
+
+    // THE PASSBAND. Wide at birth, one octave wide when settled.
     float centre = 0.20 + 1.70 * band;
-    float width = mix(2.30, 0.55, coh);
+    float width = mix(2.30, 0.52, arc);
     // The squeeze along the station's axis: at birth the domain is isotropic and
-    // the field has no direction; locked, x barely moves it and every octave is
-    // a striation running along the line.
-    float xs = mix(1.0, 0.09, coh);
+    // the field has no direction; settled, x barely moves it and the surviving
+    // octave is a striation running ALONG the line instead of across it.
+    float xs = mix(1.0, 0.08, arc);
     float f0 = mix(2.2, 5.2, band);
 
     // The passband, octave by octave, each one gated on whether this frame can
@@ -794,36 +859,37 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         float d = (float(i) - centre) / width;
         float w = exp(-d * d) * ms_aa(6.2831853 * f0 * oct / S, size, pixelScale);
         acc += w * ms_noise3(float3(pq.x * xs * f0 * oct,
-                                    across * f0 * oct,
+                                    (across / S) * f0 * oct,
                                     scroll * (0.42 + 0.30 * float(i)) + float(i) * 19.0));
         wsum += w;
     }
     float v = acc / max(wsum, 1e-4);
+    float v01 = clamp(0.5 + 1.30 * v, 0.0, 1.0);
 
-    // THE ENVELOPE. Broadband energy fills the frame; a station does not. As
-    // coherence rises the energy collects into a band 0.17 wide about the line.
-    float ax = across / 0.19;
-    // Not a mix toward the band but a HANDOVER to it: the broadband term is
-    // multiplied down by (1 - coh) while the band's own term is multiplied up,
-    // so energy that was spread across the frame ends up in one place instead of
-    // the frame keeping a share of it. Mixing left a third of the static behind
-    // at full lock and the picture read as an ember rather than a station.
-    float env = (1.0 - coh) * 0.55 + coh * exp(-ax * ax);
-
-    // THE HISS. A fine field, gated on the same resolution test, so it stays a
-    // noise FLOOR at every size: audible under the station, never a grain of
-    // sand on the glass and never a mote.
+    // THE THREE TERMS.
+    //
+    // The station's texture floors at 0.58 rather than reaching zero: the field
+    // modulates the line's brightness along its length so it is alive, but a
+    // line that the noise is allowed to cut into pieces stops being one thing,
+    // and one thing is what a 76 pt indicator has room to say.
+    float station = prof * (0.58 + 0.42 * v01);
+    // What is still spread over the whole frame. At birth this is the picture.
+    float spread = mix(1.0, mix(0.30, 0.12, lock), arc) * 0.42 * v01;
+    // The floor. Gated on the same resolution test so it stays a noise FLOOR at
+    // every size: audible under the station, never a grain of sand on the glass.
     float hz = ms_noise3(float3(pq * 8.5, scroll * 1.7 + 41.0));
-    float floorHiss = hiss * (0.055 + 0.075 * (0.5 + hz))
-                    * mix(1.0, 0.62, coh) * ms_aa(6.2831853 * 8.5 / S, size, pixelScale);
+    float floorHiss = hiss * mix(0.42, 0.27, arc) * (0.12 + 0.88 * (0.5 + hz))
+                    * ms_aa(6.2831853 * 8.5 / S, size, pixelScale);
 
-    // The band brightens as it locks -- energy that was spread over the whole
-    // frame is now in one place, which is what a receiver actually does with it.
-    float e = env * (0.16 + 0.84 * clamp(0.5 + 1.25 * v, 0.0, 1.0))
-                  * (0.55 + 0.45 * coh) + floorHiss;
+    // The station is also allowed to get brighter as it arrives, because a
+    // receiver that has found a signal is putting the energy it was spreading
+    // over the whole band into one place. Between the narrowing and this, the
+    // settled line runs about ten times the luminance of its surround, which is
+    // what lifts it out of the mud the first cut lived in.
+    float e = station * mix(0.42, 0.98, arc) + spread + floorHiss;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.55);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.50);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);
@@ -929,30 +995,43 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
 // VEIL. Layers of translucency sliding.
 //
-// Three sheets, front to back, composited the way translucency actually
-// composites: each contributes its own light times what is left of the light
-// path in front of it, and takes its own bite out of the transmittance on the
-// way. T *= (1 - alpha) is not a stylistic choice, it is the reason the picture
-// has depth -- the back sheet is dimmed by exactly the sheets in front of it,
-// per pixel, which is the thing a stack of blended layers cannot fake.
+// THE FIRST CUT WAS MUD, for a reason that is the exact mirror of the tuning's.
+// It stacked three noise fields that each covered the WHOLE disc, and three
+// overlapping full-coverage fields average into one mottled field: there was
+// nothing to be in front of anything, because nothing had an edge. Depth needs a
+// silhouette. If every sheet is everywhere, the eye has no boundary to read and
+// the parallax it is being shown has nothing to attach to.
 //
-// THE PARALLAX. Depth is not drawn here, it is INFERRED, and the eye does it for
-// free from two cues. Further sheets slide slower, and further sheets are
-// sampled at a higher spatial frequency because more of them fits in the same
-// angle. Nothing is scaled and nothing is blurred; the cues are enough.
+// So the sheets now have SHAPE. Each is a broad low-frequency field pushed
+// through a soft threshold, which gives it one or two big lobes across the frame
+// with a soft but definite boundary and genuine gaps between them. Where two
+// scrims overlap the picture is darker; where all three do, darker again; where
+// a gap opens in all of them, the thing behind shows through. Those crossings
+// are the layer boundaries, and they are legible in a single still because they
+// are real occlusion and not a blend mode.
 //
-// WHAT IS BEHIND is meant to be ALMOST legible, which is a narrow target: fully
-// legible and the veils are pointless, illegible and it is fog. So the rearmost
-// sheet is the one with contrast, and the two in front are broad and only partly
-// opaque -- about a third each, which leaves a little under half the back sheet
-// arriving. `legibility` moves both ends of that: it raises the back sheet's
-// contrast and thins the front two, so the answer behind the curtain comes
-// nearer without ever quite arriving.
+// WHAT IS BEHIND is now a fourth thing and the brightest thing: a finer, higher
+// contrast field at the very back with no scrim of its own. It is what the veils
+// are veiling. It is never fully revealed, because even a pixel with all three
+// scrims open still only sees it through the transmittance the gaps allow and
+// through its own threshold, and it is never hidden either, which is what
+// "almost legible" means. `legibility` works both ends of that: it sharpens what
+// is behind and thins the scrims in front of it.
+//
+// THE COMPOSITE is the one physical statement in the species: each scrim adds
+// its own light times what is left of the light path, then takes its bite out of
+// the path with T *= (1 - alpha), and the thing behind gets whatever T survives.
+// That is why the back is dimmed by exactly the scrims in front of it, per
+// pixel, which is the thing a stack of blend modes cannot fake.
+//
+// THE PARALLAX is inferred from two cues and nothing is scaled or blurred to get
+// it: nearer scrims slide faster and are coarser on screen, further ones slide
+// slower and are finer, because more of a distant thing fits in the same angle.
 //
 // `layers` is a separation, not a count. The loop is fixed at three, because a
 // variable loop is not allowed and because three is what reads: at zero the
-// three sheets converge onto nearly the same scale and rate and the picture is
-// one soft veil, and at one they pull apart into three plainly different depths.
+// scrims converge onto nearly the same scale and rate and the picture is one
+// veil over the thing behind, and at one they pull into three plain depths.
 [[ stitchable ]] half4 ms_veil(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -969,48 +1048,70 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float drift      = clamp(c3, 0.0, 1.0);   // the sliding itself
 
     float2 q = uv / S;
-    float sep = 0.35 + 0.65 * layers;
-    float base = 0.055 + 0.135 * drift;
+    float sep = 0.30 + 0.70 * layers;
+    float base = 0.070 + 0.150 * drift;
 
     float acc = 0.0;     // light gathered, already attenuated by what is in front
     float T = 1.0;       // what is left of the light path
     for (int i = 0; i < 3; i++) {
         float fi = float(i);
+        float far = fi * 0.5;                       // 0, 0.5, 1 front to back
 
-        // Deeper sheets: finer on screen, slower across it, and each on its own
-        // heading, so this is parallax and not one translation of three copies.
-        float f = 1.55 * (1.0 + 1.35 * fi * sep);
-        float rate = base / (1.0 + 1.70 * fi * parallax);
-        float head = 0.30 - 0.34 * fi;
+        // Nearer scrims are coarser on screen and slide faster; further ones are
+        // finer and slower, because more of a distant thing fits in the same
+        // angle. Each has its own heading too, so this is parallax and not one
+        // translation of three copies.
+        float f = 1.12 * (1.0 + 1.15 * fi * sep);
+        float rate = base / (1.0 + 2.10 * fi * parallax);
+        float head = 0.34 - 0.40 * fi;
         float2 slide = float2(cos(head), sin(head)) * (rate * t);
 
-        float n = ms_fbm3(float3(q * f + slide, t * 0.022 + fi * 7.3), 2, 2.03, 0.50);
-        float d = clamp(0.5 + 1.25 * n, 0.0, 1.0);
+        float n = ms_fbm3(float3(q * f + slide, t * 0.020 + fi * 7.3), 2, 2.03, 0.50);
+        float d = clamp(0.5 + 1.35 * n, 0.0, 1.0);
 
-        // The back sheet carries the contrast; the two in front are films, and
-        // legibility is only allowed to sharpen the one behind.
-        float far = fi * 0.5;                       // 0, 0.5, 1 front to back
-        float contrast = mix(0.55, 1.45 + 0.80 * legibility, far);
-        float lum = clamp((d - 0.5) * contrast + 0.5, 0.0, 1.0);
+        // THE SILHOUETTE, and this is the line the first cut did not have. A
+        // soft threshold rather than a coverage floor: the scrim genuinely is
+        // NOT THERE in its gaps, so there is somewhere for the thing behind to
+        // be seen, and its boundary is soft enough to have no edge and definite
+        // enough for the eye to find. That boundary is what the parallax
+        // attaches to; without it three overlapping fields just average.
+        //
+        // The transition window is wide, and gets wider with depth. Narrow
+        // windows make the gaps small and hard, and a small hard gap with the
+        // bright thing behind showing through it is a SPECK -- the one shape
+        // this whole family is forbidden. Wide windows give large soft openings,
+        // which is also what a real scrim has, and the extra width on the deeper
+        // ones is what makes them read as thinner gauze.
+        float lo = 0.38 - 0.06 * far;
+        float body = smoothstep(lo, lo + 0.34 + 0.06 * far, d);
 
-        // A veil is mostly present even where it is thin, so the coverage floor
-        // is a quarter rather than zero: at zero the front sheets stop occluding
-        // in their thin places and the stack loses the depth it was built for.
-        // Thinning the two in front is how the thing behind gets nearer, which
-        // is legibility's other half.
-        float opacity = mix(0.36 * (1.0 - 0.38 * legibility), 0.46, far * far);
-        float alpha = mix(0.15, 1.0, smoothstep(0.26, 0.80, d)) * opacity;
+        // Each scrim has its own brightness plane, dimmer with depth: they are
+        // veils catching a little light, not light sources.
+        float level = mix(0.22, 0.11, far);
+        float lum = level * (0.55 + 0.45 * d);
+
+        // Thinning the scrims is how the thing behind gets nearer, which is
+        // legibility's other half.
+        float opacity = mix(0.72, 0.46, far) * (1.0 - 0.34 * legibility);
+        float alpha = body * opacity;
 
         acc += lum * alpha * T;
         T *= (1.0 - alpha);
     }
 
-    // Normalised against what a single fully present sheet would give, so the
-    // stack does not read dimmer than one veil merely because it is three.
+    // WHAT IS BEHIND. Finer, higher in contrast, and much brighter than any
+    // scrim, with no veil of its own -- it is the thing being veiled. It arrives
+    // through whatever transmittance the gaps in the three scrims have left,
+    // which is what makes it almost legible rather than either hidden or plain.
+    float2 backSlide = float2(0.021, -0.013) * t;
+    float bn = ms_fbm3(float3(q * 3.20 + backSlide, t * 0.026 + 51.0), 2, 2.03, 0.50);
+    float behind = smoothstep(0.26, 0.92, clamp(0.5 + 1.60 * bn, 0.0, 1.0));
+    acc += behind * (0.70 + 0.46 * legibility) * T;
+
     float e = acc * 1.35;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.70, 0.42);
+    float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.55);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.62), position, pixelScale);
