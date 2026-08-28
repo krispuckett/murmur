@@ -16,6 +16,10 @@
 //   ms_veil         three translucent scrims sliding at different rates over a
 //                   brighter thing behind them, which stays almost legible.
 //                   Parallax as depth of thought.
+//   ms_echo         an irregular mass answered by its own past: ghosts displaced
+//                   along a heading, each later, softer and dimmer. No rings.
+//   ms_glyph        almost-writing. Strokes struck by a wandering hand that
+//                   begin dissolving before they finish forming. No letters.
 //
 // WHAT THIS FAMILY IS NOT. The inspiration piece these indicators replace is a
 // fibonacci dot sphere, and the single easiest way to fail here is to draw
@@ -33,6 +37,19 @@
 // it off again -- and that cycle moves the WEAVE, not the luminance: its mean
 // brightness barely changes across the whole beat, which is the difference
 // between a loom and a blinking light.
+//
+// THE TEMPO, which was reset once on device. These are THINKING indicators, and
+// the first tune held them at the tempo of an ambient card: correct for a
+// surface a person lives beside, one notch too still for a thing that is meant
+// to say ATTENTION. So every internal rate in this file was lifted, and the
+// rule for how much is the one worth carrying: a species' CARRIER -- the motion
+// that is the idea, the flock's travel, the cloth crossing the loom, the
+// attention's traverse, the impulse's run -- went up about twice, while its
+// DETAIL -- the grain, the drape, the boil of the noise underneath -- went up
+// about half again. Lifting both equally makes a field busier rather than
+// faster; lifting the carrier harder makes it move without adding anything to
+// look at, which is the difference between active and stormy. `speed` still
+// means "the designed tempo" at 1.0. What changed is what that tempo is.
 //
 // THE CIRCLE. These mount at 20 to 300 points inside a Circle clip. The view
 // clips; the shader must never lean on that. Every function brings its light all
@@ -435,17 +452,28 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float sky      = clamp(c3, 0.0, 1.0);   // the dusk behind it
 
     // THE BANK.
-    float bank = turn * (0.62 * sin(t * 0.107) + 0.31 * sin(t * 0.181 + 1.7));
+    float bank = turn * (0.62 * sin(t * 0.214) + 0.31 * sin(t * 0.362 + 1.7));
 
     // THE ROLL. 0.26 is roughly where the mass's own body ends, so the inside
     // leads the outside, which is the way round a real roll goes.
     float r = length(uv);
     float2 q = ms_rot(uv, bank * (1.0 + 1.35 * turn * (0.26 - r))) / S;
 
+    // THE TRAVEL. A flock does not hover, and at the family's lifted tempo the
+    // fold has to be seen CROSSING the mass rather than boiling in place -- a
+    // faster boil is churn, and churn is the stormy failure. So the domain the
+    // sheet is read in is advected. This costs a vector add and it is the whole
+    // difference: the body envelope stays where it is, because it is measured in
+    // uv and not here, so the MATERIAL streams through a mass that keeps its own
+    // outline, which is exactly what a murmuration does. The heading leans with
+    // the bank, so the flock travels the way it is turning.
+    float head = 0.62 + bank * 0.85;
+    q -= float2(cos(head), sin(head)) * (0.105 * t);
+
     // The drag: one warp field along the tangent of the turn, because that is
     // the direction the flock's own motion carries its material.
     float2 tangent = float2(-uv.y, uv.x) / max(r, 1e-3);
-    float warp = ms_fbm3(float3(q * 1.35 + float2(9.7, 3.1), t * 0.055), 2, 2.00, 0.50);
+    float warp = ms_fbm3(float3(q * 1.35 + float2(9.7, 3.1), t * 0.088), 2, 2.00, 0.50);
     float2 qw = q + tangent * (warp * (0.22 + 0.30 * flock) / S);
 
     // The sheet, and the level sets are taken PERIODICALLY. One zero level is a
@@ -456,7 +484,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // folded back over itself and is what a flock's density actually looks like.
     // exp(k(cos - 1)) is the smooth way to say "near a level set": periodic, no
     // discontinuity anywhere, and thickness is one number.
-    float n = ms_fbm3(float3(qw * 2.85, t * 0.085), 3, 2.03, 0.52);
+    float n = ms_fbm3(float3(qw * 2.85, t * 0.115), 3, 2.03, 0.52);
     // Two numbers do the work. `folds` is how many level sets the slice cuts:
     // two or three, because a flock is a sheet folded a few times and not a
     // pastry. `k` is how sharply the density peaks at each one, and it is kept
@@ -481,14 +509,14 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // gaussian at 0.285 with a slowly wandering centre: broad enough that a 20 pt
     // indicator is one clear gesture, tight enough that the containment below
     // never has to cut anything that was still bright.
-    float2 bc = uv - 0.070 * float2(sin(t * 0.083), cos(t * 0.061));
+    float2 bc = uv - 0.070 * float2(sin(t * 0.166), cos(t * 0.122));
     float body = exp(-pow(length(bc) / 0.285, 2.3));
     // A flock's density varies by about three to one across its own body, not
     // by ten to one: it is a mass that thickens, never a mass with holes cut in
     // it. The 0.34 floor is that ratio, written down.
     float dens = body * (0.40 + 0.60 * sheet) * (0.46 + 0.54 * flock);
 
-    float skyN = ms_fbm3(float3(q * 0.75, t * 0.031), 2, 2.00, 0.50);
+    float skyN = ms_fbm3(float3(q * 0.75, t * 0.047), 2, 2.00, 0.50);
     float dusk = sky * (0.055 + 0.075 * (0.5 + skyN)) * (1.0 - 0.55 * dens);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
@@ -565,8 +593,9 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float K = mix(17.0, 42.0, threads);
     float aa = ms_aa(K / S, size, pixelScale);
 
-    // THE LOOM'S BEAT: taut, then eased, then taut. Fifty five seconds.
-    float beat = 0.5 + 0.5 * sin(t * 0.1142);
+    // THE LOOM'S BEAT: taut, then eased, then taut. About thirty five seconds,
+    // which is long enough that the cycle is felt and never counted.
+    float beat = 0.5 + 0.5 * sin(t * 0.1828);
     float taut = clamp(tension * (0.42 + 0.58 * beat), 0.0, 1.0);
     float wander = mix(1.15, 0.20, taut);
 
@@ -576,15 +605,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // bolt lying on a table does. Warping the families separately would have
     // been cheaper and wrong: two independently wandering thread sets are not a
     // fold, they are a mistake in the weaving.
-    float3 dq = float3(q * 0.85, t * 0.028);
+    float3 dq = float3(q * 0.85, t * 0.042);
     float drapeA = ms_fbm3(dq, 2, 2.00, 0.50);
     float drapeB = ms_fbm3(dq + 21.7, 2, 2.00, 0.50);
     float2 qd = q + float2(drapeA, drapeB) * 0.30;
 
     // Each family wanders along its OWN threads, so threads bend over their
     // length instead of the whole sheet sliding.
-    float w1 = ms_fbm1(dot(qd, d2) * 1.9 + t * 0.055, 3, 4.0);
-    float w2 = ms_fbm1(dot(qd, d1) * 1.9 - t * 0.041, 3, 61.0);
+    float w1 = ms_fbm1(dot(qd, d2) * 1.9 + t * 0.083, 3, 4.0);
+    float w2 = ms_fbm1(dot(qd, d1) * 1.9 - t * 0.062, 3, 61.0);
 
     // THE SPACING BREATHES, and this is what stops the weave reading as a
     // printed grid. A cloth beaten by hand is not evenly spaced: the reed packs
@@ -594,16 +623,16 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // change of spacing, which is exactly the irregularity a hand loom leaves.
     // Nine radians over the frame moves the pitch by about a third at its
     // extremes, which is visible as cloth and never as an error.
-    float br1 = ms_fbm1(dot(qd, d2) * 0.50 - t * 0.023, 2, 91.0);
-    float br2 = ms_fbm1(dot(qd, d1) * 0.50 + t * 0.019, 2, 137.0);
+    float br1 = ms_fbm1(dot(qd, d2) * 0.50 - t * 0.035, 2, 91.0);
+    float br2 = ms_fbm1(dot(qd, d1) * 0.50 + t * 0.029, 2, 137.0);
 
     // Time enters as a slow crawl of the phases, which is the cloth being fed
     // through the loom, not a brightness on a timer.
     // The wander is worth several radians, not a fraction of one: at K around
     // thirty the phase runs to thirty radians across the frame, so a displacement
     // under a radian is invisible and the weave comes out as machine-ruled.
-    float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 + br1 * 7.0 - t * 0.34;
-    float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.27;
+    float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 + br1 * 7.0 - t * 0.68;
+    float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.54;
 
     float warp = mix(0.5, 0.5 + 0.5 * sin(ph1), aa);
     float weft = mix(0.5, 0.5 + 0.5 * sin(ph2), aa);
@@ -694,14 +723,14 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // one species whose whole subject is that there is something detailed under
     // the dark. Its own drift is very slow: the meaning is not going anywhere.
     float2 q = uv / S;
-    float lat = ms_fbm3(float3(q * 2.60, t * 0.048), 4, 2.03, 0.52);
+    float lat = ms_fbm3(float3(q * 2.60, t * 0.072), 4, 2.03, 0.52);
 
     float lobes  = clamp(0.5 + 1.15 * lat, 0.0, 1.0);
     float crease = 1.0 - clamp(abs(lat) * 2.30, 0.0, 1.0);
     float psi = mix(lobes, crease, structure);
 
     // THE ATTENTION. Slower and wider as dwell rises.
-    float rate = mix(0.46, 0.13, dwell);
+    float rate = mix(0.92, 0.26, dwell);
     float2 ac = 0.16 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
     float rad = mix(0.245, 0.320, dwell);
     float ad = length(uv - ac) / rad;
@@ -810,7 +839,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float tau = max(time - epoch, 0.0);
     float3 law = ms_settle_law(tau, 6.0);
     float arc = clamp(1.0 - law.z, 0.0, 1.0);   // 0 at birth, 1 at rest
-    float scroll = law.y * max(speed, 0.0);
+    // The scramble runs at nearly twice its first tempo. This multiplies the
+    // law's DISTANCE, not its time constant, so the arc still completes in the
+    // six real seconds it promises -- what got faster is how hard the static
+    // boils while the search is on, and how live the held station is after.
+    float scroll = law.y * 1.90 * max(speed, 0.0);
 
     // Six degrees off level. A station is a line, but a line at exactly zero
     // degrees inside a circle reads as a rule someone drew in the UI.
@@ -824,7 +857,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // fBm that never stops moving, so a locked station still breathes. `drift`
     // sets how far. This is also why the line can never read as a UI rule: a
     // rule is straight and this is not, at any setting.
-    float needle = ms_fbm1(ruv.x * 3.10 + t * 0.085, 3, 17.0) * (0.022 + 0.062 * drift);
+    float needle = ms_fbm1(ruv.x * 3.10 + t * 0.170, 3, 17.0) * (0.022 + 0.062 * drift);
     float across = ruv.y - needle;
 
     // THE HALF-WIDTH, which is the whole arc in one number. At birth it is wider
@@ -950,7 +983,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // THE MEDIUM.
     float fq = mix(1.70, 3.30, pathways);
-    float3 pm = float3(q * fq, t * 0.045);
+    float3 pm = float3(q * fq, t * 0.068);
     float n = ms_fbm3(pm, 3, 2.03, 0.55);
     float open = clamp(0.5 + 1.30 * n, 0.0, 1.0);
     float crease = 1.0 - clamp(abs(n) * 3.80, 0.0, 1.0);
@@ -965,10 +998,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // THE PHASE. The bend dominates the straight term on purpose: wavefronts
     // that follow the medium read as transport through it, and a straight front
     // reads as a wipe.
-    float bend = ms_fbm3(float3(q * 1.15, t * 0.030), 2, 2.00, 0.50);
+    float bend = ms_fbm3(float3(q * 1.15, t * 0.045), 2, 2.00, 0.50);
     float phase = dot(q, float2(0.62, 0.38)) * 4.20 + bend * 9.00;
 
-    float rate = mix(0.30, 1.25, pulseRate);
+    float rate = mix(0.57, 2.35, pulseRate);
     float th = phase - t * rate * 2.0;
     float skew = th + 0.55 * sin(th);                 // steep front, long wake
     float k = mix(3.40, 1.50, afterglow);             // and how long
@@ -1049,7 +1082,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     float2 q = uv / S;
     float sep = 0.30 + 0.70 * layers;
-    float base = 0.070 + 0.150 * drift;
+    float base = 0.140 + 0.300 * drift;
 
     float acc = 0.0;     // light gathered, already attenuated by what is in front
     float T = 1.0;       // what is left of the light path
@@ -1066,7 +1099,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         float head = 0.34 - 0.40 * fi;
         float2 slide = float2(cos(head), sin(head)) * (rate * t);
 
-        float n = ms_fbm3(float3(q * f + slide, t * 0.020 + fi * 7.3), 2, 2.03, 0.50);
+        float n = ms_fbm3(float3(q * f + slide, t * 0.030 + fi * 7.3), 2, 2.03, 0.50);
         float d = clamp(0.5 + 1.35 * n, 0.0, 1.0);
 
         // THE SILHOUETTE, and this is the line the first cut did not have. A
@@ -1103,8 +1136,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // scrim, with no veil of its own -- it is the thing being veiled. It arrives
     // through whatever transmittance the gaps in the three scrims have left,
     // which is what makes it almost legible rather than either hidden or plain.
-    float2 backSlide = float2(0.021, -0.013) * t;
-    float bn = ms_fbm3(float3(q * 3.20 + backSlide, t * 0.026 + 51.0), 2, 2.03, 0.50);
+    float2 backSlide = float2(0.038, -0.023) * t;
+    float bn = ms_fbm3(float3(q * 3.20 + backSlide, t * 0.039 + 51.0), 2, 2.03, 0.50);
     float behind = smoothstep(0.26, 0.92, clamp(0.5 + 1.60 * bn, 0.0, 1.0));
     acc += behind * (0.70 + 0.46 * legibility) * T;
 
@@ -1115,4 +1148,225 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.62), position, pixelScale);
+}
+
+// MARK: - 7. Echo
+
+// ECHO. A form answered by its own past.
+//
+// THE ONE WAY THIS FAILS is rings. Say "echo" and the reflex is a concentric
+// ripple, and a concentric ripple is a sonar sweep: a set of clean circles that
+// belong to a radar screen and not to this family. There is not a circle in
+// this species. What repeats is an IRREGULAR MASS -- the same noise silhouette
+// the pack builds everywhere else -- and it repeats by being DISPLACED along a
+// heading, never by expanding about a centre.
+//
+// EACH REPETITION IS LATE, and that is the difference between an echo and a row
+// of copies. A ghost samples the field at t - k * lag, so it shows the form as
+// it WAS, not as it is. It is therefore not merely the source shifted over: it
+// is a differently shaped thing, different by exactly as much as the form
+// changed while the sound was away. Photograph it and the ghosts do not rhyme
+// with the source, they remember it.
+//
+// EACH REPETITION IS SOFTER, and the softness costs nothing. A blurred edge is
+// a WIDE THRESHOLD, so every ghost reads its silhouette through a wider window
+// than the one in front of it. No second sampling, no blur pass, no taps: the
+// fourth ghost's window is so wide that its smoothstep is nearly a straight
+// line and what is left is a soft lobe, which is what a fourth echo should be.
+//
+// THE FAMILY DRIFTS AS ONE. The whole constellation is carried by a single slow
+// wander, and the heading the ghosts trail along turns on a slow sine, so the
+// trail swings instead of pointing in one direction forever. The step between
+// repetitions is small next to the mass's own radius, so the ghosts OVERLAP
+// heavily and the picture is one smeared form with a memory rather than a line
+// of separate blobs -- which is the other way this species could have become
+// dots, and the reason the step is 0.045 to 0.12 and not more.
+[[ stitchable ]] half4 ms_echo(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float repeats = clamp(c0, 0.0, 1.0);   // how many answers come back
+    float decay   = clamp(c1, 0.0, 1.0);   // how fast they give up
+    float offset  = clamp(c2, 0.0, 1.0);   // how far, and how late, each one is
+    float blur    = clamp(c3, 0.0, 1.0);   // how much softer each one gets
+
+    // The heading the answers trail along, turning on a slow sine so the trail
+    // swings. A fixed heading reads as a motion blur; a turning one reads as a
+    // room.
+    float head = 0.55 + 0.85 * sin(t * 0.061);
+    float2 dir = float2(cos(head), sin(head));
+
+    // The family drifts as one.
+    float2 wander = 0.055 * float2(sin(t * 0.083), cos(t * 0.104));
+
+    // THE STEP IS SMALLER THAN THE FORM, always, and that is the whole
+    // balance of this species. Push the repetitions apart far enough to read
+    // them individually and they become separate soft blobs -- orbs, the thing
+    // Murmur exists not to be, arrived at from a third direction. Keep them
+    // closer than the mass is wide and the series reads the way a stroboscopic
+    // photograph reads: one thing, several times, fading. What makes a
+    // repetition legible is then its SHAPE recurring down the trail, not a gap
+    // beside it.
+    float step = 0.055 + 0.075 * offset;   // uv between repetitions
+    // SLIGHTLY late, and slightly is the operative word. The lag has to be
+    // small next to the time the form takes to change, or each ghost is a
+    // different shape and the series reads as lumps rather than as one thing
+    // answered. Half a second against a form that turns over in about ten is
+    // roughly a twentieth of a shape: recognisably the same mass, visibly not
+    // the same instant.
+    float lag  = 0.22 + 0.55 * offset;     // seconds between them
+    float live = 1.2 + 2.8 * repeats;      // how far down the series we hear
+
+    float acc = 0.0;
+    for (int i = 0; i < 4; i++) {
+        float k = float(i);
+        float2 c = wander - dir * (step * k);
+        float2 p = (uv - c) / S;
+
+        // The lateness. This is the line that makes it an echo.
+        float tk = t - lag * k;
+
+        // THE FORM IS EXTENDED, NOT COMPACT, and this is the hard-won line.
+        // Every attempt to give this species a tidy single mass -- a gaussian
+        // body, a perturbed distance field, a lower-frequency silhouette --
+        // ended at the same place: an ORB. A compact form centred in a circle IS
+        // an orb, however irregular you make its outline, because the circle
+        // around it supplies the symmetry the form is missing. The only shape
+        // that survives a circular frame in this family is a broad irregular
+        // field that does not have a centre, so that is what repeats here: the
+        // same threshold-of-noise the pack uses everywhere, read through a wide
+        // shallow limit that keeps it off the rim and otherwise lets the
+        // silhouette do all of the drawing.
+        float d = 0.5 + 1.35 * ms_fbm3(float3(p * 2.35, tk * 0.105), 2, 2.03, 0.55);
+
+        // Softer with every repetition, and the softness is free: a blurred
+        // edge IS a wide threshold. By the fourth ghost the window is wider than
+        // the field's whole range, so what is left is a soft lobe -- which is
+        // what a fourth echo should be. No second sampling and no blur pass.
+        float w = 0.20 + (0.24 + 0.52 * blur) * k;
+        float mass = smoothstep(0.56 - w, 0.56 + w, d);
+
+        // Wide and shallow. Its only job is to keep the ghost away from a rim
+        // it should never reach; the moment it is tight enough to decide the
+        // outline, the species is an orb again.
+        float body = 1.0 - smoothstep(0.16 + 0.03 * k, 0.46 + 0.03 * k, length(uv - c));
+
+        // 0.66 is the source's own ceiling. An echo is a quiet thing: if the
+        // loudest member of the series is already at the top of the rail there
+        // is nowhere for the answers to be quieter, and the series flattens.
+        acc += mass * body * 0.66 * pow(mix(0.74, 0.30, decay), k)
+                          * smoothstep(0.0, 1.0, live - k);
+    }
+
+    MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
+    float3 field = ms_lit(pal, acc, glow, 0.0, 0.76, 0.48);
+
+    float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
+    return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
+}
+
+// MARK: - 8. Glyph
+
+// GLYPH. Almost-writing.
+//
+// THE ONE WAY THIS FAILS is letters. A shader that draws a legible character is
+// a gimmick, it is wrong the second time you look at it, and it dies in review.
+// So there is no alphabet here, no glyph table, no letterform of any kind. What
+// there is is the PHYSICS OF A STROKE, and strokes that never get far enough to
+// become anything.
+//
+// HOW A STROKE IS MADE, and it is one idea: a stroke is what a blob becomes
+// when you look at it in a squashed frame. The domain is compressed along the
+// direction the hand is pulling and stretched across it -- a third along, nearly
+// three times across -- so the field's own round features come out long and
+// narrow. Take the crest of that field rather than its body and what is drawn is
+// a mark with weight that varies down its length, which is what a loaded brush
+// does. The pulling direction is itself a slow noise field, so marks cross each
+// other at every angle instead of combing in one, and that is the difference
+// between handwriting and hatching.
+//
+// HOW IT NEVER RESOLVES, and this is the species rather than a detail. A second,
+// much faster field is the clock, and the presence read off it is two smoothsteps
+// whose EDGES OVERLAP: the falling edge begins before the rising edge has
+// finished. A mark therefore starts dissolving before it has finished forming,
+// and its peak lands around two thirds rather than at one. It is not a fade in
+// and a fade out with a hold between them -- there is no hold, and there is
+// never a moment where the thing is fully there. That is meaning trying to
+// arrive, stated as an inequality between two thresholds.
+//
+// WHAT IT IS NOT. ms_cipher is a latent field lit by a passing attention: smoke
+// with a reveal, and its shapes are broad islands. This is gestural: narrow,
+// directional, struck rather than uncovered, and its dark is empty page rather
+// than unlit field. It is also new writing FORMING and not old writing
+// surfacing, so nothing here is ever recovered from underneath -- every mark is
+// made now, in front, and lost.
+[[ stitchable ]] half4 ms_glyph(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float marks     = clamp(c0, 0.0, 1.0);   // how much is being written at once
+    float formation = clamp(c1, 0.0, 1.0);   // how far a mark gets
+    float dissolve  = clamp(c2, 0.0, 1.0);   // how quickly it goes
+    float ink       = clamp(c3, 0.0, 1.0);   // how wet the brush is
+
+    float2 q = uv / S;
+
+    // THE HAND. The angle the stroke is being pulled at, here, now.
+    // The frequency matters as much as the amplitude: a slowly turning hand
+    // writes every mark in a region at the same angle, which is hatching, not
+    // handwriting. This turns over about half a frame, so marks cross.
+    float ang = 2.80 * ms_fbm3(float3(q * 1.35, t * 0.052), 2, 2.00, 0.50) + 0.50;
+    float2 d = float2(cos(ang), sin(ang));
+    float2 e = float2(-d.y, d.x);
+
+    // THE STROKE. Compressed along the pull, stretched across it.
+    float fq = 1.50 + 2.40 * marks;
+    float2 sq = float2(dot(q, d) * 0.34, dot(q, e) * 2.70) * fq;
+    float m = ms_fbm3(float3(sq, t * 0.115), 2, 2.03, 0.52);
+
+    // The crest, not the body: a mark, not a smear. Wet ink lays a fatter line.
+    float wet = mix(4.60, 2.60, ink);
+    float stroke = pow(1.0 - clamp(abs(m) * wet, 0.0, 1.0), 1.55);
+    // What the wet brush leaves either side of where it actually touched.
+    float bleed = (1.0 - clamp(abs(m) * wet * 0.42, 0.0, 1.0)) * 0.22 * ink;
+
+    // THE LIFE. Two smoothsteps whose edges overlap, so the peak is about two
+    // thirds and there is no moment of arrival anywhere in the cycle.
+    // The window is NARROW as well as overlapped. Narrow so that most of the
+    // page is bare at any instant -- writing is marks with paper between them,
+    // and the first cut, whose window was open over half the field's range,
+    // came out as a single blown sweep with no marks in it at all. Overlapped
+    // so the peak lands near 0.46: there is no value of L at which a mark is
+    // fully formed, which is the species.
+    float L = 0.5 + 1.90 * ms_fbm3(float3(q * 1.05, t * 0.300), 2, 2.00, 0.50);
+    float peak = 0.30 + 0.30 * formation;
+    float w2 = mix(0.20, 0.12, dissolve);
+    float rise = smoothstep(peak - 0.16, peak + 0.10, L);
+    float fall = 1.0 - smoothstep(peak - w2 * 0.50, peak + w2, L);
+    // A page that has been written on is never quite blank between marks, and
+    // an indicator that empties out for a second and a half reads as switched
+    // off. The residue is the ink already in the paper: the same stroke
+    // structure at a tenth of its weight, so what is left behind is the ghost
+    // of the writing and not a haze.
+    float presence = max(rise * fall, 0.11 * smoothstep(0.10, 0.45, L));
+
+    float en = (stroke * (0.72 + 0.55 * ink) + bleed) * presence;
+
+    MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
+    float3 field = ms_lit(pal, en * 1.70, glow, 0.0, 0.74, 0.50);
+
+    float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
+    return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);
 }

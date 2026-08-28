@@ -11,6 +11,10 @@
 //                 wears the light that scattered back through the emulsion.
 //   mi_pool       ink already at rest in a dish, meniscus alive. The stillest
 //                 thing in the set.
+//   mi_feather    ink that has stopped obeying the drop and started obeying the
+//                 sheet: a directional bleed advancing as a comb of hairs.
+//   mi_palimpsest a scraped page giving up what it used to say, in rows, and
+//                 taking it back before it can be read.
 //
 // WHAT THE FAMILY IS. These are the ink relatives of the Pour: same blood,
 // warm liquid light on a near-black ground, every value generated per pixel out
@@ -58,6 +62,24 @@
 // marbling veins) the shader band-limits itself with fwidth and dissolves the
 // detail into the mass it belongs to, which is the Contour field's trick and
 // the only correct answer to a line finer than a pixel.
+//
+// TEMPO, and this pack was retuned once on it. The first cut set its rates
+// against the Pour, which is an ambient card a person glances at, and against
+// that reference everything here was correct and everything here was too slow.
+// These are THINKING indicators: they stand in for attention, not for weather,
+// and attention has a pulse. So the internal rates were lifted between about
+// 1.4x and 1.9x, per style, and the rule for spending that was CARRIER BEFORE
+// DETAIL. Each species has one motion that carries its gesture (the bloom's
+// fringe, the marbling rakes, the wick's wet line, the strata rock, the
+// halation morph) and one that only textures it (the mottle, the sheet, the
+// grain, the convection, the tremor). The carriers took the larger share and
+// the details the smaller, which is what makes the set read faster without
+// reading busier: more speed on the same number of things, rather than more
+// things. Pool took the smallest lift of the six on purpose, because being the
+// stillest of the set is not a tuning of that species, it is the species.
+//
+// `speed` still means what it always meant. 1.0 is the designed tempo; what
+// changed is what the design IS.
 
 #include <metal_stdlib>
 #include <SwiftUI/SwiftUI.h>
@@ -370,8 +392,9 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
 // it lands exactly where the animation would have been. The sqrt is the part
 // you can see. It puts almost all of the travel in the first second, the way
 // ink actually leaves a nib, and then the front creeps for a long time before
-// it arrives. T is 1.9 s because the lab shoots its still frame at four
-// seconds and four seconds is two time constants: R is at 94% of final, which
+// it arrives. T is 1.25 s, and it is still a statement in real seconds rather
+// than a normalised unit: the blot is three quarters of the way out in under a
+// second and at the lab's four-second still frame it is at 98% of final, which
 // reads as arrived without reading as stopped.
 //
 // AND WHY IT IS STILL ALIVE AT REST. Nothing about a settled blot is static.
@@ -411,7 +434,7 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
 
     // The law. One exponential, read twice.
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
-    const float T = 1.9;
+    const float T = 1.25;
     float k = exp(-tau / T);                      // 1 at the drop, 0 arrived
     float Rinf = (0.19 + 0.15 * spread) * S;
     float R = Rinf * sqrt(max(1.0 - k, 0.0));
@@ -435,7 +458,7 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // broad tongues at 20 pt, and a third octave on a ring of this radius puts
     // detail below the sample spacing where it can only shimmer.
     float ring = 0.8 + 1.0 * tearK;               // lobes around the front
-    float fringe = mi_fbm3(float3(dir * ring, tau * 0.10 + 2.0), 2, 2.03, 0.5);
+    float fringe = mi_fbm3(float3(dir * ring, tau * 0.20 + 2.0), 2, 2.03, 0.5);
     float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * fringe);
 
     float sd = Rf - rr;                            // > 0 inside the front
@@ -465,7 +488,7 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // both artefact-free and the truer statement: the paper's mottling is not
     // sliding under the ink, the wetted region is getting bigger.
     float2 mp = d2 / (S * (1.0 + 0.62 * R));
-    float mott = mi_fbm3(float3(mp * 5.2, tau * 0.045 + 12.0), 3, 2.03, 0.5);
+    float mott = mi_fbm3(float3(mp * 5.2, tau * 0.070 + 12.0), 3, 2.03, 0.5);
 
     // The interior sits mid-rail and the TIDE is the brightest thing in the
     // picture. That ordering is the difference between ink and fruit: a blot
@@ -504,8 +527,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 // BACKWARDS. That is the whole motion of this style: two combs turning against
 // each other, so the laminae slide past one another instead of the sheet
 // travelling. Nothing here falls, nothing pulses, and there is no loop point:
-// the three phase rates (0.31, 0.22, 0.17 rad/s) are incommensurate, so the
-// pattern never repeats and the eye never finds the cycle.
+// the three phase rates (0.57, 0.41, 0.31 rad/s) are incommensurate, so the
+// pattern never repeats and the eye never finds the cycle. The slowest of them
+// comes round in about twenty seconds and the fastest in eleven, which is a
+// comb being drawn at a working pace rather than a tide going out.
 //
 // THE LAMINAE, and the honest problem with them. Marbled ink reads as thin
 // concentrated veins, and a thin vein is exactly the thing a 20 pt indicator
@@ -538,20 +563,21 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float driftK   = clamp(c3, 0.0, 1.0);
 
     float2 p = uv / S;
-    // The sheet slides. Nine thousandths of a frame a second at the default:
-    // over ten seconds that is a tenth of the picture, which is felt and not
-    // watched, and it means the same fold never sits in the same place twice.
-    p -= float2(0.86, 0.31) * (driftK * t * 0.035);
+    // The sheet slides. Seventeen thousandths of a frame a second at the
+    // default: over ten seconds that is a sixth of the picture, which is felt
+    // and not watched, and it means the same fold never sits in the same place
+    // twice.
+    p -= float2(0.86, 0.31) * (driftK * t * 0.058);
 
     float A = 0.050 + 0.075 * comb;
-    p = mi_rake(p, float2( 0.9563,  0.2924),  7.3, A,         t * 0.31);
-    p = mi_rake(p, float2(-0.4067,  0.9135), 12.9, A * 0.55, -t * 0.22 + 1.7);
-    p = mi_rake(p, float2( 0.6691, -0.7431), 21.7, A * 0.26,  t * 0.17 + 4.1);
+    p = mi_rake(p, float2( 0.9563,  0.2924),  7.3, A,         t * 0.57);
+    p = mi_rake(p, float2(-0.4067,  0.9135), 12.9, A * 0.55, -t * 0.41 + 1.7);
+    p = mi_rake(p, float2( 0.6691, -0.7431), 21.7, A * 0.26,  t * 0.31 + 4.1);
 
     // The sheet of ink the comb is drawn through. Broad: three octaves off a
     // base of 2.4 tops out around ten cycles a frame, which is structure a
     // 20 pt indicator can still hold.
-    float sheet = mi_fbm3(float3(p * 2.4, t * 0.030 + 21.0), 3, 2.03, 0.5);
+    float sheet = mi_fbm3(float3(p * 2.4, t * 0.046 + 21.0), 3, 2.03, 0.5);
 
     // Band phase in CYCLES, built from the sheet plus a gentle lay direction so
     // the laminae have a grain to run along instead of closing into rings.
@@ -603,7 +629,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 //
 // WHAT MOVES, since the front does not. The grain inside the wet region is read
 // at a y pulled DOWNWARD by time, so the fibre texture creeps up through the
-// standing front at three hundredths of a frame a second. The front has
+// standing front at six hundredths of a frame a second. The front has
 // arrived; the ink has not stopped. That is the whole feeling of a wick and it
 // is one term.
 //
@@ -637,7 +663,14 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // Jurin: the equilibrium height, and the spread of it across the sheet.
     float h0 = -0.19 + 0.42 * climb;
-    float rag = mi_fbm3(float3(q.x * (5.5 / S), 0.0, t * 0.075 + 4.0), 3, 2.03, 0.5);
+    // The wet line carries this species and it took the largest lift in the
+    // pack, more than the 2x the others were held to. The reason is geometric,
+    // not a matter of taste: the fibre grain below is stretched seven to one up
+    // the sheet, and sliding a long vertical streak ALONG its own axis produces
+    // almost no visible change, so the transport term can be lifted all day and
+    // the style still reads frozen. What the eye actually reads as motion here
+    // is the line seeking its level, so that is where the tempo had to go.
+    float rag = mi_fbm3(float3(q.x * (5.5 / S), 0.0, t * 0.175 + 4.0), 3, 2.03, 0.5);
     float front = h0 + (0.050 + 0.100 * fiber) * rag;
 
     float sd = front - q.y;                        // > 0 wet
@@ -650,7 +683,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // at two to one the climb is mottled rather than striated, which is what
     // the first cut looked like and it could have been any of the other five.
     // The y term carries the transport.
-    float3 gp = float3(q.x * (15.0 / S), (q.y - t * 0.030) * (2.2 / S), 9.0);
+    float3 gp = float3(q.x * (15.0 / S), (q.y - t * 0.060) * (2.2 / S), 9.0);
     float grain = mi_fbm3(gp, 2, 2.03, 0.55);
 
     // The concentration gradient a chromatogram has: strong at the source,
@@ -710,7 +743,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 // neither ever stops.
 //
 //   c0 layers     the vertical frequency at rest: how many beds
-//   c1 settle     how quickly the suspension arrives (T, 2.4 s at the default)
+//   c1 settle     how quickly the suspension arrives (T, 1.6 s at the default,
+//                 and still a count of real seconds rather than a normalised
+//                 unit: three time constants is under five seconds)
 //   c2 disturb    residual convection in the boundaries
 //   c3 tilt       which way the vessel leans, 0.5 being level
 [[ stitchable ]] half4 mi_strata(
@@ -728,17 +763,17 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float tiltK   = clamp(c3, 0.0, 1.0);
 
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
-    float T = 2.4 / (0.55 + 0.90 * settle);
+    float T = 1.6 / (0.55 + 0.90 * settle);
     float k = exp(-tau / T);                       // 1 suspended, 0 settled
     float clear = 1.0 - k;
 
     // The lean, plus the rock the vessel never loses.
-    float ang = (tiltK - 0.5) * 0.40 + 0.035 * sin(t * 0.17) + 0.022 * sin(t * 0.104 + 2.1);
+    float ang = (tiltK - 0.5) * 0.40 + 0.035 * sin(t * 0.31) + 0.022 * sin(t * 0.19 + 2.1);
     float ca = cos(ang), sa = sin(ang);
     float xAc =  uv.x * ca + (-uv.y) * sa;
     float yUp = -uv.x * sa + (-uv.y) * ca;
 
-    float rip = mi_fbm3(float3(uv * (2.6 / S), t * 0.085 + 31.0), 2, 2.03, 0.5);
+    float rip = mi_fbm3(float3(uv * (2.6 / S), t * 0.128 + 31.0), 2, 2.03, 0.5);
     float y = yUp + disturb * 0.045 * rip;
 
     // The anisotropy the arc drives. At k = 1 both axes sit at 5.6, which is a
@@ -746,7 +781,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // climbed past ten, which is a bed.
     float fx = mix(2.2, 5.6, k) / S;
     float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S;
-    float n = mi_fbm3(float3(xAc * fx, y * fy, tau * 0.030 + 3.0), 2, 2.03, 0.5);
+    float n = mi_fbm3(float3(xAc * fx, y * fy, tau * 0.045 + 3.0), 2, 2.03, 0.5);
     // Beds have edges. 1.55 rather than 1.15 is what separates one lamina from
     // the next instead of leaving a smear that could be any horizontal field.
     float dens = saturate(0.50 + 1.55 * n);
@@ -796,8 +831,8 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 // symmetric halo around a blob is a sticker; an asymmetric one is a body in a
 // room with a light in it.
 //
-// The mass reforms and also DRIFTS, slowly, about a hundredth of a frame a
-// second. A mass that only morphs in place reads as a lava lamp on a timer.
+// The mass reforms and also DRIFTS, about two hundredths of a frame a second.
+// A mass that only morphs in place reads as a lava lamp on a timer.
 //
 //   c0 mass       the threshold: how much of the frame the dark body occupies
 //   c1 corona     the width and strength of the scatter
@@ -823,8 +858,8 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // lobes is the whole subject, and the pitch is what decides it.
     const float F = 1.8;                            // domain scale, cycles a frame
     float2 p = uv / S;
-    float3 q = float3(p * F + float2(0.020, -0.014) * t,
-                      t * (0.020 + 0.055 * morph) + 6.0);
+    float3 q = float3(p * F + float2(0.036, -0.025) * t,
+                      t * (0.038 + 0.105 * morph) + 6.0);
     float4 Fd = mi_fbmd3(q, 3, 2.03, 0.5);
     // THE BIAS, and without it this style does not exist. The level set of a
     // plain fBm is a winding curve that crosses the whole frame, so lighting
@@ -962,9 +997,13 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 dir = rr > 1e-5 ? dv / rr : float2(1.0, 0.0);
 
     // The shore, read on a ring so it is periodic in theta with no seam, and
-    // moving through the third coordinate at a fiftieth of a cycle a second:
-    // slower than anything else in this file, which is the point of the style.
-    float rimN = mi_fbm3(float3(dir * 1.35, t * 0.020 + 17.0), 2, 2.03, 0.5);
+    // moving through the third coordinate at about a fortieth of a cycle a
+    // second: still slower than anything else in this file, which is the point
+    // of the style. The tempo pass lifted the rest of the pack half again or
+    // more and this style deliberately took the smallest share of it, because
+    // whatever the others are doing, the pool has to stay the stillest thing in
+    // the set or it is not this species any more.
+    float rimN = mi_fbm3(float3(dir * 1.35, t * 0.026 + 17.0), 2, 2.03, 0.5);
     float R = (0.225 + 0.070 * tension) * S * (1.0 + 0.20 * rimN);
 
     // A spherical cap, leaned, raised to 1.6. The exponent is the difference
@@ -980,7 +1019,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // The surface, and its slope, in one tap.
     const float SF = 3.1;
-    float4 Sf = mi_fbmd3(float3(uv * (SF / S), t * (0.030 + 0.070 * tremor) + 41.0),
+    float4 Sf = mi_fbmd3(float3(uv * (SF / S), t * (0.042 + 0.098 * tremor) + 41.0),
                          3, 2.03, 0.5);
     float2 slope = Sf.yz * (SF / S) * (0.024 + 0.060 * tremor);
 
@@ -1022,6 +1061,323 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
              + (0.22 + 0.32 * sheenK) * spec * pool
              + (0.10 + 0.12 * tension) * men
              + 0.075 * dried;
+
+    MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
+    return mi_finish(mi_shade(pal, tv), inkLin, mi_shore(uv), glow, position * pixelScale);
+}
+
+// MARK: - 7. Feather
+
+// FEATHER. Ink running along the grain, hair by hair.
+//
+// WHY THIS IS NOT ANOTHER BLOOM, which is the first thing to answer because the
+// two species share a chemistry. A blot on sized paper spreads the same distance
+// in every direction and its story is a circle with a tide line. This is what
+// happens on paper that is sized badly or not at all: the ink stops obeying the
+// drop and starts obeying the SHEET, running along the fibre far and across it
+// barely, so what advances is not a front but a comb of hairs, each one a
+// channel, with the mass filling in behind them. Bloom is isotropic and its
+// silhouette is round. This is anisotropic and its silhouette is a plume with a
+// toothed leading edge. Put the two side by side at 76 pt and nothing about them
+// rhymes, which was the requirement.
+//
+// THE ARC IS ALSO A DIFFERENT LAW, and the difference is not decoration. Bloom
+// conserves AREA, so its radius carries a square root and nearly all of its
+// travel happens in the first moment. Here the plume is channelled: it advances
+// at roughly constant width, so the area it has wetted is proportional to the
+// LENGTH, and spending a fixed reservoir of ink over that gives
+//
+//   L̇ = (L∞ - L) / T      →      L(τ) = L∞ + (L0 - L∞) e^(-τ/T)
+//
+// a plain exponential approach with no root in it. Closed form, so any τ lands
+// where the animation would have been. In the eye the two arcs read as two
+// different events: the blot lunges and then creeps for a long time, the feather
+// sets off at a walk and eases into its stop. T is 1.45 s, a little longer than
+// the blot's 1.25, because a bleed has further to go.
+//
+// REST IS NOT STILL. When L has arrived the hairs keep working: the fringe noise
+// runs on through its third coordinate at 0.22, which is the pack's post-tempo
+// rate, so the teeth of the comb lengthen and retract against each other without
+// the plume as a whole going anywhere. That is capillary shimmer, and it is what
+// a saturated feather actually does under a loupe.
+//
+//   c0 bleed      how far the plume gets before the ink is spent
+//   c1 fiber      the pitch of the grain: how many hairs, how deep the comb, how
+//                 visible the striation inside the wetted mass
+//   c2 direction  the heading, in turns. This is the knob that keeps the species
+//                 off bloom's ground, so it is a real axis and not a nudge
+//   c3 dryness    how hard the paper fights the ink: a tight terminating edge
+//                 and a concentrated tip on dry stock, a soft one on damp
+[[ stitchable ]] half4 mi_feather(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = mi_uv(position, size);
+    float S = max(formScale, 0.10);
+    float bleed   = clamp(c0, 0.0, 1.0);
+    float fiber   = clamp(c1, 0.0, 1.0);
+    float dirK    = clamp(c2, 0.0, 1.0);
+    float dryness = clamp(c3, 0.0, 1.0);
+
+    float tau = max(time - epoch, 0.0) * max(speed, 0.0);
+
+    // The grain of the sheet. The 0.45 offset is so the default knob (0.5) lands
+    // on a diagonal rather than square on an axis: a plume running dead
+    // horizontal reads as a diagram, and a plume running dead vertical starts to
+    // borrow the wick's composition.
+    float ang = dirK * 6.2831853 + 0.45;
+    float2 a = float2(cos(ang), sin(ang));
+    float2 b = float2(-a.y, a.x);
+    float s = dot(uv, a);
+    float n = dot(uv, b);
+
+    // The law. L0 is not zero: the pen touched down before it bled, so there is
+    // a mark to feather OUT of rather than a species that begins as an empty
+    // frame.
+    const float T = 1.45;
+    float L0 = 0.05 * S;
+    float Linf = (0.34 + 0.26 * bleed) * S;
+    float L = Linf + (L0 - Linf) * exp(-tau / T);
+
+    float sSrc = -0.24 * S;
+    float u = s - sSrc;                            // 0 at the source, forward is +
+
+    // The width the fan settles at, needed before the comb because the comb is
+    // measured against it.
+    float Wref = (0.085 + 0.075 * bleed) * S;
+
+    // THE COMB. One slice of the 3D field taken across the fibres, with time in
+    // the third coordinate so the teeth work in place instead of sliding along
+    // the edge. A comb that slides is a zip; a comb that breathes is capillary.
+    //
+    // The pitch is counted across the PLUME and not across the frame, and that
+    // is the whole difference between a comb and a staircase. Measured against
+    // the frame, a plume a sixth of the frame wide catches two or three cells of
+    // the noise and its leading edge becomes three enormous blocks; measured
+    // against its own width it always carries the same number of teeth however
+    // wide it has grown, which is what a fibre count actually means.
+    float pitch = 2.0 + 4.5 * fiber;
+    float hair = mi_fbm3(float3(n * (pitch / max(Wref, 1e-4)), 0.0, tau * 0.22 + 3.0),
+                         2, 2.03, 0.5);
+    float Lh = L * (1.0 + (0.09 + 0.24 * fiber) * hair);
+
+    // The striation inside the wetted mass: high frequency across the fibres,
+    // low along them, so the texture runs WITH the bleed. Same anisotropy the
+    // wick uses on its climb, in this species' own rotated frame. It is
+    // evaluated up here rather than with the rest of the shading because the
+    // plume's own outline is built out of it.
+    float fib = mi_fbm3(float3(n * (13.0 / S), s * (2.0 / S), 21.0 + tau * 0.050),
+                        2, 2.03, 0.55);
+
+    float w = 0.012 + 0.055 * Linf;
+    float front = smoothstep(-w, w, Lh - u);
+    // Behind the source the ink also creeps, but barely: fibre runs both ways
+    // and the reservoir is in front of it. The trailing edge is carried on the
+    // same striation as the sides, because a pen lifting off does not leave a
+    // ruled line and the first cut's straight diagonal cut across the root was
+    // the one hard edge left in this pack.
+    float bw = 0.075 * S;
+    float back = smoothstep(-bw, bw, u + (0.10 + 0.035 * fib) * S);
+    float along = front * back;
+
+    // The plume fans as it goes, because no two fibres are quite parallel, and
+    // its sides wander on the striation for the same reason: fibre is not a
+    // ruler. The root is already a mark, not a point, because a pen laid down
+    // has width before it has bled anywhere. Starting the fan near zero instead
+    // drew a bright hairline with a haze on it, which reads as a comet.
+    float uN = saturate(u / max(Linf, 1e-4));
+    float W = Wref * (0.85 + 0.65 * uN) * (1.0 + 0.16 * fib);
+    // A super-gaussian, exp(-(n/W)^4), and the fourth power is the point. A
+    // plain gaussian cross-section peaks on the axis, and a plume with a peak
+    // running down its middle reads as a beam with a haze on it: the first cut
+    // of this looked like a comet, which is a body this family does not own.
+    // The flat top spreads the ink across the plume the way a wetted channel
+    // actually holds it, and the shoulders still fall off soft.
+    float x2 = (n * n) / max(W * W, 1e-8);
+    float across = exp(-x2 * x2);
+
+    // Chromatography again: the solvent reaches further than the pigment, so the
+    // root is saturated and the reach is thin.
+    float sat = mix(1.0, 0.66, uN);
+
+    // The tip, where each hair stalls and its pigment piles up.
+    float dTip = Lh - u;
+    float wt = (0.012 + 0.030 * (1.0 - dryness)) * S;
+    float tip = exp(-(dTip * dTip) / max(wt * wt, 1e-8)) * back;
+
+    float dens = along * across * sat * (0.78 + 0.55 * fiber * fib);
+    float tv = 0.045 + 0.74 * clamp(dens, 0.0, 1.3)
+             + (0.16 + 0.18 * dryness) * tip * across;
+
+    MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
+    return mi_finish(mi_shade(pal, tv), inkLin, mi_shore(uv), glow, position * pixelScale);
+}
+
+// MARK: - 8. Palimpsest
+
+// PALIMPSEST. Older writing coming up through the sheet.
+//
+// A palimpsest is a page that was scraped and written over, and the ghost of
+// what it used to say keeps rising back through the new surface. That is the
+// species: marks that are almost readable, in rows, that surface somewhere,
+// hold for a moment and are taken back into the paper before they ever resolve.
+//
+// THE ONE HARD RULE. There are no letterforms here and there is no font. What
+// makes a mark read as WRITING is not its shapes, it is two facts about how it
+// is arranged: strokes are thin curved things of varying width, and they sit in
+// ROWS with blank between them. Give the eye those two facts and it supplies the
+// language by itself, which is the whole trick and also the only honest way to
+// do it: a shader that actually drew glyphs would be drawing someone's alphabet,
+// and it would resolve, and resolving is the one thing this species must never
+// do.
+//
+// So the strokes are RIDGED noise: 1 - |fBm|, whose level sets are continuous
+// curves that thin and thicken along their length exactly the way a pen does.
+// The rows are a band-limited cosine on a wandering baseline, because no hand
+// writes on a rule. And the sharpening exponent is what ages them: raised, it
+// thins the strokes until they break into fragments where the ridge dips, which
+// is what happens to ink that has been scraped off a page.
+//
+// WHAT MOVES, and this is the species' real idea. Nothing does. Every other
+// shader in this pack advects something: the blot creeps, the marble slides, the
+// wick transports, the bed rocks, the mass drifts, the pool's sheen wanders. The
+// writing here is IN the paper and the paper is not going anywhere. What moves
+// is a slow surfacing field that decides, per place, how much of the sheet's
+// memory is currently visible. The marks do not travel; your access to them
+// does. That is what memory is like and it is the reason this reads as thought
+// rather than as weather.
+//
+// AND WHY IT IS NOT THE SIGNAL FAMILY'S VEIL, which occupies the neighbouring
+// register of almost-legibility. Veil is a stack of translucent scrims with a
+// real transmittance chain: what is behind is dimmed by exactly what is in front
+// of it, per pixel, and legibility is a matter of gaps opening in the layers.
+// Nothing here is in front of anything. Both texts are in the same sheet at the
+// same depth, and the one surfacing field gates them in OPPOSITION: where the
+// field is high the newer hand comes up, where it is low the older one does, and
+// in the wide middle both are half present. Two texts trading places in one
+// surface, not two sheets seen through each other.
+//
+//   c0 layers     how far apart the two hands sit: angle, size of writing, and
+//                 how sharply they trade
+//   c1 legibility how close the strokes come to resolving. It is capped below 1
+//                 on purpose and there is no setting that lets you read it
+//   c2 surfacing  how far up the writing is allowed to come
+//   c3 age        how eroded the older hand is: thinner, more broken, more gap
+[[ stitchable ]] half4 mi_palimpsest(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = mi_uv(position, size);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+    float layers     = clamp(c0, 0.0, 1.0);
+    float legibility = clamp(c1, 0.0, 1.0);
+    float surfacing  = clamp(c2, 0.0, 1.0);
+    float age        = clamp(c3, 0.0, 1.0);
+
+    float2 p = uv / S;
+
+    // THE SURFACING FIELD. One tap, shared, and it is the only thing in this
+    // shader with a clock. It both drifts and evolves: drifting alone sweeps a
+    // wave across the page, evolving alone makes the same places breathe on a
+    // timer, and neither on its own reads as memory. Together they mean a
+    // different part of the sheet is giving something up every time you look.
+    float srf = mi_fbm3(float3(p * 1.45 + float2(0.045, -0.032) * t, t * 0.085 + 5.0),
+                        2, 2.03, 0.5);
+
+    // The two hands trade places in the one surface. `layers` sharpens the trade:
+    // at 0 they overlap almost everywhere and the page is one confused text, at 1
+    // they separate into distinct territories.
+    float sep = 0.10 + 0.26 * layers;
+    float gate = smoothstep(-sep, sep, srf);
+    // THE ENVELOPE, and the species does not work without it. The trade above
+    // decides WHICH hand you are seeing, and by itself that is all it does: the
+    // two visibilities sum to very nearly a constant, so every part of the page
+    // carries the same amount of ink at all times and nothing ever appears to
+    // rise or be taken back. The first cut had exactly that and read as a flat
+    // busy texture rather than as memory. So a second, larger and slower field
+    // decides HOW MUCH is up anywhere at all, and it drifts on its own heading
+    // so the two mechanisms never fall into step. One raw octave: this is a
+    // broad envelope and paying fBm for it would buy detail nobody can see.
+    // The pitch is load bearing and the first number was wrong. At 0.95 the
+    // whole indicator sits inside a single cell of this field, so the envelope
+    // stops being a map of WHERE the page is giving something up and becomes one
+    // number for the entire cell rising and falling: a brightness pulse, which
+    // this family bans, and one that took the page to nearly black at its low
+    // point. At 2.6 there are two or three regions across the disc at any
+    // moment, so some part of the sheet is always surfaced while another is
+    // being taken back, which is both the species and the reason the total never
+    // goes away. The floor is 0.30 for the same reason halation's corona has one.
+    float env = mi_noise3(float3(p * 2.6 + float2(-0.026, 0.038) * t, t * 0.062 + 19.0));
+    float lift = 0.30 + 0.70 * smoothstep(-0.24, 0.30, env);
+
+    // Capped below 1, always. Reaching full density is what "resolving" would
+    // mean and this species is defined by not getting there.
+    float reach = (0.52 + 0.52 * surfacing) * lift;
+    float visA = reach * gate;
+    float visB = reach * (1.0 - gate) * (0.80 + 0.20 * layers);
+
+    // The pixel footprint in page units, for the two places detail has to be
+    // given up rather than aliased.
+    float px = max(fwidth(p.x), 1e-5);
+    float fine = 1.0 - smoothstep(0.012, 0.030, px);
+
+    float writing = 0.0;
+    for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        // The older hand is turned on the page and written smaller, which is what
+        // a scraped and reused sheet actually looks like: nobody lines the new
+        // text up with the old.
+        float ha = 0.22 + fi * (0.55 + 0.90 * layers);
+        float ca = cos(ha), sa2 = sin(ha);
+        float2 e = float2(p.x * ca + p.y * sa2, -p.x * sa2 + p.y * ca);
+
+        // THE ROWS. A wandering baseline, because a ruled one reads as a form to
+        // fill in rather than as handwriting.
+        float lineFreq = (5.0 + 2.6 * fi * (0.4 + 0.6 * layers)) / S;
+        float yl = (e.y + 0.055 * sin(e.x * 2.3 + fi * 2.1)) * lineFreq;
+        float wl = max(fwidth(yl), 1e-5);
+        float attl = exp(-4.9348 * wl * wl);
+        float row = 0.5 + 0.5 * cos(6.2831853 * yl) * attl;
+        // The rows have to WIN. At a gentler exponent the strokes wandered
+        // across the gaps and the page read as a scribble; ink between the lines
+        // is the one thing that stops a sheet of writing looking like a thicket.
+        row = pow(row, 2.4);
+
+        // THE STROKES. Ridged noise, and the anisotropy is severe on purpose:
+        // three to one across against along, so a mark is narrow enough to sit
+        // inside one row instead of spanning three of them. A stroke taller than
+        // its line is not handwriting, it is a fence.
+        float sc = 1.0 - 0.28 * fi;
+        float3 sp = float3(e.x * (16.0 * sc / S), e.y * (5.4 * sc / S), 11.0 + fi * 13.0);
+        float ridge = saturate(1.0 - abs(mi_fbm3(sp, 2, 2.03, 0.5)) * (1.0 / 0.55));
+
+        // Age erodes by SHARPENING. A higher exponent does not merely thin the
+        // stroke, it breaks it wherever the ridge dips, which is exactly how
+        // scraped ink fails: not evenly fainter, but in pieces.
+        float aged = age * fi;                      // the second hand is the old one
+        float sharp = 2.2 + 6.0 * legibility + 3.2 * aged;
+        // At 20 pt a stroke this thin has nothing to stand on, so the exponent
+        // relaxes toward the broad mass instead of aliasing into a strobe. The
+        // page stops being readable before it starts being wrong.
+        sharp = mix(1.5, sharp, fine);
+        float stroke = pow(ridge, sharp) * row;
+
+        writing += stroke * (i == 0 ? visA : visB);
+    }
+
+    // The tooth of the sheet. One raw octave, the cheapest thing in the file, and
+    // it is here because a page with nothing on it between the writing is not a
+    // page, it is a background.
+    float tooth = mi_noise3(float3(p * (26.0 / S), 3.0));
+
+    float tv = 0.048 + 0.78 * clamp(writing, 0.0, 1.2) + 0.045 * (0.5 + 0.5 * tooth);
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));

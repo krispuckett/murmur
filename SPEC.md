@@ -1,9 +1,10 @@
 # Murmur — build contract
 
 Murmur is a Swift package of parametric thinking indicators for AI products:
-24 Metal shader "species", one uniform API, a lab app for designing a
-configuration by hand, and a one-tap export that hands the exact configuration
-to a coding agent for implementation. This document is the contract every
+32 Metal shader "species", one uniform API, five AI states (idle, thinking,
+responding, success, error) with per-state animation treatments, a lab app for
+designing a configuration by hand, and a one-tap export that hands the exact
+configuration to a coding agent for implementation. This document is the contract every
 builder works to. Do not deviate from names, signatures, or file ownership
 without updating this file.
 
@@ -152,6 +153,8 @@ not.
 | undertow | ml_undertow | two layers sliding opposite ways, structure born where they shear | contrast 0.5 | slip 0.5 | veil 0.3 | bias 0.5 |
 | meander | ml_meander | one bright channel wandering through dark mass, the path is the thought | width 0.4 | wander 0.5 | bank 0.4 | flow 0.5 |
 | confluence (arc) | ml_confluence | two flows finding each other and joining; joined is the rest state | approach 0.5 | mingle 0.5 | shimmer 0.3 | angle 0.5 |
+| melt | ml_melt | a heavy molten mass slowly melting and reforming, viscous, drips absorbed back into the body | mass 0.5 | viscosity 0.6 | dripAbsorb 0.5 | heat 0.4 |
+| glaze | ml_glaze | a thin bright sheet of liquid sliding over a dark form, light traveling in the film | sheet 0.5 | slide 0.5 | sheen 0.5 | tilt 0.5 |
 
 ### MurmurInk.metal (mi_) — ink and paper physics, capillary time
 
@@ -163,6 +166,8 @@ not.
 | strata (arc) | mi_strata | sediment settling into layers: horizontal density bands finding their level | layers 0.5 | settle 0.5 | disturb 0.2 | tilt 0.5 |
 | halation | mi_halation | a dark mass wearing its own light: soft halo shifting as the mass slowly reforms | mass 0.5 | corona 0.5 | morph 0.4 | offset 0.5 |
 | pool | mi_pool | ink already at rest, meniscus alive: the stillest style in the set, surface tension doing the thinking | tension 0.5 | tremor 0.2 | sheen 0.5 | tilt 0.5 |
+| feather (arc) | mi_feather | ink feathering along paper fibers: a directional bleed advancing hair by hair, then resting saturated | bleed 0.5 | fiber 0.5 | direction 0.5 | dryness 0.4 |
+| palimpsest | mi_palimpsest | older writing ghosting up through the surface, almost legible, reabsorbed before it resolves | layers 0.5 | legibility 0.4 | surfacing 0.5 | age 0.5 |
 
 ### MurmurLight.metal (mg_) — light through media
 
@@ -174,6 +179,8 @@ not.
 | lantern | mg_lantern | one light behind moving fog: presence felt through a medium, never seen directly | fog 0.5 | reach 0.5 | drift 0.4 | offset 0.5 |
 | mirage | mg_mirage | horizontal refraction bands bending a distant light, the desert-road shimmer | bands 0.5 | bend 0.5 | distance 0.5 | haze 0.4 |
 | oculus (arc) | mg_oculus | a soft aperture admitting light, opening as thought completes; open is rest | aperture 0.5 | rim 0.4 | beam 0.5 | dust 0.3 |
+| dapple | mg_dapple | canopy light: soft patches through moving leaves, the shade breathing across the floor | canopy 0.5 | breeze 0.5 | patch 0.5 | depthLight 0.5 |
+| eclipse | mg_eclipse | a slow occluder drifting across a light, the corona doing the talking at the edge | occlude 0.5 | corona 0.5 | drift 0.4 | softness 0.5 |
 
 ### MurmurSignal.metal (ms_) — order emerging from noise (the thinking metaphors)
 
@@ -185,6 +192,8 @@ not.
 | tuning (arc) | ms_tuning | static finding the station: broadband noise narrowing toward a coherent line; coherent is rest, noise never fully gone | band 0.5 | lock 0.5 | hiss 0.3 | drift 0.4 |
 | current | ms_current | signal moving through a medium: impulses traveling a soft network, felt as moving light, never drawn as wires | pathways 0.5 | pulseRate 0.4 | glow 0.5 | branch 0.5 |
 | veil | ms_veil | layers of translucency sliding: what is behind almost legible, parallax as depth of thought | layers 0.5 | parallax 0.5 | legibility 0.4 | drift 0.3 |
+| echo | ms_echo | a soft form answered by its own fading repetitions, each displaced and softer than the last, never rings | repeats 0.5 | decay 0.5 | offset 0.5 | blur 0.4 |
+| glyph | ms_glyph | almost-writing: marks forming out of ink and dissolving before they resolve into letters | marks 0.5 | formation 0.5 | dissolve 0.5 | ink 0.5 |
 
 ## Swift API (owner: core)
 
@@ -194,10 +203,10 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
 }
 
 public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
-    case eddy, well, tide, undertow, meander, confluence
-    case bloom, marbling, wick, strata, halation, pool
-    case caustic, aurora, ember, lantern, mirage, oculus
-    case murmuration, loom, cipher, tuning, current, veil
+    case eddy, well, tide, undertow, meander, confluence, melt, glaze
+    case bloom, marbling, wick, strata, halation, pool, feather, palimpsest
+    case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
+    case murmuration, loom, cipher, tuning, current, veil, echo, glyph
     // id, family, displayName, shaderName ("ml_eddy" etc.),
     // characterKnobs: [MurmurKnob] (label + default from the roster tables),
     // hasArc: Bool (the (arc) styles)
@@ -274,6 +283,21 @@ reads the .metal source from the module bundle at runtime. If bundling the
 source proves fragile, emit the package-dependency form and note it; do not
 ship a broken exporter.
 
+## States and treatments (owner: core)
+
+Five AI states: `MurmurState` = idle, thinking, responding, success, error.
+States never touch the shaders; they modulate the existing uniforms Swift-side
+through a `MurmurStateTreatment` (speedFactor, glowFactor, depthFactor,
+hueShiftDelta, entry), eased over about 0.6 s on every state change. Entering
+thinking or success resets the birth reference so arc styles re-run their
+arrival. `MurmurEntry` names the entry animation: none, wake (brief speed
+overshoot decaying in), swell (a glow envelope that rises and settles inside
+about 1.5 s), stutter (two quick catches of the clock in the first half
+second, then a clean settle; the error catch). Default treatments per state
+live on the configuration and are Codable, so a designer's custom treatments
+travel with the export. The five states must be legible as MOTION: a viewer
+who cannot read the label should still know idle from thinking from error.
+
 ## Lab app (owner: lab)
 
 iOS app, deployment target 26.0, SDK current (Xcode 27), xcodegen project
@@ -285,7 +309,7 @@ Structure, three screens, house grammar throughout (Liquid Glass; glass card
 overlays, never stock sheets with platters; no `.background()` before
 `.glassEffect()`; mono for labels and values; sub-44pt tap targets banned):
 
-1. **Gallery.** All 24 styles live, grouped by family, each a circle indicator
+1. **Gallery.** All 32 styles live, grouped by family, each a circle indicator
    on the ink ground with its mono name. Dark ground (this is a product
    stage). Tap opens the studio.
 2. **Studio.** One style large (~300 pt) on top, a size row under it (20, 46,

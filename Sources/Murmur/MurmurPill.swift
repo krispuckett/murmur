@@ -11,6 +11,7 @@ import SwiftUI
 
 public struct MurmurPill: View {
     private let configuration: MurmurConfiguration
+    private let state: MurmurState
     private let label: String
     private let showsPill: Bool
     private let showsLabel: Bool
@@ -20,12 +21,14 @@ public struct MurmurPill: View {
 
     public init(
         _ configuration: MurmurConfiguration,
+        state: MurmurState = .thinking,
         label: String = "Thinking...",
         showsPill: Bool = true,
         showsLabel: Bool = true,
         indicatorSize: CGFloat = 46
     ) {
         self.configuration = configuration
+        self.state = state
         self.label = label
         self.showsPill = showsPill
         self.showsLabel = showsLabel
@@ -56,7 +59,7 @@ public struct MurmurPill: View {
 
     public var body: some View {
         HStack(spacing: indicatorSize * 0.22) {
-            MurmurView(grounded)
+            MurmurView(grounded, state: state)
                 .frame(width: indicatorSize, height: indicatorSize)
 
             if showsLabel {

@@ -16,6 +16,10 @@
 //               inverted second copy. The bands themselves are never drawn.
 //   mg_oculus   an aperture admitting light, opening as the thought completes.
 //               Open is the rest state, and rest is not a freeze.
+//   mg_dapple   canopy light: two layers of leaves sliding past each other, and
+//               the floor lit wherever their gaps happen to line up.
+//   mg_eclipse  a soft dark mass wandering across a light it never leaves and
+//               never clears. The corona at its limb is the whole picture.
 //
 // THE FAMILY LAW, and every one of these obeys it. Time enters where a
 // COORDINATE IS READ, never as a brightness multiplier. That is not a style
@@ -37,6 +41,27 @@
 // With the kit's 2.03 lacunarity that caps a three octave field near f = 4 and
 // a two octave field near f = 8, and where a frequency below sits at the top of
 // its range the comment says which octave count is holding it there.
+//
+// THE TEMPO, and what `speed` = 1.0 means. These were first tuned to the calm of
+// an ambient card, and on device the whole set read one notch too still: an
+// indicator is ATTENTION, not atmosphere, and a thinking indicator that barely
+// moves says the thinking has stopped. Every internal rate constant below was
+// therefore lifted between 1.5x and 2x. The `speed` uniform still means "the
+// designed tempo"; what changed is what the designed tempo IS.
+//
+// The lift is not uniform inside a style, and the rule it follows is worth
+// keeping. Where a style has a CARRIER motion (a whole pattern translating) and
+// a DETAIL motion (the same pattern reorganising in place), the carrier takes
+// the full 2x and the detail takes about 1.5x. Translation reads as speed;
+// churn reads as busyness. Lift them together and the field gets faster AND
+// noisier, which is how calm turns into stormy. Lift the carrier harder and it
+// reads faster at the same density, which is what was actually wanted.
+//
+// Two rates deliberately did not take the full lift. mg_lantern's light does not
+// move at all, by contract, so its whole increase went into the fog drifting in
+// front of it. mg_oculus's opening arc stays at 2.6 REAL seconds, because it
+// describes an event rather than a texture and it has to keep meaning what it
+// says; only the medium under it sped up.
 //
 // THE CONTAINMENT. The view clips to a circle. A clip that lands on lit pixels
 // draws a hard rim, and a hard rim on an organic form is the one edge this
@@ -456,8 +481,8 @@ static inline float mg_hold(float2 uv, float reach) {
     // churn is the third noise axis, which reorganises the surface without
     // translating it. `swim` trades between them; neither is ever zero, because
     // still water is not this species.
-    float2 drift = float2(0.052, 0.019) * t * (0.30 + 1.55 * swim);
-    float churn = t * (0.155 - 0.055 * swim);
+    float2 drift = float2(0.104, 0.038) * t * (0.30 + 1.55 * swim);
+    float churn = t * (0.235 - 0.085 * swim);
     float3 p = float3((uv + drift) * f, churn);
 
     // The Hessian, by differencing the analytic gradient. e = 0.10 of a cell is
@@ -604,9 +629,9 @@ static inline float mg_hold(float2 uv, float reach) {
         // into a single mass, which is how the first cut of this read as a dome
         // rather than as a curtain.
         float xi = x + 0.17 * fi;
-        float rate = (0.055 + 0.115 * wander) * (1.0 + 0.42 * fi);
+        float rate = (0.110 + 0.230 * wander) * (1.0 + 0.42 * fi);
         float big = mg_fbm1(xi * 3.4 + t * rate, 2, lane) * 0.115;
-        float fine = mg_fbm1(xi * 7.5 - t * rate * 0.63, 2, lane + 7.0) * 0.030;
+        float fine = mg_fbm1(xi * 7.5 - t * rate * 0.50, 2, lane + 7.0) * 0.030;
         float foot = 0.050 + 0.030 * fi + (big + fine) * (0.35 + 1.30 * foldK);
 
         float h = up - foot;
@@ -625,7 +650,7 @@ static inline float mg_hold(float2 uv, float reach) {
         // lines and field lines are not vertical in the picture plane, and each
         // set travels with its own lamina, so the three slide across each other
         // and the vertical structure is never a static comb.
-        float pn = mg_fbm1(xi * 3.8 + h * 0.90 + t * rate * 0.85, 2, lane + 23.0);
+        float pn = mg_fbm1(xi * 3.8 + h * 0.90 + t * rate * 0.68, 2, lane + 23.0);
         float pleat = 1.0 - min(abs(pn) * 2.2, 1.0);
         float ray = 0.62 + 0.70 * pleat * pleat;
         // The far laminae are dimmer, the way the far side of a fold is.
@@ -726,16 +751,17 @@ static inline float mg_hold(float2 uv, float reach) {
     // detail here would tear the coals into speckle instead of making them swim.
     // It grows from nothing at the floor, because air that has not risen yet has
     // not had time to bend anything.
-    float3 wp = float3(x * 2.1, h * 1.7 - t * (0.30 + 0.52 * updraft), t * 0.20);
+    float3 wp = float3(x * 2.1, h * 1.7 - t * (0.55 + 0.95 * updraft), t * 0.30);
     float warp = mg_fbm3(wp, 2, 2.03, 0.5);
     float dx = warp * (0.030 + 0.080 * shimmer) * smoothstep(0.0, 0.32, h);
     float xs = x + dx;
 
     // THE BED. Patches, not a ramp. Its own slow crawl in the third axis is the
     // coals shifting as they burn down, and it is the only motion the light
-    // itself has: about a fortieth of the plume's rate, which is felt and not
-    // watched.
-    float3 bp = float3(xs * 2.8, h * 1.2, t * 0.075);
+    // itself has: about a fifteenth of the plume's rate, which is felt and not
+    // watched. It took the smaller half of the tempo lift for that reason. Coals
+    // that reorganise as fast as the gas above them stop reading as fuel.
+    float3 bp = float3(xs * 2.8, h * 1.2, t * 0.115);
     float bed = 0.5 + 0.5 * mg_fbm3(bp, 3, 2.03, 0.5);
     float bedThick = 0.050 + 0.060 * floorK;
     float bedMask = smoothstep(-0.085, -0.004, h) * exp(-max(h, 0.0) / bedThick);
@@ -744,8 +770,8 @@ static inline float mg_hold(float2 uv, float reach) {
     // frequency opens with height so the column widens as it climbs.
     float spread = 1.0 + (0.85 + 1.55 * updraft) * max(h, 0.0);
     float3 pp = float3(xs * (2.6 / spread),
-                       h * (2.30 - 0.80 * updraft) - t * (0.52 + 0.86 * updraft),
-                       t * 0.13);
+                       h * (2.30 - 0.80 * updraft) - t * (0.94 + 1.55 * updraft),
+                       t * 0.195);
     float plume = 0.5 + 0.5 * mg_fbm3(pp, 3, 2.03, 0.5);
     float column = exp(-max(h, 0.0) / (0.16 + 0.40 * heat));
     // Only the hot part of the plume carries light. The smoothstep is what turns
@@ -875,9 +901,14 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // which is eight points across in the gallery's 76 pt cell: a wisp whose
     // shape you can actually see. Finer than this and the medium turns back into
     // an even grey, which is the failure this style already had once.
-    float2 flow = float2(0.072, -0.026) * t * (0.32 + 1.30 * driftK);
+    // The drift took the full 2x of the tempo pass and the turnover took 1.6x,
+    // and this style is where that split matters most: the lamp is forbidden to
+    // change, so the fog crossing in front of it is the ONLY thing that can make
+    // the indicator read as active. Fog that crosses faster reads as faster;
+    // fog that boils faster just reads as weather.
+    float2 flow = float2(0.144, -0.052) * t * (0.32 + 1.30 * driftK);
     float ff = 4.6 / S;
-    float fz = t * (0.045 + 0.150 * driftK);
+    float fz = t * (0.072 + 0.240 * driftK);
 
     // The density HERE, which is the thing the eye is actually looking at, and
     // the density AT THE LAMP, which is the thickness the light has to get out
@@ -1036,7 +1067,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // thing in the pack that would alias. The 1.6 across is deliberately enough
     // to vary within the light's width, so a stratum SHEARS the image instead of
     // sliding all of it together.
-    float3 bp = float3((x + t * 0.085) * 1.6, d * (5.5 + 5.0 * bands), t * 0.17);
+    float3 bp = float3((x + t * 0.170) * 1.6, d * (5.5 + 5.0 * bands), t * 0.255);
     float band = mg_fbm3(bp, 2, 2.03, 0.5);
 
     // THE FOLD, and then THE BEND, which together are the whole mapping.
@@ -1061,8 +1092,11 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
 
     // The light is not a smooth blob. Two octaves of slow field give it internal
     // structure, so at 300 pt there is something to look at inside it and the
-    // slices the bands cut off it are not all identical.
-    float3 sp = float3(x * 3.2, ys * 3.2 + 5.7, t * 0.045);
+    // slices the bands cut off it are not all identical. This is the subject and
+    // not the medium, so it took the smallest lift in the pack: a light a long
+    // way down a road does not change quickly, and the shimmer crossing it is
+    // where all the speed belongs.
+    float3 sp = float3(x * 3.2, ys * 3.2 + 5.7, t * 0.065);
     float grain = 0.5 + 0.5 * mg_fbm3(sp, 2, 2.03, 0.5);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
@@ -1222,7 +1256,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // amplitude, which is a torn edge rather than a scalloped one. The third
     // axis is the wander that keeps this alive after the opening has arrived.
     float2 ring = float2(cos(ang), sin(ang)) * 1.10;
-    float tearN = mg_fbm3(float3(ring, t * 0.13), 2, 2.03, 0.5);
+    float tearN = mg_fbm3(float3(ring, t * 0.234), 2, 2.03, 0.5);
     // Agitated while it opens, settled when it has. The 0.30 is the only place
     // the arc touches anything but the radius.
     float Ra = R * (1.0 + (0.16 + 0.30 * law.z) * tearN);
@@ -1237,14 +1271,14 @@ static inline float3 mg_open_law(float tau, float openTime) {
 
     // THE SKY BEYOND. Two octaves at f = 6.5 puts the finest cell at 0.076 uv,
     // three and a half points at 46 pt: structure in the light, not grain.
-    float3 ip = float3(uv * (6.5 / S) + float2(0.0, -t * 0.085), t * 0.10);
+    float3 ip = float3(uv * (6.5 / S) + float2(0.0, -t * 0.170), t * 0.15);
     float inner = 0.5 + 0.5 * mg_fbm3(ip, 2, 2.03, 0.5);
 
     // THE AIR. f = 7.0 over two octaves is the finest field in this pack and it
     // sits exactly on the scale rule: 0.070 uv, three points at 46 pt. Anything
     // finer becomes motes, and motes are the one thing this package must never
     // draw.
-    float3 ap = float3(uv * (7.0 / S) + float2(t * 0.022, -t * 0.058), t * 0.19);
+    float3 ap = float3(uv * (7.0 / S) + float2(t * 0.044, -t * 0.116), t * 0.285);
     float air = 0.5 + 0.5 * mg_fbm3(ap, 2, 2.03, 0.5);
     air = 1.0 - dustK * 0.55 * (1.0 - air);
 
@@ -1270,6 +1304,277 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(through, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
+    return mg_out(rgb, position * pixelScale);
+}
+
+// MARK: - 7. Dapple
+
+// DAPPLE. Canopy light, and the shade breathing across the floor.
+//
+// The mechanism is two layers of leaves, and it is the whole species. A canopy
+// is not one screen with holes in it, it is a DEPTH of overlapping crowns, and
+// light reaches the floor only where a gap in the near layer happens to line up
+// with a gap in the far one. So the transmission here is a PRODUCT of two
+// thresholded fields drifting at different rates and in different directions,
+// and everything good about the picture follows from that product:
+//
+//   the patches are broad and irregular, because the intersection of two soft
+//   regions is a soft region, and nothing in it is ever a cell or a dot
+//   they appear and vanish where they are, rather than sliding in from the
+//   edge, because two gaps come into alignment in place
+//   and that is the BREATHING. Nothing here modulates brightness with time. The
+//   shade breathes because the two layers are sliding past each other, which is
+//   a coordinate being read, which is the family law
+//
+// Two layers and not three. Three would be more literally true of a real
+// canopy, but the intersection of three random gap sets is small and scattered,
+// and small scattered bright things are exactly the dots this package exists to
+// avoid. The large scale comes from a separate broad crown field instead, which
+// lifts and dims whole regions of floor without ever fragmenting them.
+//
+// WHY THE PATCHES ARE ROUND, which is the fact that makes dapple look like
+// dapple. Each bright patch on a forest floor is not the shape of the gap above
+// it: it is a PINHOLE IMAGE OF THE SUN, and the further the floor is from the
+// canopy the more completely the gap's own shape is lost and the rounder and
+// softer the patch becomes. That is what `depthLight` is. It widens the
+// threshold (a wider penumbra) and lowers the canopy's effective frequency (a
+// blurred projection) together, because in the real thing those are one effect.
+// At zero the floor is right under the leaves and the patches wear the gaps'
+// torn shapes; at one it is a long way below and they are soft warm ovals.
+//
+// This is the pack's other water-and-light style and it must never be confused
+// with mg_caustic, so the two are built to be opposites: the caustic is a FINE
+// WEB drawn as the zero set of a Jacobian, all line and no area; the dapple is
+// BROAD AREA with no line in it anywhere.
+//
+//   c0 canopy      how fine the leaf mass is. Low is a few big crowns, high is
+//                  a dense canopy with small gaps.
+//   c1 breeze      how much the canopy moves: the layers' drift and the gust
+//                  that sways them. The gust is positional, never luminous.
+//   c2 patch       how open the canopy is, which is the threshold the gaps are
+//                  cut at, which is how much floor is lit and how large the
+//                  patches get.
+//   c3 depthLight  how far the floor is below the leaves. The penumbra dial
+//                  described above, and the one that decides whether this reads
+//                  as leaf shadow or as sunlight.
+[[ stitchable ]] half4 mg_dapple(
+    float2 position,
+    half4  currentColor,
+    float2 size,
+    float  time,
+    float  pixelScale,
+    half4  inkColor,
+    half4  toneColor,
+    float  hueShift,
+    float  formScale,
+    float  speed,
+    float  depth,
+    float  glow,
+    float  c0,
+    float  c1,
+    float  c2,
+    float  c3,
+    float  epoch
+) {
+    float2 res = max(size, float2(1.0));
+    float2 uv = (position - 0.5 * res) / min(res.x, res.y);
+
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+    float canopy = clamp(c0, 0.0, 1.0);
+    float breeze = clamp(c1, 0.0, 1.0);
+    float patch = clamp(c2, 0.0, 1.0);
+    float fall = clamp(c3, 0.0, 1.0);
+
+    // THE PENUMBRA, both halves of it. A wider threshold is a softer shadow
+    // edge; a lower frequency is the gap's own shape being lost on the way
+    // down. They move together because in the real thing they are one effect.
+    float soft = 0.10 + 0.30 * fall;
+    float blur = 1.0 - 0.28 * fall;
+
+    // THE TWO LAYERS. The far one projects larger and drifts the other way, so
+    // the alignments come and go rather than travelling across the frame.
+    float trans = 1.0;
+    for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        // At canopy 1 with the floor right under the leaves this reaches 7.6,
+        // whose finest octave cell is 0.065 uv: the top of the legal range for
+        // a two octave field and still three points at 46 pt.
+        float freq = (4.6 + 3.0 * canopy) * blur * (1.0 - 0.34 * fi) / S;
+        float2 dr = mix(float2(0.085, 0.032), float2(-0.055, 0.024), fi)
+                  * t * (0.40 + 1.40 * breeze);
+        // THE GUST. Two incommensurate sines per layer, so the sway never finds
+        // a beat and never reads as a wobble on a timer. It moves the canopy's
+        // COORDINATE. A gust that changed how much light came through would be
+        // the pulsing this family forbids; a gust that moves the leaves is what
+        // actually happens.
+        float2 gust = float2(sin(t * (0.83 - 0.21 * fi) + fi * 2.3),
+                             cos(t * (0.61 + 0.17 * fi) + fi * 1.1))
+                    * (0.012 + 0.045 * breeze);
+        float3 q = float3((uv + dr + gust) * freq, t * (0.17 - 0.05 * fi));
+        float n = mg_fbm3(q, 2, 2.03, 0.5);
+        // The gap: light passes where the leaf field is thin. `patch` moves the
+        // cut, so it opens and closes the canopy without changing its scale.
+        float cut = 0.16 - 0.26 * patch;
+        trans *= smoothstep(cut - soft, cut + soft, n);
+    }
+
+    // THE CROWN. The canopy's large scale thickness, drifting slowly on its own.
+    // It lifts and dims whole stretches of floor at once, which is the scale a
+    // third multiplied layer would have destroyed rather than provided.
+    float3 cq = float3((uv + float2(0.020, 0.008) * t * (0.40 + 1.40 * breeze)) * (1.35 / S),
+                       t * 0.075);
+    float crown = 0.5 + 0.5 * mg_fbm3(cq, 2, 2.03, 0.5);
+
+    MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
+
+    // Shade under a canopy is never black: it is filled with light bounced off
+    // every leaf and trunk around it, and a dapple whose shade goes to ink reads
+    // as spotlights on a stage instead of as a wood.
+    float lit = (0.050 + 0.130 * crown) + (0.58 + 0.32 * crown) * trans;
+    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
+    // Only the fully aligned gaps carry the sun itself. The cube is what keeps
+    // the emission on the few brightest patches rather than on all of them.
+    float3 em = mg_shade(pal, 0.80) * (0.50 * pow(clamp(trans, 0.0, 1.0), 3.0)) * max(glow, 0.0);
+
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
+    return mg_out(rgb, position * pixelScale);
+}
+
+// MARK: - 8. Eclipse
+
+// ECLIPSE. A soft dark mass wandering across a light, and the corona at its limb
+// doing all of the talking.
+//
+// THE READING OF THE BRIEF, stated so it can be checked. "Never fully covered
+// and never fully free" is taken here to mean the PICTURE is always partial:
+// there is always corona, so the light is never extinguished, and there is
+// always a dark mass, so the light is never simply a light. The occluder's
+// wander is bounded to guarantee both. It is a closed path around the light
+// rather than a pass across it, which is also why this has no beginning and no
+// end and therefore no arc: `epoch` is ignored.
+//
+// THE INVERSION, which is how this stays clear of its two neighbours at 76 pt.
+// mg_oculus is bright in the middle with a dark surround. mg_lantern is a glow
+// with no dark anywhere in it. This one is DARK IN THE MIDDLE with its light at
+// the edge, which is the opposite composition to both, and the difference
+// survives being shrunk to a gallery cell because it is a difference of where
+// the black is rather than of what the texture does.
+//
+// THE CORONA IS NOT A RING, and three things stop it becoming one:
+//
+//   its reach is a function of ANGLE. The falloff length outside the limb is
+//   modulated by a field evaluated on the unit circle, so the corona goes out in
+//   plumes of very different lengths and its outer boundary is ragged. A corona
+//   with one falloff length is an annulus, and an annulus is a graphic.
+//   it is weighted by the LIGHT BEHIND IT. The occluder is offset from the
+//   light, so one side of its limb has the light's bright middle behind it and
+//   the opposite side has only the light's outskirts. That makes the corona
+//   several times brighter on one side, which is the crescent, and it costs
+//   nothing because the light field is already in hand.
+//   the limb itself is TORN and soft, and it drifts.
+//
+// The occluder is never black either. A mass lit only by scattered light is
+// still a mass; a mass at zero is a hole cut in the picture, and the eye reads
+// the hole's edge as a drawn curve no matter how soft it is.
+//
+//   c0 occlude   how much of the light the mass takes: its radius and how far
+//                it wanders. More coverage is more limb against bright light,
+//                so more corona, which is why an eclipse gets more dramatic
+//                rather than dimmer as it deepens.
+//   c1 corona    the corona's brightness and how far its plumes reach.
+//   c2 drift     how fast the mass travels its path, which is the rate at which
+//                the bright crescent swings around the limb.
+//   c3 softness  how soft the mass's edge is, and how much it is allowed to
+//                move. This is the dial that decides between an object passing
+//                in front of a light and a thickening in the same medium.
+[[ stitchable ]] half4 mg_eclipse(
+    float2 position,
+    half4  currentColor,
+    float2 size,
+    float  time,
+    float  pixelScale,
+    half4  inkColor,
+    half4  toneColor,
+    float  hueShift,
+    float  formScale,
+    float  speed,
+    float  depth,
+    float  glow,
+    float  c0,
+    float  c1,
+    float  c2,
+    float  c3,
+    float  epoch
+) {
+    float2 res = max(size, float2(1.0));
+    float2 uv = (position - 0.5 * res) / min(res.x, res.y);
+
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+    float occK = clamp(c0, 0.0, 1.0);
+    float coronaK = clamp(c1, 0.0, 1.0);
+    float driftK = clamp(c2, 0.0, 1.0);
+    float softK = clamp(c3, 0.0, 1.0);
+
+    // THE LIGHT. Broad, structured and a little off centre. It is wide on
+    // purpose: the corona is weighted by whatever light stands behind the limb,
+    // and a tight source would leave the far side of the limb with nothing
+    // behind it at all and the corona would read as half a ring.
+    const float2 lp = float2(0.030, -0.022);
+    float sigL = 0.210 * S;
+    float2 dl = uv - lp;
+    float3 lq = float3(uv * (5.5 / S) + float2(0.0, -t * 0.060), t * 0.12);
+    float lgrain = 0.5 + 0.5 * mg_fbm3(lq, 2, 2.03, 0.5);
+    float lightRaw = exp(-dot(dl, dl) / (sigL * sigL)) * (0.52 + 0.62 * lgrain);
+
+    // THE WANDER. A closed path with incommensurate rates on the two axes, so
+    // the mass never retraces the same loop and never comes to rest, and its
+    // offset from the light stays inside a band by construction: it cannot
+    // leave the light and it cannot centre on it.
+    float th = t * (0.18 + 0.36 * driftK);
+    float2 orbit = float2(cos(th), sin(th * 0.77) * 0.72) * (0.062 + 0.070 * occK) * S;
+    float2 op = lp + orbit;
+    float2 dO = uv - op;
+    float ro = length(dO);
+    float angO = atan2(dO.y, dO.x);
+
+    // THE LIMB. Torn on the unit circle, so it is periodic in the angle with no
+    // seam at the wrap, and drifting, so the edge is alive without the mass ever
+    // changing size.
+    float2 ring = float2(cos(angO), sin(angO)) * 1.25;
+    float tearN = mg_fbm3(float3(ring, t * 0.26), 2, 2.03, 0.5);
+    float Rocc = (0.115 + 0.075 * occK) * S * (1.0 + (0.07 + 0.09 * softK) * tearN);
+    float w = (0.030 + 0.055 * softK) * S;
+    float cover = 1.0 - smoothstep(Rocc - w, Rocc + w, ro);
+
+    // THE PLUMES. A second field on the same circle, displaced in the plane so
+    // it is a different realisation while staying periodic, driving the corona's
+    // REACH rather than its brightness. That is what makes the outer edge ragged
+    // instead of round.
+    float2 cring = float2(cos(angO), sin(angO)) * 1.90 + float2(11.3, -7.1);
+    float plumeN = 0.5 + 0.5 * mg_fbm3(float3(cring, t * 0.22), 2, 2.03, 0.5);
+    float hC = (0.022 + 0.070 * coronaK) * S * (0.35 + 1.45 * plumeN);
+    float limb = exp(-max(ro - Rocc, 0.0) / max(hC, 1e-4));
+    // Weighted by the light standing behind this stretch of limb, which is where
+    // the crescent comes from and why it swings as the mass wanders.
+    float corona = limb * lightRaw * (0.85 + 1.55 * coronaK);
+
+    MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
+
+    // The mass keeps a trace of scattered light so it stays a body rather than
+    // a hole. The number is small enough to read as unlit and large enough that
+    // the edge is a falling off and not a boundary.
+    float lit = 0.028 + 0.88 * lightRaw * (1.0 - cover) + corona
+              + cover * 0.050 * (0.40 + 0.60 * lgrain);
+    float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
+    float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(corona, 0.0, 1.0), 2.0)) * max(glow, 0.0);
+
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }

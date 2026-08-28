@@ -76,6 +76,10 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
     public var ink: MurmurRGBA
     /// The single hue family anchor.
     public var tone: MurmurRGBA
+    /// What each AI state does to the material. Prefilled with the stock
+    /// table; override a state to give this configuration its own behavior,
+    /// and the override travels with the saved config and the export.
+    public var treatments: [MurmurState: MurmurStateTreatment]
 
     /// Passing only a style gives you the style exactly as it was tuned.
     public init(
@@ -87,7 +91,8 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
         hueShift: Double = 0,
         character: [Double]? = nil,
         ink: MurmurRGBA = .ink,
-        tone: MurmurRGBA = .tone
+        tone: MurmurRGBA = .tone,
+        treatments: [MurmurState: MurmurStateTreatment]? = nil
     ) {
         self.style = style
         self.speed = speed
@@ -98,6 +103,41 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
         self.character = character ?? style.characterDefaults
         self.ink = ink
         self.tone = tone
+        self.treatments = treatments ?? MurmurStateTreatment.defaults
+    }
+
+    /// Always answers, even for a state a decoded dictionary is missing.
+    public func treatment(for state: MurmurState) -> MurmurStateTreatment {
+        treatments[state] ?? state.defaultTreatment
+    }
+
+    /// The states this configuration has moved away from the stock table,
+    /// in roster order. Empty means it uses the defaults throughout.
+    public var customizedStates: [MurmurState] {
+        MurmurState.allCases.filter { treatment(for: $0) != $0.defaultTreatment }
+    }
+
+    // Treatments arrived after the first configurations were written, so a
+    // saved config without them decodes to the stock table rather than
+    // failing. Everything else has been required since the beginning.
+    private enum CodingKeys: String, CodingKey {
+        case style, speed, formScale, depth, glow, hueShift, character, ink, tone, treatments
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        style = try container.decode(MurmurStyle.self, forKey: .style)
+        speed = try container.decode(Double.self, forKey: .speed)
+        formScale = try container.decode(Double.self, forKey: .formScale)
+        depth = try container.decode(Double.self, forKey: .depth)
+        glow = try container.decode(Double.self, forKey: .glow)
+        hueShift = try container.decode(Double.self, forKey: .hueShift)
+        character = try container.decode([Double].self, forKey: .character)
+        ink = try container.decode(MurmurRGBA.self, forKey: .ink)
+        tone = try container.decode(MurmurRGBA.self, forKey: .tone)
+        treatments = try container.decodeIfPresent(
+            [MurmurState: MurmurStateTreatment].self, forKey: .treatments
+        ) ?? MurmurStateTreatment.defaults
     }
 
     /// Exactly four values, always. Missing entries fall back to the style's
@@ -133,7 +173,8 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
             hueShift: hueShift,
             character: newStyle.characterDefaults,
             ink: ink,
-            tone: tone
+            tone: tone,
+            treatments: treatments
         )
     }
 }

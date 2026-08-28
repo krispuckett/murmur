@@ -58,10 +58,10 @@ public struct MurmurKnob: Sendable, Hashable, Codable {
 
 /// The 24 species.
 public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
-    case eddy, well, tide, undertow, meander, confluence
-    case bloom, marbling, wick, strata, halation, pool
-    case caustic, aurora, ember, lantern, mirage, oculus
-    case murmuration, loom, cipher, tuning, current, veil
+    case eddy, well, tide, undertow, meander, confluence, melt, glaze
+    case bloom, marbling, wick, strata, halation, pool, feather, palimpsest
+    case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
+    case murmuration, loom, cipher, tuning, current, veil, echo, glyph
 
     public var id: String { rawValue }
 
@@ -69,10 +69,14 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
 
     public var family: MurmurFamily {
         switch self {
-        case .eddy, .well, .tide, .undertow, .meander, .confluence: .liquid
-        case .bloom, .marbling, .wick, .strata, .halation, .pool: .ink
-        case .caustic, .aurora, .ember, .lantern, .mirage, .oculus: .light
-        case .murmuration, .loom, .cipher, .tuning, .current, .veil: .signal
+        case .eddy, .well, .tide, .undertow, .meander, .confluence, .melt, .glaze:
+            .liquid
+        case .bloom, .marbling, .wick, .strata, .halation, .pool, .feather, .palimpsest:
+            .ink
+        case .caustic, .aurora, .ember, .lantern, .mirage, .oculus, .dapple, .eclipse:
+            .light
+        case .murmuration, .loom, .cipher, .tuning, .current, .veil, .echo, .glyph:
+            .signal
         }
     }
 
@@ -83,7 +87,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     /// The rest ignore it. Settled is never frozen: a whisper of drift stays.
     public var hasArc: Bool {
         switch self {
-        case .confluence, .bloom, .strata, .oculus, .tuning: true
+        case .confluence, .bloom, .strata, .oculus, .tuning, .feather: true
         default: false
         }
     }
@@ -105,6 +109,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "one bright channel wandering through dark mass, the path is the thought"
         case .confluence:
             "two flows finding each other and joining; joined is the rest state"
+        case .melt:
+            "a heavy molten mass slowly melting and reforming, viscous, drips absorbed back into the body"
+        case .glaze:
+            "a thin bright sheet of liquid sliding over a dark form, light traveling in the film"
         case .bloom:
             "ink meeting water: a front advancing with a live fBm edge, settling saturated"
         case .marbling:
@@ -117,6 +125,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "a dark mass wearing its own light: soft halo shifting as the mass slowly reforms"
         case .pool:
             "ink already at rest, meniscus alive: the stillest style in the set, surface tension doing the thinking"
+        case .feather:
+            "ink feathering along paper fibers: a directional bleed advancing hair by hair, then resting saturated"
+        case .palimpsest:
+            "older writing ghosting up through the surface, almost legible, reabsorbed before it resolves"
         case .caustic:
             "light refracted through moving water onto a floor: the web, soft, never cellular"
         case .aurora:
@@ -129,6 +141,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "horizontal refraction bands bending a distant light, the desert-road shimmer"
         case .oculus:
             "a soft aperture admitting light, opening as thought completes; open is rest"
+        case .dapple:
+            "canopy light: soft patches through moving leaves, the shade breathing across the floor"
+        case .eclipse:
+            "a slow occluder drifting across a light, the corona doing the talking at the edge"
         case .murmuration:
             "the namesake: a flock as one soft mass, density turning and folding over itself, individuals never resolvable"
         case .loom:
@@ -141,6 +157,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "signal moving through a medium: impulses traveling a soft network, felt as moving light, never drawn as wires"
         case .veil:
             "layers of translucency sliding: what is behind almost legible, parallax as depth of thought"
+        case .echo:
+            "a soft form answered by its own fading repetitions, each displaced and softer than the last, never rings"
+        case .glyph:
+            "almost-writing: marks forming out of ink and dissolving before they resolve into letters"
         }
     }
 
@@ -160,6 +180,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("width", 0.4), k("wander", 0.5), k("bank", 0.4), k("flow", 0.5)]
         case .confluence:
             [k("approach", 0.5), k("mingle", 0.5), k("shimmer", 0.3), k("angle", 0.5)]
+        case .melt:
+            [k("mass", 0.5), k("viscosity", 0.6), k("dripAbsorb", 0.5), k("heat", 0.4)]
+        case .glaze:
+            [k("sheet", 0.5), k("slide", 0.5), k("sheen", 0.5), k("tilt", 0.5)]
         // Ink
         case .bloom:
             [k("spread", 0.5), k("edgeTear", 0.5), k("tail", 0.4), k("asymmetry", 0.3)]
@@ -173,6 +197,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("mass", 0.5), k("corona", 0.5), k("morph", 0.4), k("offset", 0.5)]
         case .pool:
             [k("tension", 0.5), k("tremor", 0.2), k("sheen", 0.5), k("tilt", 0.5)]
+        case .feather:
+            [k("bleed", 0.5), k("fiber", 0.5), k("direction", 0.5), k("dryness", 0.4)]
+        case .palimpsest:
+            [k("layers", 0.5), k("legibility", 0.4), k("surfacing", 0.5), k("age", 0.5)]
         // Light
         case .caustic:
             [k("web", 0.5), k("depthWater", 0.5), k("swim", 0.4), k("focus", 0.5)]
@@ -186,6 +214,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("bands", 0.5), k("bend", 0.5), k("distance", 0.5), k("haze", 0.4)]
         case .oculus:
             [k("aperture", 0.5), k("rim", 0.4), k("beam", 0.5), k("dust", 0.3)]
+        case .dapple:
+            [k("canopy", 0.5), k("breeze", 0.5), k("patch", 0.5), k("depthLight", 0.5)]
+        case .eclipse:
+            [k("occlude", 0.5), k("corona", 0.5), k("drift", 0.4), k("softness", 0.5)]
         // Signal
         case .murmuration:
             [k("flock", 0.5), k("turn", 0.5), k("cohesion", 0.5), k("sky", 0.3)]
@@ -199,6 +231,10 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("pathways", 0.5), k("pulseRate", 0.4), k("glow", 0.5), k("branch", 0.5)]
         case .veil:
             [k("layers", 0.5), k("parallax", 0.5), k("legibility", 0.4), k("drift", 0.3)]
+        case .echo:
+            [k("repeats", 0.5), k("decay", 0.5), k("offset", 0.5), k("blur", 0.4)]
+        case .glyph:
+            [k("marks", 0.5), k("formation", 0.5), k("dissolve", 0.5), k("ink", 0.5)]
         }
     }
 

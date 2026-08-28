@@ -106,6 +106,9 @@ extension MurmurConfiguration {
         out.append("```")
         out.append("")
 
+        out.append(contentsOf: stateSection(for: surface))
+        out.append("")
+
         // The numbers, in prose, so nothing depends on reading the snippet.
         out.append("## The exact configuration")
         out.append("")
@@ -148,6 +151,105 @@ extension MurmurConfiguration {
         return out.joined(separator: "\n")
     }
 
+    /// How the host drives the thing. Without this an agent ships a pill
+    /// that says "thinking" while the answer is already streaming.
+    private func stateSection(for surface: MurmurExportSurface) -> [String] {
+        var lines: [String] = []
+        lines.append("## Driving the state")
+        lines.append("")
+        lines.append(
+            "There are five states: idle, thinking, responding, success and "
+                + "error. They modulate the same material rather than swapping it "
+                + "out, so the indicator stays one object. Pass the state that "
+                + "matches what the agent is doing."
+        )
+        lines.append("")
+
+        switch surface {
+        case .pill:
+            lines.append("```swift")
+            lines.append("MurmurPill(Self.murmur, state: agentIsStreaming ? .responding : .thinking)")
+            lines.append("```")
+            lines.append("")
+        case .indicator:
+            lines.append("```swift")
+            lines.append("MurmurView(Self.murmur, state: agentIsStreaming ? .responding : .thinking)")
+            lines.append("```")
+            lines.append("")
+        case .swiftUIOnly:
+            lines.append(
+                "The view above holds one state. To drive five, scale the speed, "
+                    + "glow and depth arguments by the factors below and add the "
+                    + "hue delta to the hue shift argument."
+            )
+            lines.append("")
+        }
+
+        let custom = customizedStates
+        for state in MurmurState.allCases {
+            let t = treatment(for: state)
+            let hue = t.hueShiftDelta < 0 ? "" : "+"
+            let mark = custom.contains(state) ? "  (customized)" : ""
+            lines.append(
+                "- \(state.rawValue): speed x\(MurmurExport.number(t.speedFactor)), "
+                    + "glow x\(MurmurExport.number(t.glowFactor)), "
+                    + "depth x\(MurmurExport.number(t.depthFactor)), "
+                    + "hue \(hue)\(MurmurExport.number(t.hueShiftDelta)), "
+                    + "entry \(t.entry.rawValue)\(mark)"
+            )
+        }
+        lines.append("")
+
+        if !custom.isEmpty {
+            lines.append(
+                "The states marked customized were changed by hand and are "
+                    + "already in the snippet above. The rest are the package "
+                    + "defaults."
+            )
+            lines.append("")
+        }
+
+        lines.append(
+            "Error walks the same hue family down toward dark ember. Do not "
+                + "give it a separate alarm color."
+        )
+        lines.append("")
+        lines.append(contentsOf: Self.entryLines)
+        lines.append("")
+        lines.append(
+            "Glide the levels between states over about "
+                + "\(MurmurExport.number(MurmurStateTreatment.transitionDuration)) seconds "
+                + "with a smoothstep. A cut reads as a different indicator rather "
+                + "than a change of mind. The entry runs once on top of that, "
+                + "measured from the instant of the change."
+        )
+
+        if style.hasArc {
+            lines.append("")
+            lines.append(
+                "This style has an arrival arc, so entering thinking or success "
+                    + "restarts it from that moment."
+            )
+        }
+        return lines
+    }
+
+    /// What the four entry names mean, in the terms whoever reimplements
+    /// this will need. The numbers match MurmurEntry.
+    private static var entryLines: [String] {
+        [
+            "The entry is the one-shot the change itself looks like:",
+            "- none: nothing beyond the level glide.",
+            "- wake: the tempo overshoots by 60 percent and decays back with a "
+                + "0.4 second time constant. The material wakes up.",
+            "- swell: the glow rises to 35 percent above its level, peaking near "
+                + "0.4 seconds and gone by 1.5. The arrival breath.",
+            "- stutter: the clock catches twice inside the first half second, "
+                + "then settles clean. Keep the catches soft enough to read as "
+                + "the material snagging; a hard hold reads as a broken frame.",
+        ]
+    }
+
     private static var packageInstallLines: [String] {
         [
             "Add the package dependency:",
@@ -181,6 +283,11 @@ extension MurmurConfiguration {
         }
         if ink != defaults.ink { mutations.append("c.ink = \(MurmurExport.literal(ink))") }
         if tone != defaults.tone { mutations.append("c.tone = \(MurmurExport.literal(tone))") }
+        for state in customizedStates {
+            mutations.append(
+                "c.treatments[.\(state.rawValue)] = \(MurmurExport.literal(treatment(for: state)))"
+            )
+        }
 
         let configuration: String
         if mutations.isEmpty {
@@ -290,6 +397,15 @@ enum MurmurExport {
     static func literal(_ rgba: MurmurRGBA) -> String {
         let base = "MurmurRGBA(r: \(number(rgba.r)), g: \(number(rgba.g)), b: \(number(rgba.b))"
         return rgba.a >= 1 ? base + ")" : base + ", a: \(number(rgba.a)))"
+    }
+
+    static func literal(_ treatment: MurmurStateTreatment) -> String {
+        "MurmurStateTreatment("
+            + "speedFactor: \(number(treatment.speedFactor)), "
+            + "glowFactor: \(number(treatment.glowFactor)), "
+            + "depthFactor: \(number(treatment.depthFactor)), "
+            + "hueShiftDelta: \(number(treatment.hueShiftDelta)), "
+            + "entry: .\(treatment.entry.rawValue))"
     }
 
     static func colorLiteral(_ rgba: MurmurRGBA) -> String {

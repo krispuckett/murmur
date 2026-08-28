@@ -1,4 +1,4 @@
-// The Liquid pack. Six thinking indicators made of molten weight: the pour's
+// The Liquid pack. Eight thinking indicators made of molten weight: the pour's
 // blood, none of the pour's form.
 //
 //   ml_eddy        thought circling a centre. A vortex's differential rotation,
@@ -21,8 +21,14 @@
 //                  diagonal. An arc: the approach is a law, the distance
 //                  travelled is that law's exact integral, and joined is the
 //                  rest state, still moving, still turning over at the meeting.
+//   ml_melt        a heavy lump of iron softening under its own heat. An
+//                  implicit surface, so its drips stretch necks and are taken
+//                  back rather than falling; the body rings when one lands.
+//   ml_glaze       a thin film sliding over a dark form, pooling in its
+//                  hollows, brightest at its own edge, with the light inside
+//                  running faster than the film that carries it.
 //
-// WHAT THE FAMILY SHARES, AND WHY THAT IS NOT A LIMIT. These six are one
+// WHAT THE FAMILY SHARES, AND WHY THAT IS NOT A LIMIT. These eight are one
 // ecosystem, not one animal. The shared blood is the material and the light:
 // warm liquid light computed per pixel out of gradient noise, walked through the
 // house OKLAB rail so a single hue family holds, kneed where it runs hot, and
@@ -55,10 +61,16 @@
 //                 between about 0.05 and 0.80 on it, so the brightest thing on
 //                 screen is the tone with a little light behind it and the pale
 //                 stop is somewhere they can reach, not somewhere they sit.
-//   the tempo     motion is felt, not watched. The fastest thing in the pack
-//                 crosses the disc in about eighteen seconds; most of it takes
-//                 half a minute. Nothing here pulses: the family verbs are FLOW
-//                 and SETTLE, and a brightness that breathes is neither.
+//   the tempo     ATTENTION, NOT ATMOSPHERE. The first tune of this pack was
+//                 built to the ambient bar the pour is held to, and on device it
+//                 read as one notch too still: a thinking indicator is a
+//                 statement that work is happening, and an ambient card is not.
+//                 Every internal rate was lifted 1.5x to 1.9x, carriers further
+//                 than details so the set reads faster without reading busier.
+//                 The fastest thing in the pack now crosses the disc in about
+//                 ten seconds and the slowest in twenty. Nothing here pulses:
+//                 the family verbs are FLOW and SETTLE, and a brightness that
+//                 breathes is neither.
 //   the cost      fixed-count loops, fBm at three octaves, nine field taps a
 //                 pixel at the worst (confluence) and three at the best (well).
 //                 An indicator at 46 pt has to be free, and a 300 pt one has to
@@ -423,31 +435,31 @@ static inline float2 ml_uv(float2 position, float2 size) {
 
     // The core wanders. Two incommensurate rates, so it traces a slow open curve
     // that never repeats inside a session and never looks like an orbit.
-    float2 core = (0.028 + 0.070 * drift) * float2(sin(T * 0.117), cos(T * 0.091 + 1.7));
+    float2 core = (0.028 + 0.070 * drift) * float2(sin(T * 0.199), cos(T * 0.155 + 1.7));
     float2 p = uv - core;
     float r = length(p);
 
     const float RC = 0.17;   // core softening: keeps omega finite at the middle
     const float R0 = 0.25;   // the reference ring the speed is pinned to
     float fall = mix(0.55, 1.45, shear);
-    float omega = (0.055 + 0.150 * swirl) * pow((R0 + RC) / (r + RC), fall);
+    float omega = (0.110 + 0.300 * swirl) * pow((R0 + RC) / (r + RC), fall);
 
     // Time enters HERE, in the coordinate, and only here.
     //
     // The field is not born unwound. Rendered from a standing start it is a
-    // scatter of round blobs for the first ten seconds and only becomes an eddy
-    // once the differential rotation has had time to draw them out, and a
-    // thinking indicator does not get ten seconds to become itself. So the twist
-    // is measured from fourteen seconds before the view appeared. That is not a
-    // cheat: fourteen seconds is where winding and renewal balance, so it is the
+    // scatter of round blobs for its first several seconds and only becomes an
+    // eddy once the differential rotation has had time to draw them out, and a
+    // thinking indicator does not get several seconds to become itself. So the
+    // twist is measured from seven seconds before the view appeared. That is not a
+    // cheat: seven seconds is where winding and renewal balance, so it is the
     // state the field settles into and stays in. Starting there means the first
     // frame is the steady state and every frame after it is too.
-    float th = omega * (T + 14.0);
+    float th = omega * (T + 7.0);
     float cs = cos(th), sn = sin(th);
     float2 q = float2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
 
     float f = 3.8 / S;     // about three broad forms across the disc
-    float3 dom = float3(q * f, (0.050 + 0.065 * drift) * T);
+    float3 dom = float3(q * f, (0.085 + 0.110 * drift) * T);
     float n = ml_fbm3(dom, 3, 2.03, 0.5);
     float g = ml_noise3(dom * 2.85 + float3(11.3, 5.1, 0.0));
 
@@ -549,18 +561,18 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // reading as something. Off centre it reads as a place the material is
     // going, which is what it is.
     float ecc = 0.20 * offset;
-    float ea = 0.043 * T + 0.9;
+    float ea = 0.065 * T + 0.9;
     float2 core = ecc * float2(cos(ea), sin(ea));
     float2 p = uv - core;
     float r = length(p);
     float2 dir = p / max(r, 1e-5);
 
     // The curl. Differential, so the mouth turns faster than the rim. About a
-    // radian and a third of twist between rim and throat over a form's whole
+    // radian of twist between rim and throat over a form's whole
     // transit: enough that the wisps lean into the mouth instead of pointing at
     // it, which is most of what stops a radial draw reading as a starburst, and
     // well short of the eddy's winding, which is that species' whole subject.
-    float spin = (0.016 + 0.060 * churn) / (r + 0.26);
+    float spin = (0.026 + 0.096 * churn) / (r + 0.26);
     float th = spin * T;
     float cs = cos(th), sn = sin(th);
     float2 d2 = float2(cs * dir.x - sn * dir.y, sn * dir.x + cs * dir.y);
@@ -578,7 +590,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // start or end at the same place. Same spacing, same length and same phase
     // are the three things that were making the eye call it a mechanism, and
     // this removes all three for one noise evaluation.
-    float warp = ml_noise3(float3(p * (2.2 / S), 51.0 + 0.030 * T));
+    float warp = ml_noise3(float3(p * (2.2 / S), 51.0 + 0.045 * T));
 
     // The remap, and the exponent is gone: it is linear now. A compressing power
     // made every form about five times longer than it was wide, and five times
@@ -596,11 +608,11 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // because the scroll is also what stretches the forms, and a long one puts
     // the spokes back.
     const float CYC = 0.60;
-    float u = (0.045 + 0.130 * pull) * T / CYC;
+    float u = (0.086 + 0.247 * pull) * T / CYC;
     float f = fract(u);
     float kf = floor(u);
     float w = smoothstep(0.0, 1.0, f);
-    float zdrift = 0.020 * T;
+    float zdrift = 0.030 * T;
 
     float3 dA = float3(d2 * (g + f * CYC),         7.0 + kf * 5.3 + zdrift);
     float3 dB = float3(d2 * (g + (f + 1.0) * CYC), 7.0 + (kf - 1.0) * 5.3 + zdrift);
@@ -612,7 +624,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // a big shape there is nothing at cell size. And a well fed evenly from
     // every direction is a diagram: real infall arrives from somewhere, so whole
     // sectors of this one go nearly dark and others carry most of the material.
-    float env = 0.5 + 0.5 * ml_noise3(float3(p * (1.3 / S), 31.0 + 0.045 * T));
+    float env = 0.5 + 0.5 * ml_noise3(float3(p * (1.3 / S), 31.0 + 0.068 * T));
 
     float streams = smoothstep(0.30, 0.92, 0.5 + 1.05 * n);
     float conv = smoothstep(0.48, 0.10, r);          // 0 at the rim, 1 at the mouth
@@ -677,7 +689,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
 //   c0 reach   how far the body travels
 //   c1 lean    how steeply the surface tilts at the turn
 //   c2 foam    how much light the moving crest throws
-//   c3 period  the there-and-back time, 15 s at 0 down to 6 s at 1
+//   c3 period  the there-and-back time, 10 s at 0 down to 4 s at 1
 [[ stitchable ]] half4 ml_tide(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -693,7 +705,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     float foam = clamp(c2, 0.0, 1.0);
     float per = clamp(c3, 0.0, 1.0);
 
-    float P = mix(15.0, 6.0, per);
+    float P = mix(10.0, 4.0, per);
     float w = 6.2831853 / P;
     float ph = w * T;
     float A = 0.16 + 0.30 * reach;
@@ -704,7 +716,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // The surface. uv.y grows DOWNWARD, so positive `below` is under water.
     // The base level sits a little above centre so the water is most of the
     // disc: a body of light with a lit surface, not a half-filled circle.
-    float ripple = 0.030 * S * ml_fbm1((uv.x - pos) * 2.4 / S + 0.35 * T, 3, 5.0);
+    float ripple = 0.030 * S * ml_fbm1((uv.x - pos) * 2.4 / S + 0.49 * T, 3, 5.0);
     float h = -0.080 + 0.55 * lean * sway * uv.x + ripple;
     float below = uv.y - h;
 
@@ -712,7 +724,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // The lean is in the material too: the body shears with depth the way a
     // column of water does when the whole bowl is tipped.
     float3 dom = float3((uv.x - pos - 0.30 * lean * sway * below) * f,
-                        uv.y * f * 0.90, 0.050 * T);
+                        uv.y * f * 0.90, 0.070 * T);
     float n = ml_fbm3(dom, 3, 2.03, 0.5);
 
     float body = smoothstep(-0.045, 0.075, below);
@@ -769,10 +781,12 @@ static inline float2 ml_uv(float2 position, float2 size) {
 // between them: three things, which is one more than a shear usually gives you
 // and the reason this holds up at 300 pt.
 //
-// THE SLIP IS SLOW. Thirty two thousandths of a frame width a second each way at
-// the default, so a feature takes most of half a minute to cross. Faster reads
-// as scrolling, and scrolling is the one thing a thinking indicator must never
-// look like.
+// THE SLIP IS THE FASTEST CARRIER IN THE PACK, and it can afford to be. What the
+// eye follows here is the SEAM, and the seam does not travel: it is an
+// interference pattern between two sheets, so doubling the slip makes the braid
+// turn over twice as fast in place rather than sliding twice as fast across.
+// That is the one style in the set where speed buys activity with no risk of the
+// thing a thinking indicator must never look like, which is scrolling.
 //
 //   c0 contrast   how tight the seam is against how present the veil is
 //   c1 slip       the differential speed of the two sheets
@@ -795,18 +809,18 @@ static inline float2 ml_uv(float2 position, float2 size) {
     float veil = clamp(c2, 0.0, 1.0);
     float bias = clamp(c3, 0.0, 1.0);
 
-    float iface = 0.52 * (bias - 0.5) + 0.030 * sin(T * 0.071);
+    float iface = 0.52 * (bias - 0.5) + 0.030 * sin(T * 0.099);
     float sfrac = (uv.y - iface) / 0.24;
     float mUp = 1.0 - smoothstep(-1.0, 1.0, sfrac);
     float overlap = 4.0 * mUp * (1.0 - mUp);
 
-    float u = 0.012 + 0.042 * slip;
+    float u = 0.023 + 0.080 * slip;
     float f = 3.6 / S;
     // Two sheets of the same material at slightly different scales and different
     // corners of the noise domain, so they are two sheets and not one sheet
     // sampled twice.
-    float3 qa = float3((uv.x - u * T) * f,        uv.y * f * 1.00,  2.0 + 0.040 * T);
-    float3 qb = float3((uv.x + u * T) * f * 1.07, uv.y * f * 0.92, 23.0 + 0.036 * T);
+    float3 qa = float3((uv.x - u * T) * f,        uv.y * f * 1.00,  2.0 + 0.060 * T);
+    float3 qb = float3((uv.x + u * T) * f * 1.07, uv.y * f * 0.92, 23.0 + 0.054 * T);
     float na = ml_fbm3(qa, 3, 2.03, 0.5);
     float nb = ml_fbm3(qb, 3, 2.03, 0.5);
 
@@ -833,7 +847,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // mass on both sides of it to be born between rather than a void.
     float t = 0.045 + (0.20 + 0.42 * veil) * base + 0.34 * braid;
     // THE WALK IS CAPPED BELOW THE PALE STOP, and this is the pour pack's
-    // pv_tint lesson arriving a second time. Of the six species this one keeps
+    // pv_tint lesson arriving a second time. Of the species here this one keeps
     // the most of its area near the tone, so the braid's peaks were the only
     // places in the pack routinely crossing 0.78 into the specular segment,
     // where the rail halves its chroma on the way to a pale highlight. The
@@ -899,7 +913,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     float flow = clamp(c3, 0.0, 1.0);
 
     float xa = uv.x / S;
-    float pth = 0.026 * T;                    // the river re-cuts itself, slowly
+    float pth = 0.049 * T;                    // the river re-cuts itself, slowly
     const float PF = 1.15;                    // the path's pitch, in xa
     const float DX = 0.055;                   // the slope's half step, in xa
 
@@ -913,7 +927,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
     // sometimes a lazy S, never a zigzag. The second term is a quarter-weight
     // whisper at twice the pitch, enough that the arc is not a parabola. All the
     // CHANGE comes from `pth` sliding the domain underneath at a fortieth of a
-    // cell a second, so the river re-cuts itself over about forty seconds
+    // cell a second, so the river re-cuts itself over about twenty seconds
     // without ever moving fast enough to watch. Slow domain drift, not per-x
     // detail: the same amount of life, none of the graph.
     float w0 = ml_vnoise1(xa * PF + pth, 7.0)
@@ -936,14 +950,14 @@ static inline float2 ml_uv(float2 position, float2 size) {
     wv *= 0.80 + 0.36 * (0.5 + 0.5 * ml_vnoise1(xa * 1.5 + 3.3, 19.0));
     float uu = dist / max(wv, 1e-4);
 
-    float travel = (0.20 + 0.55 * flow) * T;
+    float travel = (0.36 + 0.99 * flow) * T;
     // The cross-channel coordinate is CLAMPED before it goes into the water
     // field, and that clamp is not tidiness. uu grows without bound away from
     // the centreline, so an unclamped sample makes the width modulation below a
     // function of how far out you are, and the channel grows feathers: vertical
     // streaks combed out of it at every bend. Two channel widths of cross
     // variation is all the water has; past that it is the same water.
-    float3 qf = float3(xa * 3.4 - travel, clamp(uu, -2.0, 2.0) * 0.42, 4.0 + 0.030 * T);
+    float3 qf = float3(xa * 3.4 - travel, clamp(uu, -2.0, 2.0) * 0.42, 4.0 + 0.042 * T);
     float water = saturate(0.45 + 0.95 * ml_fbm3(qf, 3, 2.03, 0.5));
 
     // The water swells and pinches the channel it is in, so the SILHOUETTE
@@ -958,7 +972,7 @@ static inline float2 ml_uv(float2 position, float2 size) {
 
     // The ground. Two octaves is enough: it is meant to have form at 300 pt and
     // to be invisible at 20, and a third octave only buys noise at both.
-    float3 qm = float3(uv.x * 2.6 / S, uv.y * 2.6 / S, 30.0 + 0.045 * T);
+    float3 qm = float3(uv.x * 2.6 / S, uv.y * 2.6 / S, 30.0 + 0.063 * T);
     float ground = smoothstep(0.25, 0.95, 0.5 + 1.0 * ml_fbm3(qm, 2, 2.03, 0.5));
 
     // THE BANKS ARE SHOULDERS, NOT A RING. The first cut used a tight Gaussian
@@ -993,14 +1007,21 @@ static inline float2 ml_uv(float2 position, float2 size) {
 /// tau = joinTime the approach is within five per cent of the hold, which is the
 /// instant a person would call it joined.
 ///
-/// HOLD IS 0.16, not the exhale's 0.055, and the difference is the species. A
+/// HOLD IS 0.26, not the exhale's 0.055, and the difference is the species. A
 /// breath that has been let out is nearly still and should be. A river that has
 /// taken in another river is a bigger river: it is going somewhere at the end,
-/// so the rest state here keeps about a sixth of its arrival speed forever, and
-/// the joined channel's light still moves down it. Returns (v, D, e), where e is
+/// so the rest state here keeps about a quarter of its arrival speed forever,
+/// and the joined channel's light still moves down it.
+///
+/// It was a sixth, and a sixth measured out at about one code value of change a
+/// second across the disc, which is a whisper nobody can hear. This style spends
+/// almost all of its life settled: it reaches the hold in under four seconds and
+/// then a person waits on it. A settle state that cannot be seen to move is not
+/// a settle state, it is a freeze with a good excuse, and the whole point of an
+/// indicator is that work is visibly happening. Returns (v, D, e), where e is
 /// the fraction of the approach still to run.
 static inline float3 ml_join_law(float tau, float joinTime) {
-    const float HOLD = 0.16;
+    const float HOLD = 0.26;
     float E = max(joinTime, 0.50);
     float k = 3.0 / E;
     float e = exp(-k * max(tau, 0.0));
@@ -1066,12 +1087,12 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float shimmer = clamp(c2, 0.0, 1.0);
     float angleK = clamp(c3, 0.0, 1.0);
 
-    // The law runs on real seconds: five is the time a person waits for two
+    // The law runs on real seconds: 3.6 is about as long as a person waits for two
     // things to become one thing without wondering whether it is stuck.
     float tau = max(time - epoch, 0.0);
-    float3 law = ml_join_law(tau, 5.0);
+    float3 law = ml_join_law(tau, 3.6);
     float e = law.z;
-    float travel = law.y * 0.85 * max(speed, 0.0);
+    float travel = law.y * 1.53 * max(speed, 0.0);
 
     // THE JOINED FLOW LEAVES ALONG ITS OWN HEADING. Built on the frame's x axis
     // this style settled into a horizontal band, which is a silhouette three
@@ -1160,7 +1181,7 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float shN = ml_noise3(float3(sAx * 7.0 / S - travel * 1.9, nAx * 7.0 / S, 0.40 * travel));
     float churnUp = (0.10 + 0.30 * shimmer) * meet * (0.45 + 0.55 * (0.5 + 0.5 * shN));
 
-    float3 qh = float3(uv.x * 2.4 / S, uv.y * 2.4 / S, 40.0 + 0.035 * T);
+    float3 qh = float3(uv.x * 2.4 / S, uv.y * 2.4 / S, 40.0 + 0.049 * T);
     float haze = smoothstep(0.28, 0.96, 0.5 + 1.0 * ml_fbm3(qh, 2, 2.03, 0.5));
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
@@ -1169,4 +1190,287 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float t = 0.045 + 0.12 * haze + 0.58 * chan + 0.05 * (gA2 + gB2) + churnUp;
     float hot = chan * chan * 0.90 + churnUp * 0.80;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
+}
+
+// MARK: - 7. Melt
+
+// MELT. A heavy molten mass, softening and reforming under its own heat.
+//
+// THE SILHOUETTE IS THE SPECIES, and it is the one shape the other six do not
+// own. Every style before this fills its disc: a spiral across the whole of it,
+// a body under a level, a band, an arc, a fork. This one is a LUMP. A compact
+// closed form sitting in ink with a lot of dark around it, and what it does is
+// change shape. Nothing else in the pack has an outline you could trace.
+//
+// SO THE BODY IS AN IMPLICIT SURFACE, not a threshold on noise. Four Gaussian
+// lobes summed and cut at a level: the body, and three drips. Summing before
+// cutting is the whole reason this reads as one viscous material rather than as
+// four things near each other, because where two lobes overlap the sum crosses
+// the level in the space BETWEEN them and draws a neck. Pull a lobe away and the
+// neck thins, stretches and finally lets go, and it does all of that for free,
+// out of the arithmetic, the way real surface tension does. It is also the
+// reason this can have drips at all without breaking the family's oldest rule:
+// a drip here is never a circle sitting on its own, it is a swelling of one
+// body that is always on its way back in.
+//
+// NOTHING IS LOST AND NOTHING FALLS. Each drip runs a cycle: pushed out over
+// about seven tenths of it, drawn back in over the other three, so the reach is
+// slow and the return is more than twice as quick, which is what weight looks
+// like. It never leaves the frame and it never detaches. When it lands, the body
+// RINGS: exp(-5.5 ph) sin(16 ph), a damped oscillation starting at the instant
+// of absorption and gone about half a cycle later. That ring is the whole
+// argument for the style. Iron that swallowed a drip should wobble.
+//
+// A CRUST WITH HOT CRACKS. Molten iron is not lit like water: the skin is the
+// coolest part of it and the light comes from inside, through the places where
+// the crust has opened. So the shading runs the other way from the rest of the
+// pack. Depth into the mass sets a dull base glow, and a separate fBm read in
+// the mass's own warped frame supplies the veins, which are the only genuinely
+// bright thing here. The surface itself stays dark, and the mass wears a heat
+// aura made from the same lobes at two and a half times their radius, so the
+// disc around it is warm rather than dead.
+//
+// TIME ENTERS AS A WARP. The mass writhes because the coordinate it is measured
+// in writhes: two octaves of fBm displacing the position before the lobes are
+// evaluated at all. Turn the heat up and the displacement grows, which is the
+// honest way for a material to get more fluid.
+//
+//   c0 mass         how much iron there is
+//   c1 viscosity    how slowly it moves, and how fat a neck it holds before it
+//                   lets go. Default 0.6, thicker than the middle, because this
+//                   is the heavy one in the family and it should feel it
+//   c2 dripAbsorb   how far a drip reaches, and how hard the body rings when it
+//                   comes home
+//   c3 heat         how far the crust has opened: the writhe and the veins
+[[ stitchable ]] half4 ml_melt(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = ml_uv(position, size);
+    float S = max(formScale, 0.10);
+    float T = time * max(speed, 0.0);
+
+    float massK = clamp(c0, 0.0, 1.0);
+    float visc = clamp(c1, 0.0, 1.0);
+    float absorb = clamp(c2, 0.0, 1.0);
+    float heat = clamp(c3, 0.0, 1.0);
+
+    // Viscosity is a clock. Iron at temperature moves at a rate its own
+    // thickness sets, so one dial slows every motion in the style together
+    // rather than each of them separately.
+    float rate = mix(1.45, 0.62, visc);
+
+    // THE WRITHE. Two octaves displacing the domain before anything is measured
+    // in it, so the mass deforms rather than being a fixed shape with a texture.
+    float2 wq = uv * (2.4 / S);
+    float wz = 70.0 + 0.20 * rate * T;
+    float w1 = ml_fbm3(float3(wq, wz), 2, 2.03, 0.5);
+    float w2 = ml_fbm3(float3(wq + float2(5.3, -2.1), wz + 17.0), 2, 2.03, 0.5);
+    float2 p = uv + float2(w1, w2) * (0.055 + 0.085 * heat) * S;
+
+    // The body's radius, and it is set against the drip's reach below rather
+    // than chosen on its own. The first cut had the reach at two thirds of R,
+    // which means every drip lived entirely INSIDE the body and no neck ever
+    // formed: the whole mechanism was running and none of it was visible. The
+    // reach has to clear R by about a third for the sum to cross its level in
+    // the gap and draw the neck that is the point of the style.
+    float R = (0.165 + 0.075 * massK) * S;
+
+    // The drips, and the ring the body makes when it takes one back.
+    float ring = 0.0;
+    float lobes = 0.0;
+    for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        float cyc = rate * T * (0.150 + 0.034 * fi) + fi * 0.37;
+        float ph = fract(cyc);
+        // Out over seven tenths, back over three: slow reach, quick return.
+        float g = (ph < 0.70) ? smoothstep(0.0, 1.0, ph / 0.70)
+                              : 1.0 - smoothstep(0.0, 1.0, (ph - 0.70) / 0.30);
+        // The absorption ring, measured from the instant of landing. Both ends
+        // of the cycle sit at zero, so the wrap is silent.
+        ring += exp(-5.5 * ph) * sin(16.0 * ph);
+
+        // A new heading each cycle. floor(cyc) jumps, but it jumps at exactly
+        // the phase where g is zero and the drip has no extension, so nothing
+        // on screen moves when it does.
+        float a = fi * 2.094 + 0.09 * rate * T
+                + 2.4 * ml_vnoise1(floor(cyc) * 1.7 + fi * 9.0, 5.0);
+        float2 dv = float2(cos(a), sin(a));
+        // It thins as it stretches, and a thicker material thins less.
+        float rr = R * (0.68 - 0.24 * g * (1.0 - 0.45 * visc));
+        float2 dp = p - dv * ((0.160 + 0.210 * absorb) * S * g);
+        lobes += exp(-dot(dp, dp) / max(rr * rr, 1e-6));
+    }
+
+    float Rb = R * (1.0 + (0.09 + 0.20 * absorb) * ring);
+    float body2 = dot(p, p) / max(Rb * Rb, 1e-6);
+    float field = exp(-body2) + lobes;
+
+    // The cut. Below it there is no iron; the crossing is soft over a wide
+    // enough span that the skin never has an edge.
+    float skin = smoothstep(0.34, 0.62, field);
+    float deep = smoothstep(0.34, 1.35, field);      // how far inside we are
+
+    // The heat it gives off. The same lobes at two and a half times their
+    // radius, so the aura belongs to the mass's actual shape instead of being a
+    // soft circle painted behind it.
+    float aura = exp(-body2 / 6.25);
+
+    // THE VEINS, read in the mass's own warped frame so they deform with it.
+    float3 qi = float3(p * (3.6 / S), 80.0 + 0.30 * rate * T);
+    float vein = smoothstep(0.42, 0.93, 0.5 + 1.05 * ml_fbm3(qi, 3, 2.03, 0.5));
+    float cracks = skin * vein * (0.40 + 0.60 * heat) * (0.35 + 0.65 * deep);
+
+    MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
+
+    // The crust is DARKER than its cracks, which is the whole lighting idea and
+    // the opposite of the rest of the pack: here the light is inside the
+    // material and only gets out where the skin has opened. Cut the base too
+    // generously, as the first pass did, and the mass is a flat orange lump with
+    // a few pale marks on it, which is a stone and not molten iron.
+    float t = 0.045
+            + aura * (0.070 + 0.055 * heat)
+            + skin * (0.095 + 0.190 * deep)
+            + cracks * 0.33;
+    // Capped below the pale stop, the undertow's correction a third time. The
+    // veins sit inside a mass that is already near the tone, so unchecked they
+    // walk the rail into the specular and the iron comes out cream. Iron does
+    // not go cream; it goes yellow-white only at temperatures this style is not
+    // depicting, and the emission rail drops to 0.84 for the same reason.
+    t = 0.74 * ml_knee(t / 0.74, 0.72);
+    float hot = cracks * 0.90;
+    return ml_write(pal, inkLin, t, hot, 0.84, glow, ml_bowl(uv), position * pixelScale);
+}
+
+// MARK: - 8. Glaze
+
+// GLAZE. A thin bright film sliding over a dark form, and the light travels in
+// the film.
+//
+// THREE THINGS ARE HAPPENING AT THREE SPEEDS, and the whole style is that
+// separation. The form beneath barely moves: two octaves of fBm drifting at a
+// fiftieth of a cell a second, dark, there to be a surface with relief and not
+// to be looked at. The film slides across it at a quarter of a frame width a
+// second. And the light inside the film runs a third again faster than the film
+// does, which is the literal reading of the brief and also true: a highlight on
+// moving water is not stuck to the water, it is where the slope happens to face
+// the light, and it outruns the liquid carrying it.
+//
+// THE FILM IS A WAVE FRONT, not a stripe. The field is sampled at five times the
+// pitch ALONG the travel direction and one and a half times ACROSS it, so its
+// forms come out three times longer across the flow than along it: bands, with
+// ragged ends and irregular spacing, two or three in the disc at once. A stripe
+// would have to be drawn; this is what a noise field looks like when you squash
+// it in one direction, which means it can never be evenly spaced and never has
+// a hard edge.
+//
+// THE MENISCUS IS FREE, and it is the sheen. 4 f (1 - f) peaks exactly where the
+// film's density crosses one half, which is its EDGE, and falls to nothing both
+// in the open water and off the dry side. That is where a real film is
+// brightest, because the edge is where the surface curves hardest and catches
+// the most light, and it costs one multiply. It also means the bright line is
+// always attached to the film's own boundary rather than being a second thing
+// travelling near it.
+//
+// THE FILM POOLS. Its density is biased down by the form's relief, so it runs
+// thick in the hollows and thins over the ridges as it passes. That single term
+// is what makes this read as liquid ON something rather than a band drawn ACROSS
+// something, and it is the reason the form beneath needs relief at all.
+//
+// WHY IT IS NOT THE TIDE AND NOT THE UNDERTOW. The tide has a LEVEL: a body of
+// liquid with a surface and a bowl to sit in. This has no level and no volume,
+// only a skin passing over. The undertow is two layers and the picture is their
+// seam, which stays where it is; this is ONE film and the picture is its travel.
+// The bands run at a steep diagonal for the same reason, so nothing at cell size
+// can confuse the two.
+//
+//   c0 sheet   how much of the form is wet at once
+//   c1 slide   how fast the film crosses
+//   c2 sheen   the meniscus and the glints travelling inside it
+//   c3 tilt    the heading the film runs along, which tips the whole grammar
+[[ stitchable ]] half4 ml_glaze(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch
+) {
+    float2 uv = ml_uv(position, size);
+    float S = max(formScale, 0.10);
+    float T = time * max(speed, 0.0);
+
+    float sheetK = clamp(c0, 0.0, 1.0);
+    float slide = clamp(c1, 0.0, 1.0);
+    float sheenK = clamp(c2, 0.0, 1.0);
+    float tilt = clamp(c3, 0.0, 1.0);
+
+    float th = mix(-1.00, -0.15, tilt);
+    float2 dv = float2(cos(th), sin(th));
+    float2 ev = float2(-dv.y, dv.x);
+    float along = dot(uv, dv);
+    float across = dot(uv, ev);
+
+    // THE FORM. Dark, slow, and only ever a surface for something else to run
+    // over. Two octaves: it needs relief, not detail.
+    float3 qf = float3(uv * (2.3 / S), 60.0 + 0.020 * T);
+    float relief = saturate(0.5 + 1.0 * ml_fbm3(qf, 2, 2.03, 0.5));
+
+    // THE FILM, squashed along the travel so its forms are wave fronts.
+    float travel = (0.10 + 0.20 * slide) * T;
+    // TWO OCTAVES, NOT THREE, and the reason is the per-octave rotation. ML_ROT
+    // is what stops an fBm growing a plaid, but it also turns each octave's axes
+    // relative to the last, so the squash that makes these forms into bands
+    // survives the first octave and is scrambled by the third. Cut at three, the
+    // film came out as disconnected pale shards: a band broken into flakes,
+    // which is peeling paint and not running liquid. Two octaves keeps the
+    // anisotropy, and the across pitch drops to 0.7 so barely half a cell spans
+    // the disc sideways and a front stays continuous the whole way over.
+    float3 qs = float3((along - travel) * (5.0 / S), across * (0.85 / S), 40.0 + 0.030 * T);
+    // Biased by the relief, so it pools in the hollows and thins on the ridges.
+    float wet = 0.5 + 1.15 * ml_fbm3(qs, 2, 2.03, 0.5) - 0.34 * (relief - 0.5);
+    // A HIGH cut, and this is the difference between a film and a camouflage
+    // pattern. Cut near the middle of the field's range and half the disc is wet
+    // at once: broad pale patches with the dry form showing between them, which
+    // is marbling and belongs to another pack. Cut in the upper fifth and two or
+    // three narrow bands cross a dark form, which is a sheet of liquid running
+    // over something.
+    float cut = mix(0.82, 0.52, sheetK);
+    float film = smoothstep(cut - 0.13, cut + 0.17, wet);
+
+    // The meniscus: brightest exactly at the film's own boundary.
+    float edge = 4.0 * film * (1.0 - film);
+
+    // The light inside it, outrunning it by a third. Stretched across the flow,
+    // so these are broad sheens travelling along the front and never anything
+    // the eye could call a dot or a sparkle.
+    //
+    // THE PITCH IS 4.0 AND IT WAS 11, which was the one real mistake in this
+    // style. Speed on screen and pitch in the domain are not the same dial: at
+    // eleven the sheen crossed four noise cells a second and the whole disc
+    // decorrelated in a quarter of a second, which measures as motion and reads
+    // as a strobe. It was moving seven times faster than anything else in the
+    // pack. Same screen speed, a quarter of the pitch: the light still outruns
+    // the film carrying it, and now you can see it do it.
+    float gl = ml_noise3(float3((along - travel * 1.30) * (4.0 / S),
+                                across * (1.9 / S), 55.0 + 0.045 * T));
+    float spec = film * smoothstep(0.38, 0.96, 0.5 + gl);
+
+    MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
+
+    // The form is DARK. It is a surface for the film to run over and the eye
+    // should never be asked to look at it: lit any higher it stops being the
+    // ground and starts competing with the thing sliding across it.
+    float t = 0.045
+            + 0.055 + 0.130 * smoothstep(0.18, 0.95, relief)  // the dark form
+            + film * (0.070 + 0.090 * (1.0 - relief))         // the wet sheet
+            + edge * (0.115 + 0.175 * sheenK)                 // the meniscus
+            + spec * (0.060 + 0.160 * sheenK);
+    // Soft-capped below the rail's pale stop, the undertow's correction: a film
+    // is the brightest thing this pack draws and it should stay amber doing it.
+    t = 0.72 * ml_knee(t / 0.72, 0.72);
+    float hot = edge * (0.35 + 0.45 * sheenK) + spec * 0.55;
+    return ml_write(pal, inkLin, t, hot, 0.86, glow, ml_bowl(uv), position * pixelScale);
 }
