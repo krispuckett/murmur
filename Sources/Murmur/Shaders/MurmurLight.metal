@@ -716,7 +716,7 @@ static inline float mg_hold(float2 uv, float reach) {
     // coals shifting as they burn down, and it is the only motion the light
     // itself has: about a fortieth of the plume's rate, which is felt and not
     // watched.
-    float3 bp = float3(xs * 2.8, 0.0, t * 0.075);
+    float3 bp = float3(xs * 2.8, h * 1.2, t * 0.075);
     float bed = 0.5 + 0.5 * mg_fbm3(bp, 3, 2.03, 0.5);
     float bedThick = 0.050 + 0.060 * floorK;
     float bedMask = smoothstep(-0.085, -0.004, h) * exp(-max(h, 0.0) / bedThick);
@@ -1175,8 +1175,8 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
     float through = pass * lean * (0.42 + 0.58 * inner);
-    float lit = 0.04 + 0.84 * through + 0.30 * beam * (0.35 + 0.65 * pass * 0.0 + 0.65 * lean)
-              + 0.34 * lip;
+    float spill = beam * (0.35 + 0.65 * lean);
+    float lit = 0.04 + 0.84 * through + 0.30 * spill + 0.34 * lip;
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.92));
     float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(through, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 

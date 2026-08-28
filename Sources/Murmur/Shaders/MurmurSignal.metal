@@ -850,8 +850,9 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float k = mix(4.20, 1.75, afterglow);             // and how long
     float pulse = exp(k * (cos(skew) - 1.0));
 
-    float e = clamp(chan * (0.13 + 0.87 * pulse)
-                    + afterglow * 0.30 * halo * pulse * chan, 0.0, 1.0);
+    // The 0.13 floor is the medium at rest: dark, but a material and not a hole,
+    // so an impulse arrives INTO something instead of onto nothing.
+    float e = chan * (0.13 + 0.87 * pulse) + afterglow * 0.30 * halo * pulse * chan;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.82, 0.75);
