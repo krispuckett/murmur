@@ -38,16 +38,57 @@ final class LabModel {
 
     /// The entry envelope belonging to the state currently selected.
     var entry: MurmurEntry {
-        config.treatment(for: state).entry
+        config.entry(for: state)
     }
 
     func cycleEntry() {
         let all = MurmurEntry.allCases
         let next = all[((all.firstIndex(of: entry) ?? 0) + 1) % all.count]
-        var treatment = config.treatment(for: state)
-        treatment.entry = next
-        config.treatments[state] = treatment
+        config.entries[state] = next
         demoTick += 1
+    }
+
+    // MARK: - The state being edited
+
+    /// Every dial in the panel reads and writes through here, so selecting a
+    /// state in the row above swaps the whole panel to that state's design.
+    /// Writing back into the dictionary is the save point: there is no commit
+    /// step and nothing to lose by switching away.
+    var parameters: MurmurParameters {
+        get { config.parameters(for: state) }
+        set { config.states[state] = newValue }
+    }
+
+    /// The character array, always four long, for the state being edited.
+    var character: [Double] {
+        config.resolvedParameters(for: state).character
+    }
+
+    /// What this state was tuned at before anyone touched it. Tapping a dial's
+    /// value returns it here, not to a global default: idle's rest speed is
+    /// not thinking's.
+    var seed: MurmurParameters {
+        state.seedParameters(for: config.style)
+    }
+
+    /// A dial's binding into the selected state.
+    func dial(_ keyPath: WritableKeyPath<MurmurParameters, Double>) -> Binding<Double> {
+        Binding(
+            get: { self.parameters[keyPath: keyPath] },
+            set: { self.parameters[keyPath: keyPath] = $0 }
+        )
+    }
+
+    /// One character knob's binding into the selected state.
+    func knob(_ index: Int) -> Binding<Double> {
+        Binding(
+            get: { self.character[index] },
+            set: { newValue in
+                var updated = self.character
+                updated[index] = newValue
+                self.parameters.character = updated
+            }
+        )
     }
 
     /// The preview grounds the field in whatever the stage is, the same swap

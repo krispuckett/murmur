@@ -35,7 +35,20 @@ struct RootView: View {
             if let style = Self.launchStyle {
                 path.append(style)
             }
+            // -openState success arrives a beat after launch so the state
+            // CHANGE runs on screen: entries and flashes are only visible on
+            // the way into a state, which is the thing a screenshot rig is
+            // usually trying to catch.
+            if let state = Self.launchState {
+                try? await Task.sleep(for: .seconds(1.2))
+                model.state = state
+            }
         }
+    }
+
+    private static var launchState: MurmurState? {
+        guard let raw = UserDefaults.standard.string(forKey: "openState") else { return nil }
+        return MurmurState(rawValue: raw)
     }
 
     /// `simctl launch <sim> com.krispuckett.MurmurLab -openStyle eddy` opens

@@ -50,11 +50,6 @@ struct Studio: View {
         }
         .task(id: style) {
             model.select(style)
-            // A decoded or hand-edited configuration can arrive short; the
-            // character dials index straight into this array.
-            if model.config.character.count != 4 {
-                model.config.character = model.config.resolvedCharacter
-            }
         }
     }
 }
@@ -239,26 +234,29 @@ private struct StudioPanel: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                section("Motion") {
-                    DialRow(label: "speed", value: $model.config.speed,
-                            range: 0.25...2, defaultValue: 1)
-                    DialRow(label: "formScale", value: $model.config.formScale,
-                            range: 0.5...2, defaultValue: 1)
-                    DialRow(label: "depth", value: $model.config.depth,
-                            range: 0.3...2, defaultValue: 1)
-                    DialRow(label: "glow", value: $model.config.glow,
-                            range: 0.25...2, defaultValue: 1)
-                    DialRow(label: "hueShift", value: $model.config.hueShift,
-                            range: -0.6...0.6, defaultValue: 0, signed: true)
+                // The state's name rides its section headings. Colors and the
+                // pill below say nothing, which is how you can tell they are
+                // shared rather than per state.
+                section("Motion, \(model.state.rawValue)") {
+                    DialRow(label: "speed", value: model.dial(\.speed),
+                            range: 0.25...2, defaultValue: seed.speed)
+                    DialRow(label: "formScale", value: model.dial(\.formScale),
+                            range: 0.5...2, defaultValue: seed.formScale)
+                    DialRow(label: "depth", value: model.dial(\.depth),
+                            range: 0.3...2, defaultValue: seed.depth)
+                    DialRow(label: "glow", value: model.dial(\.glow),
+                            range: 0.25...2, defaultValue: seed.glow)
+                    DialRow(label: "hueShift", value: model.dial(\.hueShift),
+                            range: -0.6...0.6, defaultValue: seed.hueShift, signed: true)
                 }
 
-                section("Character") {
+                section("Character, \(model.state.rawValue)") {
                     ForEach(Array(style.characterKnobs.enumerated()), id: \.offset) { index, knob in
                         DialRow(
                             label: knob.label,
-                            value: $model.config.character[index],
+                            value: model.knob(index),
                             range: 0...1,
-                            defaultValue: knob.defaultValue
+                            defaultValue: seedCharacter(index, fallback: knob.defaultValue)
                         )
                     }
                 }
@@ -292,9 +290,12 @@ private struct StudioPanel: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
-            .padding(.bottom, 40)
+            .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
+        // The scroll view runs to the screen edge, so without this the last
+        // row ends up under the home indicator.
+        .safeAreaPadding(.bottom, 20)
         // A soft edge rather than a hairline or a platter: rows dissolve into
         // the ground as they reach the pinned region. Painted in the ground
         // color rather than masked, which is equivalent over a solid ground
@@ -359,6 +360,15 @@ private struct StudioPanel: View {
 
     private var displayLabel: String {
         model.pillLabel.isEmpty ? "Thinking..." : model.pillLabel
+    }
+
+    /// The selected state's untouched design, which is what a dial's value
+    /// resets to when it is tapped.
+    private var seed: MurmurParameters { model.seed }
+
+    private func seedCharacter(_ index: Int, fallback: Double) -> Double {
+        let values = seed.resolvedCharacter(for: model.config.style)
+        return index < values.count ? values[index] : fallback
     }
 
     private var toneColor: Binding<Color> {

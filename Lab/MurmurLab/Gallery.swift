@@ -31,8 +31,9 @@ struct Gallery: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 4)
-            .padding(.bottom, 48)
+            .padding(.bottom, 24)
         }
+        .safeAreaPadding(.bottom, 20)
         .background(LabTheme.stage.ignoresSafeArea())
         .navigationDestination(for: MurmurStyle.self) { style in
             Studio(style: style)
