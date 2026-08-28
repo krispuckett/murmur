@@ -5,6 +5,11 @@
 // and every number spelled out in prose underneath in case the snippet has
 // to be adapted.
 //
+// Since a state is a full design, the export has to carry five dial sets,
+// not one. It prints the construction for every state that departs from its
+// seed and lists all five in prose, so nothing depends on a reader knowing
+// what the seeds are.
+//
 // House voice throughout: plain sentences, no em dashes, no adjectives that
 // sell. The agent reading this needs facts, not a pitch.
 
@@ -89,18 +94,18 @@ extension MurmurConfiguration {
         out.append("```swift")
         switch surface {
         case .pill:
-            out.append(packageSnippet(call: "MurmurPill(Self.murmur)"))
+            out.append(packageSnippet(call: "MurmurPill(Self.murmur, state: state)"))
         case .indicator:
             out.append(
                 packageSnippet(
-                    call: "MurmurView(Self.murmur)\n            .frame(width: 46, height: 46)"
+                    call: "MurmurView(Self.murmur, state: state)\n            .frame(width: 46, height: 46)"
                 )
             )
         case .swiftUIOnly:
             if packSource != nil {
                 out.append(selfContainedSnippet())
             } else {
-                out.append(packageSnippet(call: "MurmurPill(Self.murmur)"))
+                out.append(packageSnippet(call: "MurmurPill(Self.murmur, state: state)"))
             }
         }
         out.append("```")
@@ -108,23 +113,10 @@ extension MurmurConfiguration {
 
         out.append(contentsOf: stateSection(for: surface))
         out.append("")
+        out.append(contentsOf: designSection())
+        out.append("")
 
-        // The numbers, in prose, so nothing depends on reading the snippet.
-        out.append("## The exact configuration")
-        out.append("")
-        out.append("Shared dials, 1.0 is the value each style was tuned at:")
-        out.append("- speed: \(MurmurExport.number(speed))")
-        out.append("- form scale: \(MurmurExport.number(formScale))")
-        out.append("- depth: \(MurmurExport.number(depth))")
-        out.append("- glow: \(MurmurExport.number(glow))")
-        out.append("- hue shift: \(MurmurExport.number(hueShift)) radians")
-        out.append("")
-        out.append("Character knobs, each 0 to 1, in c0 to c3 order:")
-        for pair in knobValues {
-            out.append("- \(pair.knob.label): \(MurmurExport.number(pair.value))")
-        }
-        out.append("")
-        out.append("Colors, sRGB:")
+        out.append("Colors, sRGB, shared by every state:")
         out.append("- ink, the ground the field dissolves into: \(ink.hexString)")
         out.append("- tone, the single hue family anchor: \(tone.hexString)")
         out.append("")
@@ -139,8 +131,8 @@ extension MurmurConfiguration {
             out.append("")
             out.append(
                 "This is the whole \(style.family.rawValue) pack: the shared kit and "
-                    + "its six species. Keep \(style.shaderName) and delete the other "
-                    + "five functions if you want a smaller file."
+                    + "its eight species. Keep \(style.shaderName) and delete the other "
+                    + "seven functions if you want a smaller file."
             )
             out.append("")
             out.append("```metal")
@@ -151,6 +143,8 @@ extension MurmurConfiguration {
         return out.joined(separator: "\n")
     }
 
+    // MARK: - The state sections
+
     /// How the host drives the thing. Without this an agent ships a pill
     /// that says "thinking" while the answer is already streaming.
     private func stateSection(for surface: MurmurExportSurface) -> [String] {
@@ -159,9 +153,11 @@ extension MurmurConfiguration {
         lines.append("")
         lines.append(
             "There are five states: idle, thinking, responding, success and "
-                + "error. They modulate the same material rather than swapping it "
-                + "out, so the indicator stays one object. Pass the state that "
-                + "matches what the agent is doing."
+                + "error. Each one is a complete design rather than a tint on a "
+                + "base, and the view crosses the whole dial set over about "
+                + "\(MurmurExport.number(MurmurState.transitionDuration)) seconds "
+                + "when the state changes. Pass the state that matches what the "
+                + "agent is doing."
         )
         lines.append("")
 
@@ -178,57 +174,75 @@ extension MurmurConfiguration {
             lines.append("")
         case .swiftUIOnly:
             lines.append(
-                "The view above holds one state. To drive five, scale the speed, "
-                    + "glow and depth arguments by the factors below and add the "
-                    + "hue delta to the hue shift argument."
+                "The view above holds one state. To drive five, swap in the dial "
+                    + "sets listed below, cross them over about "
+                    + "\(MurmurExport.number(MurmurState.transitionDuration)) seconds "
+                    + "with a smoothstep, and pass the matching stateIndex."
             )
             lines.append("")
         }
 
-        let custom = customizedStates
-        for state in MurmurState.allCases {
-            let t = treatment(for: state)
-            let hue = t.hueShiftDelta < 0 ? "" : "+"
-            let mark = custom.contains(state) ? "  (customized)" : ""
-            lines.append(
-                "- \(state.rawValue): speed x\(MurmurExport.number(t.speedFactor)), "
-                    + "glow x\(MurmurExport.number(t.glowFactor)), "
-                    + "depth x\(MurmurExport.number(t.depthFactor)), "
-                    + "hue \(hue)\(MurmurExport.number(t.hueShiftDelta)), "
-                    + "entry \(t.entry.rawValue)\(mark)"
-            )
-        }
-        lines.append("")
-
-        if !custom.isEmpty {
-            lines.append(
-                "The states marked customized were changed by hand and are "
-                    + "already in the snippet above. The rest are the package "
-                    + "defaults."
-            )
-            lines.append("")
-        }
-
-        lines.append(
-            "Error walks the same hue family down toward dark ember. Do not "
-                + "give it a separate alarm color."
-        )
-        lines.append("")
         lines.append(contentsOf: Self.entryLines)
         lines.append("")
         lines.append(
-            "Glide the levels between states over about "
-                + "\(MurmurExport.number(MurmurStateTreatment.transitionDuration)) seconds "
-                + "with a smoothstep. A cut reads as a different indicator rather "
-                + "than a change of mind. The entry runs once on top of that, "
-                + "measured from the instant of the change."
+            "Entering thinking or success also restarts the shader clock"
+                + (style.hasArc
+                    ? ", which is how this style replays its arrival arc."
+                    : ". This style has no arc, so that only matters for the entry.")
         )
+        lines.append("")
+        lines.append(
+            "The shader is told which state it is in: stateIndex is 0 idle, "
+                + "1 thinking, 2 responding, 3 success, 4 error, and stateTau is "
+                + "the seconds since that state was entered. During a crossfade "
+                + "the index is the state being entered."
+        )
+        return lines
+    }
 
-        if style.hasArc {
-            lines.append("")
+    /// The five designs in prose, so nothing depends on reading the snippet.
+    private func designSection() -> [String] {
+        var lines: [String] = []
+        lines.append("## The five state designs")
+        lines.append("")
+        lines.append(
+            "Each block is one complete dial set. 1.0 is the value the style "
+                + "itself was tuned at, so a number above 1 opens the material up "
+                + "and a number below 1 quiets it."
+        )
+        lines.append("")
+
+        let custom = Set(customizedStates)
+        let labels = style.characterKnobs.map(\.label)
+        for state in MurmurState.allCases {
+            let p = resolvedParameters(for: state)
+            let mark = custom.contains(state) ? ", customized" : ""
+            lines.append("\(state.rawValue) (entry \(entry(for: state).rawValue)\(mark))")
             lines.append(
-                "This style has an arrival arc, so entering thinking or success "
-                    + "restarts it from that moment."
+                "- speed \(MurmurExport.number(p.speed)), "
+                    + "form scale \(MurmurExport.number(p.formScale)), "
+                    + "depth \(MurmurExport.number(p.depth)), "
+                    + "glow \(MurmurExport.number(p.glow)), "
+                    + "hue shift \(MurmurExport.number(p.hueShift))"
+            )
+            lines.append(
+                "- "
+                    + zip(labels, p.character)
+                    .map { "\($0) \(MurmurExport.number($1))" }
+                    .joined(separator: ", ")
+            )
+            lines.append("")
+        }
+
+        if custom.isEmpty {
+            lines.append(
+                "Every state is at its seed, so constructing the configuration "
+                    + "from the style alone reproduces all of this."
+            )
+        } else {
+            lines.append(
+                "The states marked customized were tuned by hand and are written "
+                    + "out in the snippet above. The rest are seeds."
             )
         }
         return lines
@@ -239,7 +253,7 @@ extension MurmurConfiguration {
     private static var entryLines: [String] {
         [
             "The entry is the one-shot the change itself looks like:",
-            "- none: nothing beyond the level glide.",
+            "- none: nothing beyond the dial crossing.",
             "- wake: the tempo overshoots by 60 percent and decays back with a "
                 + "0.4 second time constant. The material wakes up.",
             "- swell: the glow rises to 35 percent above its level, peaking near "
@@ -260,33 +274,27 @@ extension MurmurConfiguration {
         ]
     }
 
-    /// The package form. Only values that differ from the style's tuned
-    /// defaults get written, so the snippet reads as the decisions that were
-    /// actually made.
+    // MARK: - Snippets
+
+    /// The package form. Only what departs from the seed gets written, so
+    /// the snippet reads as the decisions that were actually made.
     private func packageSnippet(call: String) -> String {
-        let defaults = MurmurConfiguration(style: style)
         var mutations: [String] = []
 
-        if speed != defaults.speed { mutations.append("c.speed = \(MurmurExport.number(speed))") }
-        if formScale != defaults.formScale {
-            mutations.append("c.formScale = \(MurmurExport.number(formScale))")
-        }
-        if depth != defaults.depth { mutations.append("c.depth = \(MurmurExport.number(depth))") }
-        if glow != defaults.glow { mutations.append("c.glow = \(MurmurExport.number(glow))") }
-        if hueShift != defaults.hueShift {
-            mutations.append("c.hueShift = \(MurmurExport.number(hueShift))")
-        }
-        if resolvedCharacter != defaults.resolvedCharacter {
-            let values = resolvedCharacter.map(MurmurExport.number).joined(separator: ", ")
-            let labels = style.characterKnobs.map(\.label).joined(separator: ", ")
-            mutations.append("c.character = [\(values)] // \(labels)")
-        }
-        if ink != defaults.ink { mutations.append("c.ink = \(MurmurExport.literal(ink))") }
-        if tone != defaults.tone { mutations.append("c.tone = \(MurmurExport.literal(tone))") }
-        for state in customizedStates {
-            mutations.append(
-                "c.treatments[.\(state.rawValue)] = \(MurmurExport.literal(treatment(for: state)))"
-            )
+        if ink != .ink { mutations.append("c.ink = \(MurmurExport.literal(ink))") }
+        if tone != .tone { mutations.append("c.tone = \(MurmurExport.literal(tone))") }
+
+        for state in MurmurState.allCases {
+            let design = parameters(for: state)
+            if design != state.seedParameters(for: style) {
+                mutations.append(
+                    "c.states[.\(state.rawValue)] = "
+                        + MurmurExport.literal(design, style: style, indent: "        ")
+                )
+            }
+            if entry(for: state) != state.defaultEntry {
+                mutations.append("c.entries[.\(state.rawValue)] = .\(entry(for: state).rawValue)")
+            }
         }
 
         let configuration: String
@@ -308,6 +316,8 @@ extension MurmurConfiguration {
             import Murmur
 
             struct ThinkingIndicator: View {
+                var state: MurmurState = .thinking
+
                 var body: some View {
                     \(call)
                 }
@@ -318,16 +328,17 @@ extension MurmurConfiguration {
     }
 
     /// The no-package form. Same mount, same argument order, every value
-    /// written as a literal so the file has no dependencies at all.
+    /// written as a literal so the file has no dependencies at all. It runs
+    /// the thinking design; the other four are in the prose below it.
     private func selfContainedSnippet() -> String {
-        let character = resolvedCharacter
+        let design = resolvedParameters(for: .thinking)
         let knobs = style.characterKnobs
         // Written at the depth the surrounding argument list lands at once
         // the literal below is de-indented. Interpolated lines keep their own
         // whitespace, so this has to match by hand.
         let knobLines = (0..<4).map { i in
             String(repeating: " ", count: 28)
-                + ".float(\(MurmurExport.number(character[i]))),  // \(knobs[i].label)"
+                + ".float(\(MurmurExport.number(design.character[i]))),  // \(knobs[i].label)"
         }.joined(separator: "\n")
 
         return """
@@ -335,6 +346,8 @@ extension MurmurConfiguration {
 
             /// \(style.displayName). \(MurmurExport.sentence(style.species))
             /// Needs \(style.family.packFileName).metal in the same target.
+            /// This runs the thinking design; the other four state designs are
+            /// listed below, along with what stateIndex and stateTau mean.
             struct \(style.displayName)Indicator: View {
                 var size: CGFloat = 46
 
@@ -358,13 +371,15 @@ extension MurmurConfiguration {
                                         .float(scale),
                                         .color(ink),
                                         .color(tone),
-                                        .float(\(MurmurExport.number(hueShift))),  // hueShift
-                                        .float(\(MurmurExport.number(formScale))),  // formScale
-                                        .float(\(MurmurExport.number(speed))),  // speed
-                                        .float(\(MurmurExport.number(depth))),  // depth
-                                        .float(\(MurmurExport.number(glow))),  // glow
+                                        .float(\(MurmurExport.number(design.hueShift))),  // hueShift
+                                        .float(\(MurmurExport.number(design.formScale))),  // formScale
+                                        .float(\(MurmurExport.number(design.speed))),  // speed
+                                        .float(\(MurmurExport.number(design.depth))),  // depth
+                                        .float(\(MurmurExport.number(design.glow))),  // glow
             \(knobLines)
-                                        .float(0.0)  // epoch
+                                        .float(0.0),  // epoch
+                                        .float(1.0),  // stateIndex: thinking
+                                        .float(time)  // stateTau
                                     )
                                 )
                             }
@@ -399,13 +414,28 @@ enum MurmurExport {
         return rgba.a >= 1 ? base + ")" : base + ", a: \(number(rgba.a)))"
     }
 
-    static func literal(_ treatment: MurmurStateTreatment) -> String {
-        "MurmurStateTreatment("
-            + "speedFactor: \(number(treatment.speedFactor)), "
-            + "glowFactor: \(number(treatment.glowFactor)), "
-            + "depthFactor: \(number(treatment.depthFactor)), "
-            + "hueShiftDelta: \(number(treatment.hueShiftDelta)), "
-            + "entry: .\(treatment.entry.rawValue))"
+    /// Multi-line, because six dials and four knobs on one line is a scroll
+    /// bar. The caller's indent is applied to the continuation lines; the
+    /// first line inherits whatever the mutation list puts in front of it.
+    static func literal(
+        _ parameters: MurmurParameters,
+        style: MurmurStyle,
+        indent: String
+    ) -> String {
+        let values = parameters.resolvedCharacter(for: style)
+            .map(number)
+            .joined(separator: ", ")
+        let labels = style.characterKnobs.map(\.label).joined(separator: ", ")
+        return [
+            "MurmurParameters(",
+            indent + "    speed: \(number(parameters.speed)), "
+                + "formScale: \(number(parameters.formScale)), "
+                + "depth: \(number(parameters.depth)),",
+            indent + "    glow: \(number(parameters.glow)), "
+                + "hueShift: \(number(parameters.hueShift)),",
+            indent + "    character: [\(values)]  // \(labels)",
+            indent + ")",
+        ].joined(separator: "\n")
     }
 
     static func colorLiteral(_ rgba: MurmurRGBA) -> String {

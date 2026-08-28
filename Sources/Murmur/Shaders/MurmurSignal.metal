@@ -392,6 +392,55 @@ static inline float ms_aa(float cycles, float2 size, float pixelScale) {
     return 1.0 - smoothstep(0.16, 0.36, perPixel);
 }
 
+/// THE STATE READ, shared by all eight species.
+///
+/// Two of the five states get an in-shader design; the rest are carried by the
+/// per-state parameter sets the Swift layer interpolates, which is the right
+/// division of labour -- a dial change is a dial change and does not belong in
+/// a branch here.
+///
+/// SUCCESS is this family's moment, and the family's own physics for it is THE
+/// PATTERN COMPLETES. Every one of these species is reaching for an order it
+/// never quite attains: the flock's fold, the loom's cloth, the station, the
+/// almost-word. For one breath at the top of a success, it arrives. `complete`
+/// is that breath: in over about a quarter of a second, out over the rest of
+/// 1.2, on a curve whose ends are flat so nothing snaps. `settled` is what is
+/// left afterwards and holds for as long as the state does -- the field a
+/// little brighter and a little more ordered than it was, the way a thing that
+/// has just succeeded looks.
+///
+/// The light in a success is NOT an overlay. Every species multiplies its own
+/// energy by (1 + complete), which brightens exactly what is already there and
+/// leaves the dark dark: the surge travels through the species' own structure
+/// because it IS the species' own structure, scaled. A white wash over the top
+/// would have been two lines of code and a different product.
+///
+/// RESPONDING is decisive drive: the search stops casting about and acquires a
+/// direction, continuously, for as long as the state holds. `drive` ramps in
+/// over half a second so entering the state is a lean and not a jolt.
+struct MSState {
+    float complete;   // success: the arrival, one breath
+    float settled;    // success: what is left after it
+    float drive;      // responding: directional urgency, held
+};
+
+static MSState ms_state(float stateIndex, float stateTau) {
+    MSState o;
+    o.complete = 0.0; o.settled = 0.0; o.drive = 0.0;
+    float tau = max(stateTau, 0.0);
+    if (stateIndex > 2.5 && stateIndex < 3.5) {
+        float a = clamp(tau / 1.20, 0.0, 1.0);
+        // In over about 0.36 s, out over the remaining 0.8. The rise was 0.24 s
+        // in the first cut and at 30 fps that is seven frames, which reads as a
+        // strobe rather than as an arrival. An arrival wants to be seen arriving.
+        o.complete = smoothstep(0.0, 0.30, a) * (1.0 - smoothstep(0.36, 1.0, a));
+        o.settled  = smoothstep(0.30, 1.05, a);
+    } else if (stateIndex > 1.5 && stateIndex < 2.5) {
+        o.drive = smoothstep(0.0, 0.55, tau);
+    }
+    return o;
+}
+
 /// THE FLOURISH CLOCK, and it is the pack's play mechanism.
 ///
 /// Every species here performs ONE gesture: a thing the material does now and
@@ -484,7 +533,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -496,6 +546,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float sky      = clamp(c3, 0.0, 1.0);   // the dusk behind it
 
     // THE BANK.
+    MSState st = ms_state(stateIndex, stateTau);
+
     float bank = turn * (0.62 * sin(t * 0.214) + 0.31 * sin(t * 0.362 + 1.7));
 
     // THE ROLL. 0.26 is roughly where the mass's own body ends, so the inside
@@ -524,8 +576,12 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // uv and not here, so the MATERIAL streams through a mass that keeps its own
     // outline, which is exactly what a murmuration does. The heading leans with
     // the bank, so the flock travels the way it is turning.
-    float head = 0.62 + bank * 0.85;
-    q -= float2(cos(head), sin(head)) * (0.105 * t);
+    // RESPONDING: the flock stops casting about and COMMITS. The heading stops
+    // leaning with the bank and holds one line, and the travel runs half again
+    // as fast down it. A flock that has decided where it is going looks exactly
+    // like this, and it is the same two numbers that make it look undecided.
+    float head = mix(0.62 + bank * 0.85, 0.62, st.drive);
+    q -= float2(cos(head), sin(head)) * (0.105 * t * (1.0 + 0.55 * st.drive));
 
     // The drag: one warp field along the tangent of the turn, because that is
     // the direction the flock's own motion carries its material.
@@ -542,6 +598,14 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // exp(k(cos - 1)) is the smooth way to say "near a level set": periodic, no
     // discontinuity anywhere, and thickness is one number.
     float n = ms_fbm3(float3(qw * 2.85, t * 0.115), 3, 2.03, 0.52);
+
+    // SUCCESS: THE FOLD BECOMES ONE CLEAN WAVE. The whole point of this species
+    // is a sheet folding over itself in a way that never settles; for one breath
+    // it settles, and the field the level sets are read from is carried onto a
+    // single travelling sine. It is a mix, not a replacement, so the flock keeps
+    // its own irregularity underneath and reads as the same bird mass arriving
+    // at an order rather than as a different picture cut in.
+    n = mix(n, 0.42 * sin(dot(uv, float2(0.87, 0.49)) * 8.4 - t * 1.15), st.complete * 0.88);
     // Two numbers do the work. `folds` is how many level sets the slice cuts:
     // two or three, because a flock is a sheet folded a few times and not a
     // pastry. `k` is how sharply the density peaks at each one, and it is kept
@@ -576,8 +640,12 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float skyN = ms_fbm3(float3(q * 0.75, t * 0.047), 2, 2.00, 0.50);
     float dusk = sky * (0.055 + 0.075 * (0.5 + skyN)) * (1.0 - 0.55 * dens);
 
+    // The light of the arrival, and it is the species' own light scaled: dark
+    // stays dark, so the surge travels through the fold and not over it.
+    float eM = (dens + dusk) * (1.0 + 0.62 * st.complete + 0.16 * st.settled);
+
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, dens + dusk, glow, 0.0, 0.78, 0.45);
+    float3 field = ms_lit(pal, eM, glow, 0.0, 0.78, 0.45);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -626,7 +694,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -650,11 +719,17 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float K = mix(17.0, 42.0, threads);
     float aa = ms_aa(K / S, size, pixelScale);
 
+    MSState st = ms_state(stateIndex, stateTau);
+
     // THE LOOM'S BEAT: taut, then eased, then taut. About thirty five seconds,
     // which is long enough that the cycle is felt and never counted.
     float beat = 0.5 + 0.5 * sin(t * 0.1828);
-    float taut = clamp(tension * (0.42 + 0.58 * beat), 0.0, 1.0);
-    float wander = mix(1.15, 0.20, taut);
+    // SUCCESS: THE CLOTH RESOLVES. Tension goes to its maximum and the threads
+    // stop wandering, so for one breath the weave is crisp and square and
+    // finished -- which is the one thing this species spends the rest of its
+    // life approaching and letting go of.
+    float taut = clamp(max(tension * (0.42 + 0.58 * beat), st.complete), 0.0, 1.0);
+    float wander = mix(1.15, 0.20, taut) * (1.0 - 0.85 * st.complete);
 
     // THE DRAPE, and it is the first thing that happens because everything else
     // is read against it. One slow two-dimensional warp displaces the domain
@@ -698,9 +773,14 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float pz = (dot(qd, d2) - (fPull.z - 0.5) * 0.70) / 0.075;
     float pull = fPull.x * exp(-pz * pz);
 
+    // RESPONDING: the bolt runs. The crawl that feeds cloth through the loom
+    // more than doubles and both families run the same way, so the weave has a
+    // direction instead of a shimmer.
+    float feed = 1.0 + 1.30 * st.drive;
+
     float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 * (1.0 - 0.65 * pull)
-              + br1 * 7.0 - t * 0.68 + pull * 5.20;
-    float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.54;
+              + br1 * 7.0 - t * 0.68 * feed + pull * 5.20;
+    float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.54 * feed;
 
     float warp = mix(0.5, 0.5 + 0.5 * sin(ph1), aa);
     float weft = mix(0.5, 0.5 + 0.5 * sin(ph2), aa);
@@ -731,7 +811,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // Handed over uncapped: the crossings and the sheen together pass 1 in the
     // brightest places, and ms_lit's knee is where that is meant to be resolved.
-    float e = cloth * bolt * (0.72 + 0.36 * taut) + sheen * 0.30 * spec * cloth;
+    float e = (cloth * bolt * (0.72 + 0.36 * taut) + sheen * 0.30 * spec * cloth)
+            * (1.0 + 0.58 * st.complete + 0.15 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.60);
@@ -776,7 +857,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -798,8 +880,21 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float psi = mix(lobes, crease, structure);
 
     // THE ATTENTION. Slower and wider as dwell rises.
-    float rate = mix(0.92, 0.26, dwell);
-    float2 ac = 0.16 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
+    MSState st = ms_state(stateIndex, stateTau);
+
+    // THE REVEAL HAS TO PASS, and the first cut's did not. Attention orbited
+    // inside a sixth of the frame at a rate that took thirteen seconds to get
+    // anywhere, so what a viewer saw in three seconds was a patch of light
+    // breathing in place -- "it kind of shifts around", which is the exact
+    // failure this pass exists to kill. The verb is PASSES: the amplitude is
+    // now most of the disc and the traverse is quick enough to read, so a
+    // legible attention crosses the field and takes the meaning with it.
+    // RESPONDING makes that traverse decisive: the wandering Lissajous is
+    // straightened toward one steady sweep across the frame.
+    float rate = mix(1.55, 0.55, dwell) * (1.0 + 0.70 * st.drive);
+    float2 orbit = 0.30 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
+    float2 sweep = float2(sin(t * rate * 0.83), 0.34 * sin(t * rate * 0.29));
+    float2 ac = mix(orbit, 0.30 * sweep, st.drive);
 
     // THE SECOND LOOK: attention darts off its path and comes back. It moves the
     // ATTENTION, not the light -- the threshold goes with it, so what surfaces
@@ -809,7 +904,9 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float4 fLook = ms_flourish(t, 21.0);
     float lookA = fLook.z * 6.2831853;
     ac += float2(cos(lookA), sin(lookA)) * (fLook.x * 0.135);
-    float rad = mix(0.245, 0.320, dwell);
+    // Tighter than it was, so the thing crossing reads as an attention with an
+    // edge rather than as a general warming of the frame.
+    float rad = mix(0.205, 0.280, dwell);
     float ad = length(uv - ac) / rad;
     float att = exp(-ad * ad);
 
@@ -817,7 +914,12 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // and pulled down where attention is. The 0.30 band above it is the softness
     // of the coastline: narrower and the islands get a hard edge, which organic
     // forms are never allowed.
-    float thr = mix(0.72, 0.30, clamp(reveal * att + scatter * 0.18, 0.0, 1.0));
+    // SUCCESS: THE WHOLE FIELD SURFACES. The threshold drops everywhere at once
+    // for one breath, so the latent structure that is normally lit only where
+    // something is looking is, briefly, entirely legible: the species' own idea
+    // of having understood the thing.
+    float thr = mix(0.72, 0.30, clamp(reveal * att + scatter * 0.18
+                                      + st.complete * 0.95, 0.0, 1.0));
     // The 0.34 band above the threshold is the softness of the coastline, and it
     // is wide on purpose twice over: narrower and the islands get an edge, which
     // organic forms may never have, and narrower also means the interior
@@ -833,7 +935,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     e = max(e, (0.10 + 0.30 * scatter) * smoothstep(0.38, 0.92, psi));
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, e, glow, 0.0, 0.70, 0.45);
+    float3 field = ms_lit(pal, e * (1.0 + 0.42 * st.complete + 0.14 * st.settled),
+                          glow, 0.0, 0.70, 0.45);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -898,7 +1001,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -913,14 +1017,22 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // the search is legible, short enough that a chat UI is not made to wait.
     // The house rate dial stays OUT of it, the way the pour keeps exhaleTime in
     // real seconds, so a slower field still settles when it says it will.
+    MSState st = ms_state(stateIndex, stateTau);
+
     float tau = max(time - epoch, 0.0);
     float3 law = ms_settle_law(tau, 6.0);
-    float arc = clamp(1.0 - law.z, 0.0, 1.0);   // 0 at birth, 1 at rest
+    // SUCCESS: THE STATION LOCKS DEAD CENTRE. The arc is carried to its end,
+    // the needle's wander is taken out and the line is pulled onto the centre
+    // line -- for one breath the receiver is perfectly tuned, which is the thing
+    // this species is always nearly doing and never quite finishing.
+    float arc = clamp(max(1.0 - law.z, st.complete), 0.0, 1.0);
     // The scramble runs at nearly twice its first tempo. This multiplies the
     // law's DISTANCE, not its time constant, so the arc still completes in the
     // six real seconds it promises -- what got faster is how hard the static
     // boils while the search is on, and how live the held station is after.
-    float scroll = law.y * 1.90 * max(speed, 0.0);
+    // RESPONDING: the dial is being worked. The scramble runs harder and the
+    // needle sweeps along the station instead of breathing in place.
+    float scroll = law.y * 1.90 * max(speed, 0.0) * (1.0 + 0.85 * st.drive);
 
     // Six degrees off level. A station is a line, but a line at exactly zero
     // degrees inside a circle reads as a rule someone drew in the UI.
@@ -934,7 +1046,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // fBm that never stops moving, so a locked station still breathes. `drift`
     // sets how far. This is also why the line can never read as a UI rule: a
     // rule is straight and this is not, at any setting.
-    float needle = ms_fbm1(ruv.x * 3.10 + t * 0.170, 3, 17.0) * (0.022 + 0.062 * drift);
+    float needle = ms_fbm1(ruv.x * 3.10 + t * (0.170 + 0.30 * st.drive), 3, 17.0)
+                 * (0.022 + 0.062 * drift) * (1.0 - 0.95 * st.complete);
     float across = ruv.y - needle;
 
     // THE SLIP: the station wanders off frequency and re-locks. The whole line
@@ -944,13 +1057,20 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // line is and how wide it is. Nothing about the light changes.
     float4 fSlip = ms_flourish(t, 30.0);
     float slip = fSlip.x;
-    across += slip * (fSlip.z * 2.0 - 1.0) * 0.058;
+    // The slip is suppressed on success rather than the coordinate being
+    // scaled. Scaling `across` was the first cut and it is exactly backwards:
+    // multiplying the across-coordinate down brings the whole frame INSIDE the
+    // gaussian, so the band swells into a filled blob instead of narrowing onto
+    // a line. Dead centre means the offsets go away -- the needle's wander and
+    // the slip -- while the width narrows on its own through sigma.
+    across += slip * (fSlip.z * 2.0 - 1.0) * 0.058 * (1.0 - st.complete);
 
     // THE HALF-WIDTH, which is the whole arc in one number. At birth it is wider
     // than the disc, so the "band" is a flat wash and the picture is whatever
     // the noise is doing -- static. At rest it is a line. `lock` chooses how
     // fine a line.
-    float sigma = mix(0.46, mix(0.115, 0.042, lock), arc) * (1.0 + 0.60 * slip);
+    float sigma = mix(0.46, mix(0.115, 0.042, lock), arc)
+                * (1.0 + 0.60 * slip) * (1.0 - 0.45 * st.complete);
     float prof = exp(-(across * across) / (sigma * sigma));
 
     // The ends taper well before the rim. Without this the settled state is a
@@ -1005,7 +1125,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // over the whole band into one place. Between the narrowing and this, the
     // settled line runs about ten times the luminance of its surround, which is
     // what lifts it out of the mud the first cut lived in.
-    float e = station * mix(0.42, 0.98, arc) + spread + floorHiss;
+    float e = (station * mix(0.42, 0.98, arc) + spread + floorHiss)
+            * (1.0 + 0.40 * st.complete + 0.15 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.76, 0.50);
@@ -1054,7 +1175,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1064,6 +1186,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float pulseRate = clamp(c1, 0.0, 1.0);   // how often an impulse passes
     float afterglow = clamp(c2, 0.0, 1.0);   // bleed into the medium, and wake
     float branch    = clamp(c3, 0.0, 1.0);   // regions, or a branching system
+
+    MSState st = ms_state(stateIndex, stateTau);
 
     float2 q = uv / S;
 
@@ -1084,10 +1208,19 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // THE PHASE. The bend dominates the straight term on purpose: wavefronts
     // that follow the medium read as transport through it, and a straight front
     // reads as a wipe.
+    // RESPONDING: the impulses acquire a direction. The bend that makes
+    // wavefronts follow the medium is halved and the straight term is doubled,
+    // so instead of light wandering the network the whole front runs ONE WAY --
+    // which is what a medium carrying an answer looks like.
+    // SUCCESS: the network fires as one. The bend goes almost entirely, so
+    // every pathway crests together for a breath: the pattern completing, in a
+    // species whose pattern is simultaneity.
     float bend = ms_fbm3(float3(q * 1.15, t * 0.045), 2, 2.00, 0.50);
-    float phase = dot(q, float2(0.62, 0.38)) * 4.20 + bend * 9.00;
+    float straight = 4.20 * (1.0 + 1.05 * st.drive);
+    float bendAmt = 9.00 * (1.0 - 0.45 * st.drive) * (1.0 - 0.88 * st.complete);
+    float phase = dot(q, float2(0.62, 0.38)) * straight + bend * bendAmt;
 
-    float rate = mix(0.57, 2.35, pulseRate);
+    float rate = mix(0.57, 2.35, pulseRate) * (1.0 + 0.80 * st.drive);
     // THE SURGE: one stretch of the medium briefly carries the signal faster,
     // so an impulse runs ahead of the rest of the front and then falls back into
     // step. It is a phase advance inside a soft region -- a change in WHERE the
@@ -1109,9 +1242,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // something rather than onto nothing. A flat floor instead of chan * chan
     // gave a uniform warm wash with a blob moving over it, which is a lamp
     // behind a card and not a signal in a medium.
-    float e = chan * (0.16 + 0.30 * chan)
+    float e = (chan * (0.16 + 0.30 * chan)
             + chan * pulse * 0.90
-            + afterglow * 0.28 * halo * pulse * chan;
+            + afterglow * 0.28 * halo * pulse * chan)
+            * (1.0 + 0.70 * st.complete + 0.16 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.74, 0.60);
@@ -1165,7 +1299,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1176,9 +1311,16 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float legibility = clamp(c2, 0.0, 1.0);   // how near the back one comes
     float drift      = clamp(c3, 0.0, 1.0);   // the sliding itself
 
+    MSState st = ms_state(stateIndex, stateTau);
+
     float2 q = uv / S;
     float sep = 0.30 + 0.70 * layers;
-    float base = 0.140 + 0.300 * drift;
+    // THE LAYERS HAVE TO SLIDE AGAINST EACH OTHER, and at the old rate they did
+    // not read as sliding at all -- a scrim crossing a fifth of the frame in ten
+    // seconds is a scrim standing still. The base rate is up by half again and
+    // RESPONDING doubles it, which is what makes the verb legible in three
+    // seconds: SLIDES.
+    float base = (0.210 + 0.420 * drift) * (1.0 + 1.00 * st.drive);
 
     float4 fPart = ms_flourish(t, 57.0);
 
@@ -1194,7 +1336,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // translation of three copies.
         float f = 1.12 * (1.0 + 1.15 * fi * sep);
         float rate = base / (1.0 + 2.10 * fi * parallax);
-        float head = 0.34 - 0.40 * fi;
+        // The headings are pulled far apart. Three sheets drifting within half
+        // a radian of each other read as one sheet with texture; a radian and a
+        // half between them and the eye sees three planes crossing, which is the
+        // only cue that says depth without anything being drawn.
+        float head = 0.55 - 1.55 * fi;
         // THE PARTING: the scrims draw apart and close again. The near sheet
         // and the far sheet are pushed OPPOSITE ways, so the gaps between them
         // widen and more of the thing behind arrives -- and it arrives because
@@ -1243,9 +1389,20 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 backSlide = float2(0.038, -0.023) * t;
     float bn = ms_fbm3(float3(q * 3.20 + backSlide, t * 0.039 + 51.0), 2, 2.03, 0.50);
     float behind = smoothstep(0.26, 0.92, clamp(0.5 + 1.60 * bn, 0.0, 1.0));
-    acc += behind * (0.70 + 0.46 * legibility) * T;
+    // SUCCESS: THE VEILS PART. The scrims give up their opacity for a breath
+    // and what has been almost legible all along is, briefly, plainly there.
+    // Nothing is added: the transmittance simply goes to one, which is the
+    // species' own physics saying the thing it has been withholding.
+    float behindLight = behind * (0.70 + 0.46 * legibility);
+    acc += behindLight * T;
+    // SUCCESS: THE VEILS PART. For one breath the scrims give up the light they
+    // were holding back -- the second term is exactly the amount they had been
+    // absorbing, (1 - T), handed over. What has been almost legible all along is
+    // briefly plainly there, and it arrives because the transmittance opened,
+    // not because anything was added on top.
+    acc += behindLight * (1.0 - T) * st.complete * 0.90;
 
-    float e = acc * 1.35;
+    float e = acc * 1.35 * (1.0 + 0.34 * st.complete + 0.14 * st.settled);
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
     float3 field = ms_lit(pal, e, glow, 0.0, 0.78, 0.55);
@@ -1289,7 +1446,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1300,14 +1458,27 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float offset  = clamp(c2, 0.0, 1.0);   // how far, and how late, each one is
     float blur    = clamp(c3, 0.0, 1.0);   // how much softer each one gets
 
-    // The heading the answers trail along, turning on a slow sine so the trail
-    // swings. A fixed heading reads as a motion blur; a turning one reads as a
-    // room.
-    float head = 0.55 + 0.85 * sin(t * 0.061);
-    float2 dir = float2(cos(head), sin(head));
+    MSState st = ms_state(stateIndex, stateTau);
 
-    // The family drifts as one.
-    float2 wander = 0.055 * float2(sin(t * 0.083), cos(t * 0.104));
+    // THE SOURCE TRAVELS, AND THE ANSWERS LIE ON ITS PATH. This is the change
+    // that made the species legible in three seconds, and it is a change of
+    // composition rather than of rate.
+    //
+    // Before, the constellation sat in one place with a wandering heading, and
+    // the ghosts were displaced along a direction that had nothing to do with
+    // any motion -- so what a viewer saw was a lumpy field with some lumps
+    // fainter than others, and the honest description was "it kind of shifts
+    // around". An echo is not a set of copies beside a thing. It is what a
+    // MOVING thing leaves behind it.
+    //
+    // So the source now runs a slow circle and the trail direction is the
+    // TANGENT to that circle, which puts every ghost exactly on the arc the
+    // source has just come through. The repetitions are literally following it,
+    // along the path it took, and the eye reads that instantly and for free.
+    // RESPONDING drives it round faster: the same figure, decisive.
+    float phi = t * 0.42 * (1.0 + 0.90 * st.drive);
+    float2 wander = 0.135 * float2(cos(phi), sin(phi));
+    float2 dir = float2(-sin(phi), cos(phi));   // where it has just been
 
     // THE STEP IS SMALLER THAN THE FORM, always, and that is the whole
     // balance of this species. Push the repetitions apart far enough to read
@@ -1317,7 +1488,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // photograph reads: one thing, several times, fading. What makes a
     // repetition legible is then its SHAPE recurring down the trail, not a gap
     // beside it.
-    float step = 0.055 + 0.075 * offset;   // uv between repetitions
+    // SUCCESS: THE ANSWERS ARRIVE TOGETHER. The spacing collapses and every
+    // repetition lands on its source at once -- the series, which spends its
+    // life spread out and fading, briefly coincides. That is what a completed
+    // pattern is for a thing made of repetitions.
+    float step = (0.055 + 0.075 * offset) * (1.0 - 0.92 * st.complete);
     // SLIGHTLY late, and slightly is the operative word. The lag has to be
     // small next to the time the form takes to change, or each ghost is a
     // different shape and the series reads as lumps rather than as one thing
@@ -1360,7 +1535,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // edge IS a wide threshold. By the fourth ghost the window is wider than
         // the field's whole range, so what is left is a soft lobe -- which is
         // what a fourth echo should be. No second sampling and no blur pass.
-        float w = (0.20 + (0.24 + 0.52 * blur) * k) * (1.0 - 0.26 * near);
+        float w = (0.20 + (0.24 + 0.52 * blur) * k) * (1.0 - 0.26 * near)
+                * (1.0 - 0.55 * st.complete);
         float mass = smoothstep(0.56 - w, 0.56 + w, d);
 
         // Wide and shallow. Its only job is to keep the ghost away from a rim
@@ -1376,7 +1552,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     }
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, acc, glow, 0.0, 0.76, 0.48);
+    float3 field = ms_lit(pal, acc * (1.0 + 0.62 * st.complete + 0.16 * st.settled),
+                          glow, 0.0, 0.76, 0.48);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.60), position, pixelScale);
@@ -1421,7 +1598,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1432,7 +1610,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float dissolve  = clamp(c2, 0.0, 1.0);   // how quickly it goes
     float ink       = clamp(c3, 0.0, 1.0);   // how wet the brush is
 
-    float2 q = uv / S;
+    MSState st = ms_state(stateIndex, stateTau);
+
+    // RESPONDING: the hand moves ACROSS THE PAGE. A steady advection of the
+    // writing domain, so marks are laid down and left behind instead of
+    // appearing and vanishing in place -- the difference between someone
+    // thinking with a pen in their hand and someone writing a reply.
+    float2 q = uv / S - float2(0.62, 0.16) * (t * 0.34 * st.drive);
 
     // THE HAND. The angle the stroke is being pulled at, here, now.
     // The frequency matters as much as the amplitude: a slowly turning hand
@@ -1461,7 +1645,25 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float wz = length(uv - 0.22 * float2(cos(wordA), sin(wordA))) / 0.32;
     float word = fWord.x * exp(-wz * wz);
 
-    float2 sq = float2(dot(q, d) * 0.34 * (1.0 - 0.45 * word), dot(q, e) * 2.70) * fq;
+    // SUCCESS: ONE FULL CONFIDENT STROKE. The compression along the pull drops
+    // right down, so the mark runs the length of the frame instead of petering
+    // out, and below the presence window is opened so it actually completes.
+    //
+    // It is still not a letter and it cannot become one: there is no letterform
+    // anywhere in this construction to resolve INTO. A completed stroke is a
+    // completed stroke. This is the one moment the species is allowed to finish
+    // what it starts, and finishing a stroke is not writing a word.
+    // The arrival is LOCAL. Applied across the whole frame it lengthens every
+    // stroke at once and opens every mark's window at once, and the page floods
+    // to a flat sheet of ink -- which is not a completed stroke, it is no
+    // strokes at all. One stroke completing needs somewhere for it to be, so the
+    // arrival lives in a patch about a quarter of the frame across and the rest
+    // of the page goes on almost-writing around it.
+    float scz = length(uv - float2(-0.05, 0.02)) / 0.24;
+    float arrive = st.complete * exp(-scz * scz);
+
+    float alongC = 0.34 * (1.0 - 0.45 * word) * (1.0 - 0.52 * arrive);
+    float2 sq = float2(dot(q, d) * alongC, dot(q, e) * 2.70) * fq;
     float m = ms_fbm3(float3(sq, t * 0.115), 2, 2.03, 0.52);
 
     // The crest, not the body: a mark, not a smear. Wet ink lays a fatter line.
@@ -1478,12 +1680,20 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // came out as a single blown sweep with no marks in it at all. Overlapped
     // so the peak lands near 0.46: there is no value of L at which a mark is
     // fully formed, which is the species.
-    float L = 0.5 + 1.90 * ms_fbm3(float3(q * 1.05, t * 0.300), 2, 2.00, 0.50);
+    float L = 0.5 + 1.90 * ms_fbm3(float3(q * 1.05, t * (0.300 + 0.34 * st.drive)),
+                                   2, 2.00, 0.50);
     float peak = 0.30 + 0.30 * formation;
     float w2 = mix(0.20, 0.12, dissolve);
     float rise = smoothstep(peak - 0.16, peak + 0.10, L);
-    float fall = 1.0 - smoothstep(peak - w2 * 0.50 + 0.060 * word,
-                                  peak + w2 + 0.100 * word, L);
+    // SUCCESS delays the FALLING edge only, and does not touch the rising one.
+    // That distinction is the whole fix: opening the rise lets MORE marks be
+    // present at once, which floods the page; delaying the fall lets the marks
+    // that were already forming actually FINISH. One stroke completing, not a
+    // page filling. The peak goes from about 0.46 to about 0.85 inside the
+    // arrival's patch, which is a confident mark and still short of a resolved
+    // one -- and there is no letterform in the construction to resolve into.
+    float fall = 1.0 - smoothstep(peak - w2 * 0.50 + 0.060 * word + 0.110 * arrive,
+                                  peak + w2 + 0.100 * word + 0.260 * arrive, L);
     // A page that has been written on is never quite blank between marks, and
     // an indicator that empties out for a second and a half reads as switched
     // off. The residue is the ink already in the paper: the same stroke
@@ -1494,7 +1704,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float en = (stroke * (0.72 + 0.55 * ink) + bleed) * presence;
 
     MSPalette pal = ms_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = ms_lit(pal, en * 1.70, glow, 0.0, 0.74, 0.50);
+    float3 field = ms_lit(pal, en * 1.70 * (1.0 + 0.26 * st.complete + 0.13 * st.settled),
+                          glow, 0.0, 0.74, 0.50);
 
     float3 inkLin = ms_srgb_to_linear(float3(inkColor.rgb));
     return ms_finish(field, inkLin, ms_containment(uv, 0.58), position, pixelScale);

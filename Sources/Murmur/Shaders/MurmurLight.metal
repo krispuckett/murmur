@@ -424,6 +424,97 @@ static inline float mg_hold(float2 uv, float reach) {
     return 1.0 - smoothstep(a, a + 0.30, r);
 }
 
+// MARK: - The states
+//
+// Two of the host's five states are expressed in the shader. The other three
+// arrive as parameter sets from Swift and need no branch here.
+
+/// What the state machine is asking for, resolved once per pixel. A branch on
+/// stateIndex is uniform across a draw, so all of this is free.
+struct MGState {
+    float drive;    // RESPONDING: 0 to 1, eased in, held while the state holds
+    float settle;   // SUCCESS: the warm hold that arrives once the flash is past
+    float tau;      // seconds since the state was entered
+    float flaring;  // 1 while the success flash is running
+};
+
+static inline MGState mg_state(float stateIndex, float stateTau) {
+    MGState s;
+    s.tau = max(stateTau, 0.0);
+    bool responding = (stateIndex > 1.5 && stateIndex < 2.5);
+    bool success    = (stateIndex > 2.5 && stateIndex < 3.5);
+    // Responding eases in over four tenths of a second rather than snapping on,
+    // because a drive that arrives instantly reads as a glitch rather than as a
+    // decision.
+    s.drive   = responding ? smoothstep(0.0, 0.40, s.tau) : 0.0;
+    s.settle  = success    ? smoothstep(0.55, 1.60, s.tau) : 0.0;
+    s.flaring = success    ? 1.0 : 0.0;
+    return s;
+}
+
+/// HOW FAR THE DRIVE HAS CARRIED, in seconds of extra travel.
+///
+/// The responding state adds a directional current to several of these styles,
+/// and the obvious way to write that is `position += velocity * t * drive`.
+/// That is wrong, and wrong in a way that would only show up as a lurch on the
+/// device: drive is a function of time, so the actual velocity of that
+/// expression is `drive + t * drive'`, and since t is absolute time in the
+/// thousands, the ramp term is enormous. The field would jump across the frame
+/// the instant the state changed.
+///
+/// So the drive is stated as a SPEED and the displacement is its exact
+/// integral, which is the same discipline the pour's exhale uses and the same
+/// integral the house clock already carries:
+///
+///     v(tau) = smoothstep(0, T, tau)              the ramp
+///     D(tau) = T (k^3 - k^4 / 2), k = tau/T       while ramping, D(T) = T/2
+///            = T/2 + (tau - T)                    once at full drive
+///
+/// Continuous, C1 at the join, exact at every t, and it costs two multiplies.
+static inline float mg_driveDist(MGState s) {
+    if (s.drive <= 0.0) { return 0.0; }
+    const float T = 0.40;
+    if (s.tau < T) { float k = s.tau / T; return T * (k * k * k - 0.5 * k * k * k * k); }
+    return T * 0.5 + (s.tau - T);
+}
+
+/// THE SUCCESS FLARE, and the whole design is in the fact that it is a
+/// WAVEFRONT rather than a global brightening.
+///
+/// This family's physics for arrival is that the SOURCE FLARES: whatever light
+/// the species already owns surges at its origin, and the surge then travels
+/// out through the medium the species is made of. A global multiply would say
+/// "the exposure changed"; a front that leaves the lamp and arrives at the edge
+/// of the frame a third of a second later says "something happened HERE, and
+/// you are watching it reach you". Only the second one is an arrival.
+///
+/// So each style names the point its light actually comes from, passes the
+/// distance from it, and gets back the local intensity of the front:
+///
+///     u = (tau - d / C) / W
+///
+/// C is how fast the front crosses the frame and W is how long it takes to pass
+/// any one point. At C = 1.15 uv per second the front reaches the far rim of the
+/// circle at about 0.48 s and the last of it has gone by 1.03, which puts the
+/// whole event inside the 1.2 s the contract allows for it.
+///
+/// The envelope is the beat's: two smoothsteps, flat at both ends, peaking a
+/// third of the way in. Nothing snaps on and nothing snaps off, including at the
+/// moment the state changes.
+///
+/// What a style does with the return value must be to BRIGHTEN WHAT EXISTS.
+/// Every use of it below multiplies a quantity the species already draws, or
+/// pushes on the physics that concentrates its light. None of them adds a white
+/// overlay, and none of them is allowed to.
+static inline float mg_flare(MGState s, float d) {
+    if (s.flaring < 0.5) { return 0.0; }
+    const float C = 1.15;   // the front's speed, uv per second
+    const float W = 0.55;   // how long the front takes to pass one point
+    float u = (s.tau - max(d, 0.0) / C) / W;
+    if (u <= 0.0 || u >= 1.0) { return 0.0; }
+    return smoothstep(0.0, 0.30, u) * (1.0 - smoothstep(0.30, 1.0, u));
+}
+
 // MARK: - The beat
 //
 // The play wave's one shared mechanism. Every style in this pack performs a
@@ -571,7 +662,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));                    // the pour's own guard
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -592,8 +685,20 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // churn is the third noise axis, which reorganises the surface without
     // translating it. `swim` trades between them; neither is ever zero, because
     // still water is not this species.
-    float2 drift = float2(0.104, 0.038) * t * (0.30 + 1.55 * swim);
-    float churn = t * (0.235 - 0.085 * swim);
+    MGState st = mg_state(stateIndex, stateTau);
+
+    // THE VERB IS "IT SWIMS", and the motion pass moved these two numbers to
+    // make sure that is what a person would say. The drift is the body of water
+    // TRAVELLING and the churn is it reorganising in place, and the first cut
+    // had them close enough in size that the honest description was "it shifts
+    // around". Travel now runs at 0.16 uv per second against a churn of 0.175,
+    // so the web visibly crosses the frame while it rearranges, rather than
+    // boiling on the spot.
+    float2 drift = float2(0.150, 0.054) * t * (0.30 + 1.55 * swim);
+    float churn = t * (0.175 - 0.062 * swim);
+    // RESPONDING: a current sets in and the whole surface runs with it. Note the
+    // integral rather than t * drive, for the reason mg_driveDist explains.
+    drift += float2(0.255, 0.062) * mg_driveDist(st);
 
     // THE GATHER. A swell crosses the surface and the light under it comes to a
     // focus, then disperses. It is done as a local rise in the FOCUSING
@@ -631,7 +736,12 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float hxy = (sx.z - s0.z) * inv;
     float hyy = (sy.z - s0.z) * inv;
 
-    float k = (0.06 + 0.20 * deepK) * (1.0 + 0.90 * swell);
+    // SUCCESS: the sun above the water flares, and the front of that flare
+    // crosses the pool. Where it is passing, the surface focuses harder, so the
+    // web itself gathers and blazes and then lets go. The species' own physics
+    // does the work; nothing is overlaid.
+    float flare = mg_flare(st, length(uv));
+    float k = (0.06 + 0.20 * deepK) * (1.0 + 0.90 * swell) * (1.0 + 1.25 * flare);
     float det = (1.0 - k * hxx) * (1.0 - k * hyy) - k * k * hxy * hxy;
 
     // The fold, with a width instead of a singularity. Bounded in (0, 1] by
@@ -647,6 +757,10 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // through. Costs nothing: s0.x is already in hand.
     float ambient = 0.115 + 0.085 * (0.5 + 0.5 * s0.x);
     float lit = ambient + (0.44 + 0.16 * deepK) * fold;
+    // The flare's extra light lands mostly ON THE WEB rather than on the whole
+    // floor, which is what brightening what exists means here: a brighter sun
+    // makes brighter caustics, not a brighter photograph.
+    lit += (0.34 * flare + 0.11 * st.settle) * (0.30 + 0.70 * fold);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
@@ -657,7 +771,8 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // saturated red and green, a pale stop takes blue up with them and warm
     // metal turns white. Sitting the emission at 0.80 lets the knee make its
     // own yellow out of the tone instead.
-    float3 em = mg_shade(pal, 0.80) * (0.42 * pow(fold, 3.2)) * max(glow, 0.0);
+    float3 em = mg_shade(pal, 0.80) * (0.42 * pow(fold, 3.2) * (1.0 + 1.8 * flare))
+              * max(glow, 0.0);
 
     float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
@@ -726,7 +841,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -738,9 +855,13 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float wander = clamp(c2, 0.0, 1.0);
     float thin = clamp(c3, 0.0, 1.0);
 
+    MGState st = mg_state(stateIndex, stateTau);
+
     // The sky's frame. uv.y runs down the screen, so up is negative; `up` is
     // measured the way the curtain is built, which is from its foot.
-    float x = uv.x / S;
+    // RESPONDING: the whole curtain streams along its own length, which for a
+    // sheet of light is what purpose looks like.
+    float x = uv.x / S - 0.32 * mg_driveDist(st);
     float up = -uv.y / S;
 
     // The top's fade, and the lower border's softness. `thin` runs the border
@@ -786,21 +907,39 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
         // Sharp below, diffuse above. Reverse these two and the species is fog.
         float prof = smoothstep(-border, 0.0, h) * exp(-max(h, 0.0) / H);
 
-        // THE PLEATS, and this is what makes a curtain a curtain instead of a
-        // glow with a shaped foot. A hanging sheet is not evenly bright across
-        // its width: where it turns edge on to the eye the path through it is
-        // longest, and those turns are NARROW. So the brightness rides a ridged
-        // field, 1 - |n|, whose bright lines are the zero crossings of a
-        // wandering scalar. That puts four to six pleats across the disc,
-        // irregularly spaced, each a soft peak about 0.06 uv wide, and the
-        // squaring keeps their flanks soft so none of them is ever an edge.
-        // They lean with height because a curtain's structure follows field
-        // lines and field lines are not vertical in the picture plane, and each
-        // set travels with its own lamina, so the three slide across each other
-        // and the vertical structure is never a static comb.
-        float pn = mg_fbm1(xi * 3.8 + h * 0.90 + t * rate * 0.68, 2, lane + 23.0);
-        float pleat = 1.0 - min(abs(pn) * 2.2, 1.0);
-        float ray = 0.62 + 0.70 * pleat * pleat;
+        // THE PLEATS, AND THE FOLDING, which is the motion pass's largest
+        // change in the pack.
+        //
+        // A hanging sheet is not evenly bright across its width: where it turns
+        // edge on to the eye the path through it is longest, and those turns are
+        // narrow. That part was right. What was WRONG was the motion. The pleats
+        // were a ridged noise field that TRANSLATED, and a pattern that
+        // translates reads as sliding, not as folding, so the honest description
+        // of this style was "it kind of shifts around".
+        //
+        // Folding is not a pattern moving. Folding is a pattern whose SPACING
+        // CHANGES: pleats gather together where the sheet doubles back and open
+        // out where it runs flat. So the pleats are now the peaks of a wave
+        // whose PHASE is modulated by a travelling field, which is exactly that:
+        //
+        //     ph    = xi * pitch + warp(xi - c t)
+        //     pleat = the peaks of cos(2 pi ph)
+        //
+        // The local pleat density is d(ph)/dxi = pitch + warp', so where the
+        // travelling warp steepens, the pleats crowd, and where it flattens they
+        // spread. At the default the density swings between about 1 and 6 pleats
+        // per uv, a six to one range, so the gathering and opening is the most
+        // legible thing in the frame. The warp travels at about 0.33 uv per
+        // second, which carries a fold across the disc in three seconds.
+        //
+        // They still lean with height, because a curtain's structure follows
+        // field lines and field lines are not vertical in the picture plane, and
+        // each lamina folds on its own lane, so the three sets fold across each
+        // other rather than as one sheet.
+        float warp = mg_fbm1(xi * 1.15 - t * rate * 1.70, 2, lane + 5.0);
+        float ph = xi * (2.6 + 2.2 * foldK) + h * 0.55 + warp * (1.1 + 2.5 * foldK);
+        float pleat = pow(0.5 + 0.5 * cos(6.2831853 * ph), 2.2);
+        float ray = 0.55 + 0.85 * pleat;
         // The far laminae are dimmer, the way the far side of a fold is.
         sheet += prof * ray * (1.0 - 0.24 * fi);
     }
@@ -810,6 +949,13 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
 
     // The sky is not empty above the curtain: airglow, at the bottom of the
     // rail, so the disc never goes to a dead flat ink where the sheet is not.
+    // SUCCESS: the curtain's own emission surges and the surge runs outward
+    // through it. Brightness in this species IS path length through the sheet,
+    // so multiplying the sheet is literally more light in the same curtain
+    // rather than a wash laid over it.
+    float flare = mg_flare(st, length(uv));
+    sheet *= 1.0 + 1.55 * flare + 0.30 * st.settle;
+
     // The pleats spend a little of the sheet's average brightness buying their
     // structure, so the coefficient comes up to keep the curtain where it was.
     float lit = 0.055 + 0.56 * sheet;
@@ -877,7 +1023,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -891,8 +1039,12 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
 
     // The floor sits low in the circle. uv.y runs down, so a pixel above the
     // floor has a smaller y and a positive height.
+    MGState st = mg_state(stateIndex, stateTau);
+
     float floorY = 0.16 + 0.12 * floorK;
-    float x = uv.x / S;
+    // RESPONDING: a draught crosses the fire and the whole column leans into it
+    // and stays leaning. Distinct from the gust, which leans and lets go.
+    float x = uv.x / S - 0.30 * mg_driveDist(st);
     float h = (floorY - uv.y) / S;
 
     // THE SHIMMER. Two octaves at f = 2.1 is a broad, slow warp: fine warp
@@ -942,8 +1094,14 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float coals = bedMask * (0.30 + 0.62 * bed);
-    float lit = 0.045 + 0.86 * coals + (0.20 + 0.34 * heat) * rise;
+    // SUCCESS: the bed itself catches, and the heat of it climbs the column. The
+    // front is measured from the COALS rather than from the frame's middle,
+    // because that is where this species' light actually lives, so the flare is
+    // seen to leave the fire and travel up through its own smoke.
+    float2 fireAt = float2(0.0, floorY);
+    float flare = mg_flare(st, length(uv - fireAt));
+    float coals = bedMask * (0.30 + 0.62 * bed) * (1.0 + 1.45 * flare + 0.28 * st.settle);
+    float lit = 0.045 + 0.86 * coals + (0.20 + 0.34 * heat) * rise * (1.0 + 1.15 * flare);
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
     // Only the coals themselves emit. Gas glowing as hard as the fuel is what
     // makes a fire shader read as a cartoon.
@@ -1056,7 +1214,9 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1073,6 +1233,8 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // Its position does not scale with formScale: it is a location, not a form.
     float2 lamp = float2(-0.155, -0.115) * offset;
 
+    MGState st = mg_state(stateIndex, stateTau);
+
     // The fog's frame. Two octaves at f = 4.6 puts the finest cell at 0.11 uv,
     // which is eight points across in the gallery's 76 pt cell: a wisp whose
     // shape you can actually see. Finer than this and the medium turns back into
@@ -1083,6 +1245,10 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // the indicator read as active. Fog that crosses faster reads as faster;
     // fog that boils faster just reads as weather.
     float2 flow = float2(0.144, -0.052) * t * (0.32 + 1.30 * driftK);
+    // RESPONDING: the fog stops wandering and starts MOVING, one way, with
+    // weight. The drift is already this style's only motion, so driving it is
+    // the whole of "answering now" here.
+    flow += float2(0.245, -0.070) * mg_driveDist(st);
     float ff = 4.6 / S;
     float fz = t * (0.072 + 0.240 * driftK);
 
@@ -1118,8 +1284,18 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // bans, and a broad one leaves the fog's own structure as the only thing
     // shaping the middle of the glow.
     float sig = (0.075 + 0.150 * reach) * S;
-    float dist2 = dot(uv - lamp, uv - lamp);
+    float2 dLamp = uv - lamp;
+    float dist2 = dot(dLamp, dLamp);
     float lampL = (sig * sig) / (dist2 + sig * sig);
+    // SUCCESS, and this is the one moment the lamp's power is allowed to move.
+    // The rest of this style exists to prove that a light behind fog does not
+    // need to change to be alive; arrival is the exception, and it is stated as
+    // the source itself surging with the surge EXPANDING FROM THE LAMP, so the
+    // near fog lights first and the far fog a third of a second later. What the
+    // eye reads is the light reaching out through the medium, which is only
+    // legible because the front takes time to arrive.
+    float flare = mg_flare(st, length(dLamp));
+    lampL *= 1.0 + 2.10 * flare + 0.34 * st.settle;
 
     // THE PASSING THICKNESS. When a wisp drifts across the lamp itself, less
     // light leaves the source at all and the whole picture eases down for a few
@@ -1224,7 +1400,9 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1238,6 +1416,8 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
 
     // The horizon sits a little above centre so the road has room. It is fixed
     // in the circle; only the field's scale answers to formScale.
+    MGState st = mg_state(stateIndex, stateTau);
+
     const float hor = -0.055;
     float x = uv.x / S;
     float d = (uv.y - hor) / S;          // positive below the horizon, on the road
@@ -1250,7 +1430,22 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // thing in the pack that would alias. The 1.6 across is deliberately enough
     // to vary within the light's width, so a stratum SHEARS the image instead of
     // sliding all of it together.
-    float3 bp = float3((x + t * 0.170) * 1.6, d * (5.5 + 5.0 * bands), t * 0.255);
+    // AND THE STRATA RISE, which is the motion pass's fix for this style. The
+    // bands used only to slide sideways, and a purely horizontal slide carries
+    // the displacement field ACROSS the light without much changing the
+    // displacement at any given HEIGHT, which is the only place it does work.
+    // The image was being sheared by a pattern that barely varied where it
+    // mattered, and the honest description was "it shifts around". Hot air
+    // convects: strata climb. Scrolling the domain vertically means the
+    // displacement at every height is continuously changing, so a slice of the
+    // light is pushed up, released, and re-formed by the next stratum arriving.
+    // That is the bands visibly bending the image, and it costs one term. 1.25
+    // domain units a second at the default pitch is 0.16 uv, about one stratum
+    // height every second.
+    // RESPONDING adds a hard sideways run to the whole shimmer on top of it.
+    float3 bp = float3((x + t * 0.170 + 0.42 * mg_driveDist(st)) * 1.6,
+                       d * (5.5 + 5.0 * bands) + t * 1.25,
+                       t * 0.255);
     float band = mg_fbm3(bp, 2, 2.03, 0.5);
 
     // THE FOLD, and then THE BEND, which together are the whole mapping.
@@ -1296,7 +1491,14 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float img = core * (0.42 + 0.78 * grain);
+    // SUCCESS: the distant light flares and the flare washes down the road
+    // toward the viewer. The front is measured from where the light's own direct
+    // image sits on screen, so it starts there and spreads, and the strata carry
+    // it: what brightens is the image and its glare, torn exactly as they
+    // already are.
+    float2 lightAt = float2(sx * S, hor + sy * S);
+    float flare = mg_flare(st, length(uv - lightAt));
+    float img = core * (0.42 + 0.78 * grain) * (1.0 + 1.60 * flare + 0.30 * st.settle);
     // The hot layer's veiling glare: the one place the strata are visible in
     // their own right rather than through what they do to the light, which is
     // why it carries the band field. It is gated in BOTH axes, and the
@@ -1306,7 +1508,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float veil = exp(-(ys * ys) / (0.145 * 0.145)) * exp(-0.18 * gx * gx)
                * haze * 0.24 * (0.45 + 0.55 * (0.5 + 0.5 * band));
     float lit = 0.030 + 0.95 * img
-              + 0.24 * halo * (0.40 + 0.60 * (0.5 + 0.5 * band))
+              + 0.24 * halo * (0.40 + 0.60 * (0.5 + 0.5 * band)) * (1.0 + 1.30 * flare)
               + veil;
 
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.90));
@@ -1419,7 +1621,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1434,6 +1638,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // THE ARC. Real seconds, measured from the epoch the view hands in.
     float tau = max(time - epoch, 0.0);
     float3 law = mg_open_law(tau, 2.6);
+    MGState st = mg_state(stateIndex, stateTau);
 
     float r = length(uv);
     float ang = atan2(uv.y, uv.x);
@@ -1465,7 +1670,11 @@ static inline float3 mg_open_law(float tau, float openTime) {
 
     // THE SKY BEYOND. Two octaves at f = 6.5 puts the finest cell at 0.076 uv,
     // three and a half points at 46 pt: structure in the light, not grain.
-    float3 ip = float3(uv * (6.5 / S) + float2(0.0, -t * 0.170), t * 0.15);
+    // RESPONDING: what comes through the opening stops drifting and STREAMS,
+    // one way, which is this species' whole available grammar for urgency: the
+    // aperture cannot hurry, so the light through it does.
+    float3 ip = float3(uv * (6.5 / S) + float2(0.0, -t * 0.170 - 0.55 * mg_driveDist(st)),
+                       t * 0.15);
     float inner = 0.5 + 0.5 * mg_fbm3(ip, 2, 2.03, 0.5);
 
     // THE AIR. f = 7.0 over two octaves is the finest field in this pack and it
@@ -1506,9 +1715,17 @@ static inline float3 mg_open_law(float tau, float openTime) {
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    float through = pass * lean * (0.42 + 0.58 * inner);
-    float spill = beam * (0.35 + 0.65 * lean);
-    float lit = 0.04 + 0.84 * through + 0.30 * spill + 0.34 * lip;
+    // SUCCESS: what is beyond the opening flares, and the surge comes THROUGH
+    // the aperture and out along the beam. The front is measured from the
+    // opening's own centre, which is where this species' light enters the frame,
+    // so the interior lights first and the beam a moment later. The aperture
+    // itself does not move: its arc belongs to the epoch, not to the state.
+    float flare = mg_flare(st, length(uv));
+    float surge = 1.0 + 1.70 * flare + 0.30 * st.settle;
+
+    float through = pass * lean * (0.42 + 0.58 * inner) * surge;
+    float spill = beam * (0.35 + 0.65 * lean) * surge;
+    float lit = 0.04 + 0.84 * through + 0.30 * spill + 0.34 * lip * surge;
     float3 body = mg_shade(pal, clamp(lit, 0.0, 0.92));
     float3 em = mg_shade(pal, 0.80) * (0.55 * pow(clamp(through, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
@@ -1584,7 +1801,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1601,6 +1820,14 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // down. They move together because in the real thing they are one effect.
     float soft = 0.10 + 0.30 * fall;
     float blur = 1.0 - 0.28 * fall;
+
+    MGState st = mg_state(stateIndex, stateTau);
+    // SUCCESS: the sun above the canopy breaks out, and the break travels across
+    // the floor. It enters as a lowering of the GAP THRESHOLD, so more of the
+    // canopy lets light through where the front is passing: the patches that are
+    // already there widen and brighten and new ones open beside them. A brighter
+    // sun opening the shade, rather than a light laid over a picture of shade.
+    float flare = mg_flare(st, length(uv));
 
     // THE CHASE. A gust swings the near canopy harder than the far one, the two
     // gap sets slide out of register, and a patch of light runs across the floor
@@ -1621,8 +1848,20 @@ static inline float3 mg_open_law(float tau, float openTime) {
         // whose finest octave cell is 0.065 uv: the top of the legal range for
         // a two octave field and still three points at 46 pt.
         float freq = (4.6 + 3.0 * canopy) * blur * (1.0 - 0.34 * fi) / S;
-        float2 dr = mix(float2(0.085, 0.032), float2(-0.055, 0.024), fi)
-                  * t * (0.40 + 1.40 * breeze);
+        // THE WIND BLOWS ONE WAY, and this is the motion pass's fix for dapple.
+        // The two layers used to drift in OPPOSITE directions, and that is
+        // exactly why the patches boiled in place: an intersection of two gap
+        // sets travelling against each other has no velocity of its own, so
+        // patches only appeared and vanished where they stood. Wind does not do
+        // that. Both layers now run the same way and the NEAR one runs faster,
+        // which is ordinary parallax, so the patches travel at about 0.13 uv per
+        // second while the 0.054 differential reshapes them over roughly three
+        // and a half seconds. Shade under wind: it crosses the floor, changing
+        // as it goes.
+        // RESPONDING drives that same wind harder rather than adding a new one.
+        float2 dr = mix(float2(0.135, 0.040), float2(0.088, 0.026), fi)
+                  * t * (0.40 + 1.40 * breeze)
+                  + float2(0.300, 0.085) * mg_driveDist(st) * (1.0 - 0.25 * fi);
         // THE GUST. Two incommensurate sines per layer, so the sway never finds
         // a beat and never reads as a wobble on a timer. It moves the canopy's
         // COORDINATE. A gust that changed how much light came through would be
@@ -1636,14 +1875,18 @@ static inline float3 mg_open_law(float tau, float openTime) {
         float n = mg_fbm3(q, 2, 2.03, 0.5);
         // The gap: light passes where the leaf field is thin. `patch` moves the
         // cut, so it opens and closes the canopy without changing its scale.
-        float cut = 0.16 - 0.26 * patch;
+        float cut = 0.16 - 0.26 * patch - (0.17 * flare + 0.045 * st.settle);
         trans *= smoothstep(cut - soft, cut + soft, n);
     }
 
     // THE CROWN. The canopy's large scale thickness, drifting slowly on its own.
     // It lifts and dims whole stretches of floor at once, which is the scale a
     // third multiplied layer would have destroyed rather than provided.
-    float3 cq = float3((uv + float2(0.020, 0.008) * t * (0.40 + 1.40 * breeze)) * (1.35 / S),
+    // The crown travels with the same wind, only slower, being the furthest
+    // thing away. A crown that drifted the other way would put the whole picture
+    // back into the disagreement the layers were just taken out of.
+    float3 cq = float3((uv + float2(0.052, 0.016) * t * (0.40 + 1.40 * breeze)
+                           + float2(0.110, 0.032) * mg_driveDist(st)) * (1.35 / S),
                        t * 0.075);
     float crown = 0.5 + 0.5 * mg_fbm3(cq, 2, 2.03, 0.5);
 
@@ -1732,7 +1975,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c1,
     float  c2,
     float  c3,
-    float  epoch
+    float  epoch,
+    float  stateIndex,
+    float  stateTau
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1790,7 +2035,12 @@ static inline float3 mg_open_law(float tau, float openTime) {
     MGBeat g = mg_beat(t, 91.0, 7.4, 2.6);
     float scoot = g.env * (0.42 + 0.30 * fract(g.seed * 7.31))
                 * ((g.seed < 0.5) ? -1.0 : 1.0);
-    float th = t * (0.18 + 0.36 * driftK) + scoot;
+    MGState st = mg_state(stateIndex, stateTau);
+    // The sweep came up from 0.324 to 0.472 rad/s at the default so the verb is
+    // unmistakable: the crescent travels visibly round the limb, a half turn in
+    // about six and a half seconds instead of ten. RESPONDING drives the same
+    // sweep harder rather than introducing a second motion.
+    float th = t * (0.26 + 0.44 * driftK) + scoot + 1.15 * mg_driveDist(st);
     // The wander TIGHTENS as occlude rises while the mass grows, so both moves
     // push coverage the same way and the knob reads as one idea rather than two
     // fighting each other. The radius breathes a little on an incommensurate
@@ -1838,6 +2088,14 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // flooded the corona no longer has to compete with itself, and at the old
     // strength it simply clamped against the rail everywhere it appeared.
     float corona = limb * (1.0 - cover) * lightRaw * (0.40 + 0.75 * coronaK);
+    // SUCCESS: the corona BLAZES. The front is measured from the light behind
+    // the mass, so it lights the limb nearest the light first and travels round
+    // and outward from there, which is the one thing this species can do that
+    // none of the other seven can. The mass is untouched: it is not a light, so
+    // it has nothing to flare, and leaving it dark through the blaze is what
+    // makes the blaze read as a corona rather than as an exposure change.
+    float flare = mg_flare(st, length(uv - lp));
+    corona *= 1.0 + 2.30 * flare + 0.34 * st.settle;
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));

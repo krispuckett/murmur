@@ -1,22 +1,16 @@
-// AI states and their treatments. From Kris's device review: one indicator
-// should be able to say what the agent is doing without becoming a different
-// object, and it has to say it as MOTION. Someone who cannot read the label
-// should still know idle from thinking from error.
+// AI states. From Kris's device review: one indicator should be able to say
+// what the agent is doing without becoming a different object, and it has to
+// say it as MOTION. Someone who cannot read the label should still know idle
+// from thinking from responding from success from error.
 //
-// The mechanism is deliberately Swift-side. Nothing here reaches the Metal;
-// a state scales the uniforms the shaders already take, so every one of the
-// 32 species gets all five states for free and a pack author never has to
-// think about them. That also keeps the taste rule intact: error walks the
-// existing hue family toward dark ember rather than introducing a second
-// hue, because a red alarm dot next to warm amber is two materials.
+// A state is a full design. The configuration carries a MurmurParameters set
+// per state, seeded here and then editable one dial at a time, plus an entry
+// that says what the change itself looks like. Nothing in this file reaches
+// the Metal as a special case: the shader gets the ordinary uniforms, plus
+// stateIndex and stateTau so a pack can add its own expression for the two
+// states that earn one.
 //
-// A treatment has two halves. The LEVELS (speed, glow, depth, hue) are where
-// the state rests, and they crossfade over transitionDuration. The ENTRY is
-// what the change itself looks like, a one-shot envelope measured from the
-// instant of the change. Levels tell you where you are; the entry tells you
-// that you just arrived.
-//
-// This file is the single place these numbers live. Tune here.
+// The seeds below are the starting design for every style. Tune here.
 
 import Foundation
 
@@ -26,63 +20,24 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
     /// Working, and the state a MurmurView shows unless told otherwise.
     /// It opens the material up rather than passing it through.
     case thinking
-    /// Streaming an answer out. Quicker and brighter.
+    /// Streaming an answer out. The urgent one.
     case responding
-    /// Arrival. Slows and settles, and restarts the arc on styles that have one.
+    /// Arrival. Settles bright, and restarts the arc on styles that have one.
     case success
-    /// Something went wrong. Dimmer, denser, and walked down the hue family.
+    /// Something went wrong. Dimmer, denser, walked down the hue family.
     case error
 
     public var displayName: String { rawValue.capitalized }
 
-    /// The tuned numbers. Retuned on Kris's second device pass: the first
-    /// table was too narrow to read. Idle and thinking now have to be
-    /// distinguishable from across a room, so idle drops to about a quarter
-    /// of thinking's tempo instead of half.
-    public var defaultTreatment: MurmurStateTreatment {
+    /// What the shader is told. Fixed by the contract in SPEC.md; a pack
+    /// branches on it, so these numbers are not free to move.
+    public var shaderIndex: Double {
         switch self {
-        // Nearly still, dim, unmistakably resting. Never actually stopped:
-        // a frozen indicator reads as a broken shader, which is the lesson
-        // the atmosphere field already taught us. Nothing announces idle,
-        // so there is no entry.
-        case .idle:
-            MurmurStateTreatment(
-                speedFactor: 0.30, glowFactor: 0.65, depthFactor: 0.75,
-                hueShiftDelta: 0, entry: .none
-            )
-        // The out-of-box look, because thinking is the default state. It
-        // does MORE than the raw material rather than passing it through:
-        // the palette opens, the light lifts, the motion picks up. A style
-        // at rest is the ingredient; this is the ingredient turned on.
-        case .thinking:
-            MurmurStateTreatment(
-                speedFactor: 1.15, glowFactor: 1.20, depthFactor: 1.25,
-                hueShiftDelta: 0, entry: .wake
-            )
-        // The one state the eye should notice changing. Quicker and
-        // brighter still, though the ceiling stays dim. No entry, because
-        // streaming is a continuation of thinking rather than an event.
-        case .responding:
-            MurmurStateTreatment(
-                speedFactor: 1.45, glowFactor: 1.30, depthFactor: 1.25,
-                hueShiftDelta: 0, entry: .none
-            )
-        // The completion breath. Everything relaxes back toward the raw
-        // material while the light holds, so arrival reads as settling
-        // rather than as stopping, and the swell is the arrival itself.
-        case .success:
-            MurmurStateTreatment(
-                speedFactor: 0.55, glowFactor: 1.05, depthFactor: 1.00,
-                hueShiftDelta: 0, entry: .swell
-            )
-        // Down the rail, not off it. The negative hue walk takes the amber
-        // family toward dark ember; deeper palette range carries the weight
-        // that the lost glow used to; the stutter is the material catching.
-        case .error:
-            MurmurStateTreatment(
-                speedFactor: 0.65, glowFactor: 0.80, depthFactor: 1.20,
-                hueShiftDelta: -0.35, entry: .stutter
-            )
+        case .idle: 0
+        case .thinking: 1
+        case .responding: 2
+        case .success: 3
+        case .error: 4
         }
     }
 
@@ -92,6 +47,65 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
     public var restartsArc: Bool {
         self == .thinking || self == .success
     }
+
+    /// How long a state change takes to cross. A cut reads as a different
+    /// indicator; this reads as a change of mind.
+    public static let transitionDuration: Double = 0.6
+
+    /// The starting design for a style: the style's own tuned character with
+    /// this state's dials. A configuration is seeded from these and then
+    /// diverges wherever the designer edits it.
+    public func seedParameters(for style: MurmurStyle) -> MurmurParameters {
+        let seed = self.seed
+        return MurmurParameters(
+            speed: seed.speed,
+            formScale: 1,
+            depth: seed.depth,
+            glow: seed.glow,
+            hueShift: seed.hueShift,
+            character: style.characterDefaults
+        )
+    }
+
+    /// What a state change looks like out of the box.
+    public var defaultEntry: MurmurEntry { seed.entry }
+
+    /// Retuned on Kris's second device pass: the first table was too narrow
+    /// to read. Idle and thinking have to be distinguishable from across a
+    /// room, so idle sits at about a quarter of thinking's tempo.
+    var seed: MurmurStateSeed {
+        switch self {
+        // Nearly still, dim, unmistakably resting. Never actually stopped:
+        // a frozen indicator reads as a broken shader, which is the lesson
+        // the atmosphere field already taught us. Nothing announces idle,
+        // so there is no entry.
+        case .idle:
+            MurmurStateSeed(speed: 0.30, glow: 0.65, depth: 0.75, hueShift: 0, entry: .none)
+        // The out-of-box look, because thinking is the default state. It
+        // does MORE than the raw material rather than passing it through:
+        // the palette opens, the light lifts, the motion picks up. A style
+        // at rest is the ingredient; this is the ingredient turned on.
+        case .thinking:
+            MurmurStateSeed(speed: 1.15, glow: 1.20, depth: 1.25, hueShift: 0, entry: .wake)
+        // The one state the eye should notice changing. Quicker and
+        // brighter still, though the ceiling stays dim. No entry, because
+        // streaming is a continuation of thinking rather than an event; the
+        // packs give it a directional drive in the shader instead.
+        case .responding:
+            MurmurStateSeed(speed: 1.45, glow: 1.30, depth: 1.25, hueShift: 0, entry: .none)
+        // The completion breath. Everything relaxes back toward the raw
+        // material while the light holds, so arrival reads as settling
+        // rather than as stopping. The swell is the Swift half of that; the
+        // packs add the flash that travels through the field.
+        case .success:
+            MurmurStateSeed(speed: 0.55, glow: 1.05, depth: 1.00, hueShift: 0, entry: .swell)
+        // Down the rail, not off it. The negative hue walk takes the amber
+        // family toward dark ember; deeper palette range carries the weight
+        // that the lost glow used to; the stutter is the material catching.
+        case .error:
+            MurmurStateSeed(speed: 0.65, glow: 0.80, depth: 1.20, hueShift: -0.35, entry: .stutter)
+        }
+    }
 }
 
 /// Dictionary keys encode as "idle", "thinking" and so on rather than as an
@@ -100,13 +114,23 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
 /// raw value, so this is a one-line opt in.
 extension MurmurState: CodingKeyRepresentable {}
 
+/// The seed factors. Internal: a configuration exposes the parameters these
+/// produce, and the designer edits those. Nobody outside needs the recipe.
+struct MurmurStateSeed: Sendable {
+    let speed: Double
+    let glow: Double
+    let depth: Double
+    let hueShift: Double
+    let entry: MurmurEntry
+}
+
 // MARK: - Entry envelopes
 
 /// What a state change looks like in the instant it happens. Every envelope
 /// is a pure function of tau, the seconds since the change, so any frame can
 /// be rendered from the timestamp alone.
 public enum MurmurEntry: String, CaseIterable, Codable, Sendable {
-    /// Nothing. The levels crossfade and that is the whole change.
+    /// Nothing. The parameters cross and that is the whole change.
     case none
     /// A brief speed overshoot that decays in. The material wakes up.
     case wake
@@ -117,9 +141,9 @@ public enum MurmurEntry: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String { rawValue.capitalized }
 
-    /// When the envelope is finished. Past this the steady treatment is all
-    /// that is left, so the phase integral below can stop working and just
-    /// run out at a constant rate.
+    /// When the envelope is finished. Past this the steady design is all
+    /// that is left, so the phase integral can stop working and just run out
+    /// at a constant rate.
     public var duration: Double {
         switch self {
         case .none: 0
@@ -183,58 +207,6 @@ public enum MurmurEntry: String, CaseIterable, Codable, Sendable {
     }
 }
 
-// MARK: - Treatments
-
-/// What a state does to the uniforms, and how it announces itself.
-/// Factors multiply, the hue delta adds, the entry runs once on arrival.
-public struct MurmurStateTreatment: Codable, Sendable, Equatable {
-    public var speedFactor: Double
-    public var glowFactor: Double
-    public var depthFactor: Double
-    public var hueShiftDelta: Double
-    public var entry: MurmurEntry
-
-    public init(
-        speedFactor: Double,
-        glowFactor: Double,
-        depthFactor: Double,
-        hueShiftDelta: Double = 0,
-        entry: MurmurEntry = .none
-    ) {
-        self.speedFactor = speedFactor
-        self.glowFactor = glowFactor
-        self.depthFactor = depthFactor
-        self.hueShiftDelta = hueShiftDelta
-        self.entry = entry
-    }
-
-    /// The stock table, keyed by state. A configuration starts here.
-    public static let defaults: [MurmurState: MurmurStateTreatment] = Dictionary(
-        uniqueKeysWithValues: MurmurState.allCases.map { ($0, $0.defaultTreatment) }
-    )
-
-    /// How long the levels take to cross. A cut reads as a different
-    /// indicator; this reads as a change of mind.
-    public static let transitionDuration: Double = 0.6
-
-    /// Levels only. The entry belongs to the state being entered and does
-    /// not average with anything.
-    ///
-    /// Written as `a * (1 - t) + b * t` rather than `a + (b - a) * t` so the
-    /// ends land exactly on the endpoints instead of near them.
-    public func blended(toward other: MurmurStateTreatment, amount: Double) -> MurmurStateTreatment {
-        let t = min(max(amount, 0), 1)
-        func mix(_ a: Double, _ b: Double) -> Double { a * (1 - t) + b * t }
-        return MurmurStateTreatment(
-            speedFactor: mix(speedFactor, other.speedFactor),
-            glowFactor: mix(glowFactor, other.glowFactor),
-            depthFactor: mix(depthFactor, other.depthFactor),
-            hueShiftDelta: mix(hueShiftDelta, other.hueShiftDelta),
-            entry: other.entry
-        )
-    }
-}
-
 // MARK: - The clock
 
 /// Turning a state change into a shader clock.
@@ -243,33 +215,33 @@ public struct MurmurStateTreatment: Codable, Sendable, Equatable {
 /// `speed` separately and use the product as their phase. If speed changes
 /// while time is large, the product jumps, and every past second is
 /// retroactively rescaled. At twenty seconds in, thinking to responding
-/// would shove the field forward by seven seconds in one frame. That is the
-/// exact cut the eased crossfade exists to avoid.
+/// would shove the field forward by several seconds in one frame. That is
+/// the exact cut the eased crossfade exists to avoid.
 ///
 /// So the view integrates the tempo into a PHASE and hands the shader
 /// `phase / speed`. The product is then the phase itself, which is
 /// continuous by construction. When the tempo is steady, which is almost
 /// always, the integral is just elapsed time and nothing changes.
 enum MurmurClock {
-    /// Smoothstep, so the level crossfade has no corners at either end.
+    /// Smoothstep, so the parameter crossfade has no corners at either end.
     static func ease(_ elapsed: Double) -> Double {
-        let t = min(max(elapsed / MurmurStateTreatment.transitionDuration, 0), 1)
+        let t = min(max(elapsed / MurmurState.transitionDuration, 0), 1)
         return t * t * (3 - 2 * t)
     }
 
-    /// The tempo multiplier at tau: the crossfading level times the entry.
+    /// The tempo at tau: the crossfading speed times the entry's overshoot.
     static func tempo(
         at tau: Double,
-        from previous: MurmurStateTreatment,
-        to current: MurmurStateTreatment,
+        from previous: MurmurParameters,
+        to current: MurmurParameters,
         entry: MurmurEntry
     ) -> Double {
-        let level = previous.blended(toward: current, amount: ease(tau))
-        return level.speedFactor * entry.speedBoost(at: tau)
+        let t = ease(tau)
+        let level = previous.speed * (1 - t) + current.speed * t
+        return level * entry.speedBoost(at: tau)
     }
 
-    /// Where the phase has got to, tau seconds into a segment, for a
-    /// configuration speed of 1.
+    /// Where the phase has got to, tau seconds into a segment.
     ///
     /// Past the horizon the tempo is constant, so that part is exact. Inside
     /// it the integrand is a smoothstep times an exponential, and Simpson on
@@ -278,18 +250,18 @@ enum MurmurClock {
     /// same tau always returns the same phase.
     static func phase(
         through tau: Double,
-        from previous: MurmurStateTreatment,
-        to current: MurmurStateTreatment,
+        from previous: MurmurParameters,
+        to current: MurmurParameters,
         entry: MurmurEntry
     ) -> Double {
         guard tau > 0 else { return 0 }
-        let horizon = max(MurmurStateTreatment.transitionDuration, entry.duration)
+        let horizon = max(MurmurState.transitionDuration, entry.duration)
         let inner = min(tau, horizon)
         var total = simpson(to: inner) { s in
             tempo(at: s, from: previous, to: current, entry: entry)
         }
         if tau > horizon {
-            total += (tau - horizon) * current.speedFactor
+            total += (tau - horizon) * current.speed
         }
         return total
     }

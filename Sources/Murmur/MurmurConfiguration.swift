@@ -1,8 +1,12 @@
-// A configuration is the whole design decision: which species, how fast,
-// how big its forms are, how deep the palette runs, and the two colors the
-// rail is built from. It is Codable because the lab saves it and the agent
-// export reads it back; it is Equatable because the studio diffs against
-// the style's defaults to know what to write into a snippet.
+// A configuration is the whole design decision: which species, the two
+// colors the palette rail is built from, and a complete dial set for each of
+// the five states.
+//
+// Kris's shape, in his words: go to idle, make all the changes you want to
+// idle, and have it kind of have a save point. Then go to thinking, make any
+// changes there. Then copy those over. So the states are five independent
+// designs that happen to share a style and a palette, not one design with a
+// state multiplier on top.
 
 import Foundation
 import SwiftUI
@@ -59,122 +63,142 @@ public struct MurmurRGBA: Sendable, Codable, Equatable, Hashable {
 
 public struct MurmurConfiguration: Sendable, Codable, Equatable {
     public var style: MurmurStyle
-    /// 1 is the designed tempo for every style.
-    public var speed: Double
-    /// 1 is the designed scale; larger makes broader forms.
-    public var formScale: Double
-    /// Palette range dial, 0.3 ... 2.
-    public var depth: Double
-    /// Emission and presence dial.
-    public var glow: Double
-    /// Radians. Walks the one hue family; it never introduces a second hue.
-    public var hueShift: Double
-    /// Four values, 0...1, meaning per style. Read through
-    /// `resolvedCharacter` so a short or long array can never reach a shader.
-    public var character: [Double]
-    /// The ground the field dissolves into.
+    /// The ground the field dissolves into. Shared by every state: a state
+    /// change is the material moving, never the room changing color.
     public var ink: MurmurRGBA
-    /// The single hue family anchor.
+    /// The single hue family anchor, likewise shared.
     public var tone: MurmurRGBA
-    /// What each AI state does to the material. Prefilled with the stock
-    /// table; override a state to give this configuration its own behavior,
-    /// and the override travels with the saved config and the export.
-    public var treatments: [MurmurState: MurmurStateTreatment]
+    /// One complete design per state.
+    public var states: [MurmurState: MurmurParameters]
+    /// What each state's arrival looks like.
+    public var entries: [MurmurState: MurmurEntry]
 
-    /// Passing only a style gives you the style exactly as it was tuned.
+    /// Passing only a style seeds all five states from that style's own
+    /// tuning, which is the out-of-box design.
     public init(
         style: MurmurStyle,
-        speed: Double = 1,
-        formScale: Double = 1,
-        depth: Double = 1,
-        glow: Double = 1,
-        hueShift: Double = 0,
-        character: [Double]? = nil,
         ink: MurmurRGBA = .ink,
         tone: MurmurRGBA = .tone,
-        treatments: [MurmurState: MurmurStateTreatment]? = nil
+        states: [MurmurState: MurmurParameters]? = nil,
+        entries: [MurmurState: MurmurEntry]? = nil
     ) {
         self.style = style
-        self.speed = speed
-        self.formScale = formScale
-        self.depth = depth
-        self.glow = glow
-        self.hueShift = hueShift
-        self.character = character ?? style.characterDefaults
         self.ink = ink
         self.tone = tone
-        self.treatments = treatments ?? MurmurStateTreatment.defaults
+        self.states = Self.completed(states ?? [:], for: style)
+        self.entries = Self.completed(entries ?? [:])
     }
 
-    /// Always answers, even for a state a decoded dictionary is missing.
-    public func treatment(for state: MurmurState) -> MurmurStateTreatment {
-        treatments[state] ?? state.defaultTreatment
+    // MARK: Reading
+
+    /// The stored design, or the seed for a state the dictionary is missing.
+    /// Always answers, so nothing downstream deals in optionals.
+    public func parameters(for state: MurmurState) -> MurmurParameters {
+        states[state] ?? state.seedParameters(for: style)
     }
 
-    /// The states this configuration has moved away from the stock table,
-    /// in roster order. Empty means it uses the defaults throughout.
+    /// The same design with the character normalized to exactly four values.
+    /// This is what the view renders from.
+    public func resolvedParameters(for state: MurmurState) -> MurmurParameters {
+        parameters(for: state).resolved(for: style)
+    }
+
+    public func entry(for state: MurmurState) -> MurmurEntry {
+        entries[state] ?? state.defaultEntry
+    }
+
+    /// The states whose design or entry has been moved off its seed, in
+    /// roster order. The export prints exactly these.
     public var customizedStates: [MurmurState] {
-        MurmurState.allCases.filter { treatment(for: $0) != $0.defaultTreatment }
+        MurmurState.allCases.filter {
+            parameters(for: $0) != $0.seedParameters(for: style)
+                || entry(for: $0) != $0.defaultEntry
+        }
     }
 
-    // Treatments arrived after the first configurations were written, so a
-    // saved config without them decodes to the stock table rather than
-    // failing. Everything else has been required since the beginning.
+    // MARK: Editing
+
+    /// Back to the seed for one state, design and entry both.
+    public mutating func resetToSeed(_ state: MurmurState) {
+        states[state] = state.seedParameters(for: style)
+        entries[state] = state.defaultEntry
+    }
+
+    /// Kris's "then I can copy all those over": take one state's finished
+    /// design and put it on the others. The entry is not copied, because it
+    /// is the state's meaning rather than its look, and a success swell on
+    /// idle would be a lie.
+    public mutating func copyDesign(from source: MurmurState, to targets: [MurmurState]) {
+        let design = parameters(for: source)
+        for target in targets where target != source {
+            states[target] = design
+        }
+    }
+
+    /// Switching style keeps every dial the designer set and takes the new
+    /// style's character defaults, because the old knobs meant something
+    /// else entirely. Colors and entries come across untouched.
+    public func withStyle(_ newStyle: MurmurStyle) -> MurmurConfiguration {
+        var moved = states
+        for state in MurmurState.allCases {
+            var design = parameters(for: state)
+            design.character = newStyle.characterDefaults
+            moved[state] = design
+        }
+        return MurmurConfiguration(
+            style: newStyle,
+            ink: ink,
+            tone: tone,
+            states: moved,
+            entries: entries
+        )
+    }
+
+    // MARK: Codable
+
     private enum CodingKeys: String, CodingKey {
-        case style, speed, formScale, depth, glow, hueShift, character, ink, tone, treatments
+        case style, ink, tone, states, entries
     }
 
+    /// A partial dictionary decodes to a complete one, filled from the
+    /// seeds. That keeps a hand-written or trimmed JSON usable and means the
+    /// view can never be handed a state with no design.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         style = try container.decode(MurmurStyle.self, forKey: .style)
-        speed = try container.decode(Double.self, forKey: .speed)
-        formScale = try container.decode(Double.self, forKey: .formScale)
-        depth = try container.decode(Double.self, forKey: .depth)
-        glow = try container.decode(Double.self, forKey: .glow)
-        hueShift = try container.decode(Double.self, forKey: .hueShift)
-        character = try container.decode([Double].self, forKey: .character)
         ink = try container.decode(MurmurRGBA.self, forKey: .ink)
         tone = try container.decode(MurmurRGBA.self, forKey: .tone)
-        treatments = try container.decodeIfPresent(
-            [MurmurState: MurmurStateTreatment].self, forKey: .treatments
-        ) ?? MurmurStateTreatment.defaults
-    }
-
-    /// Exactly four values, always. Missing entries fall back to the style's
-    /// tuned default, extra entries are dropped. Decoded JSON and a style
-    /// switch in the lab both go through here, so neither can hand the
-    /// shader a short array.
-    public var resolvedCharacter: [Double] {
-        let defaults = style.characterDefaults
-        return (0..<4).map { i in i < character.count ? character[i] : defaults[i] }
-    }
-
-    /// The style's four knobs paired with the values in this configuration.
-    public var knobValues: [(knob: MurmurKnob, value: Double)] {
-        let values = resolvedCharacter
-        return zip(style.characterKnobs, values).map { (knob: $0, value: $1) }
-    }
-
-    /// Everything back to the tuned state, keeping the style.
-    public mutating func resetCharacter() {
-        character = style.characterDefaults
-    }
-
-    /// Switching style in the lab carries the shared dials and colors across
-    /// but takes the new style's character defaults; the old knobs meant
-    /// something else.
-    public func withStyle(_ newStyle: MurmurStyle) -> MurmurConfiguration {
-        MurmurConfiguration(
-            style: newStyle,
-            speed: speed,
-            formScale: formScale,
-            depth: depth,
-            glow: glow,
-            hueShift: hueShift,
-            character: newStyle.characterDefaults,
-            ink: ink,
-            tone: tone,
-            treatments: treatments
+        states = Self.completed(
+            try container.decodeIfPresent(
+                [MurmurState: MurmurParameters].self, forKey: .states
+            ) ?? [:],
+            for: style
         )
+        entries = Self.completed(
+            try container.decodeIfPresent(
+                [MurmurState: MurmurEntry].self, forKey: .entries
+            ) ?? [:]
+        )
+    }
+
+    private static func completed(
+        _ partial: [MurmurState: MurmurParameters],
+        for style: MurmurStyle
+    ) -> [MurmurState: MurmurParameters] {
+        var full = partial
+        for state in MurmurState.allCases where full[state] == nil {
+            full[state] = state.seedParameters(for: style)
+        }
+        return full
+    }
+
+    private static func completed(
+        _ partial: [MurmurState: MurmurEntry]
+    ) -> [MurmurState: MurmurEntry] {
+        var full = partial
+        for state in MurmurState.allCases where full[state] == nil {
+            full[state] = state.defaultEntry
+        }
+        return full
     }
 }

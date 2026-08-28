@@ -102,7 +102,9 @@ Every style is one `[[ stitchable ]]` function with EXACTLY this signature
     float  c1,            // character knob 1
     float  c2,            // character knob 2
     float  c3,            // character knob 3
-    float  epoch          // restart hook for settle arcs; 0 otherwise
+    float  epoch,         // restart hook for settle arcs; 0 otherwise
+    float  stateIndex,    // 0 idle, 1 thinking, 2 responding, 3 success, 4 error
+    float  stateTau       // seconds since the state was entered
 )
 ```
 
@@ -283,20 +285,43 @@ reads the .metal source from the module bundle at runtime. If bundling the
 source proves fragile, emit the package-dependency form and note it; do not
 ship a broken exporter.
 
-## States and treatments (owner: core)
+## States and state designs (owner: core, packs)
 
 Five AI states: `MurmurState` = idle, thinking, responding, success, error.
-States never touch the shaders; they modulate the existing uniforms Swift-side
-through a `MurmurStateTreatment` (speedFactor, glowFactor, depthFactor,
-hueShiftDelta, entry), eased over about 0.6 s on every state change. Entering
-thinking or success resets the birth reference so arc styles re-run their
-arrival. `MurmurEntry` names the entry animation: none, wake (brief speed
-overshoot decaying in), swell (a glow envelope that rises and settles inside
-about 1.5 s), stutter (two quick catches of the clock in the first half
-second, then a clean settle; the error catch). Default treatments per state
-live on the configuration and are Codable, so a designer's custom treatments
-travel with the export. The five states must be legible as MOTION: a viewer
-who cannot read the label should still know idle from thinking from error.
+A state is a full DESIGN, not a tint on the base:
+
+- `MurmurParameters` holds one complete dial set: speed, formScale, depth,
+  glow, hueShift, character (4 values).
+- `MurmurConfiguration` holds style, ink, tone, plus `states:
+  [MurmurState: MurmurParameters]` (every state gets its own editable set,
+  seeded on init from the style defaults times the state's seed factors:
+  idle near-still and dim, thinking opened and lively, responding urgent,
+  success settled-bright, error dark-ember with hueShift -0.35) and
+  `entries: [MurmurState: MurmurEntry]` (defaults: idle none, thinking wake,
+  responding none, success swell, error stutter). All Codable; the export
+  prints every state whose design departs from its seed.
+- MurmurView interpolates the whole parameter set over about 0.6 s on state
+  change, runs the Swift entry envelopes (wake overshoot, swell, stutter),
+  resets the birth reference on entering thinking or success, and passes
+  `stateIndex` and `stateTau` into the shader.
+
+In-shader state expression (owner: packs, shared per pack under its prefix):
+- SUCCESS (stateIndex 3): one designed flash of arrival during roughly the
+  first 1.2 s of stateTau: a surge of light that travels THROUGH the species'
+  own field structure (brighten what exists; never a white overlay), then
+  eases into a settled brightness. Each family interprets it in its own
+  physics: liquid surges, ink saturates in a bloom, light flares its source,
+  signal momentarily completes its pattern.
+- RESPONDING (stateIndex 2): decisive drive: a clear directional urgency in
+  the species' own grammar (advection with a direction, forms tightened),
+  continuous while the state holds. It should read as "answering now".
+- Other states take no special in-shader branch; their character comes from
+  the per-state parameter sets. Branching on stateIndex is uniform across a
+  draw and costs nothing.
+
+The five states must be legible as MOTION: a viewer who cannot read the
+label should still know idle from thinking from responding from success from
+error.
 
 ## Lab app (owner: lab)
 

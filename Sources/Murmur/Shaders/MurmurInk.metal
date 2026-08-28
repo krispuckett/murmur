@@ -425,6 +425,77 @@ static MIBeat mi_beat(float t, float lane, float dur, float rise) {
     return g;
 }
 
+// MARK: The states
+//
+// Two of the five states are expressed in the shader; the other three are
+// carried entirely by their parameter sets, which is the right division of
+// labour because a dial set can say "dim and near-still" perfectly well and
+// cannot say "an arrival travelled through this material".
+//
+// SUCCESS, in ink, is a BLOOM OF SATURATION. The one thing this family must
+// not do is lay white over the top: paper does not get whiter when the answer
+// lands, ink gets DEEPER. So the surge walks the existing field further up the
+// rail, from deep amber toward the tone, where there is more chroma and more
+// light and it is still the same hue. That is what "the ink drinks" means
+// literally: the mark takes up more pigment and holds it.
+//
+// It travels, and travelling is what makes it an arrival rather than a fade.
+// Each species hands mi_drink its own progress coordinate q, so the surge
+// sweeps root to tip up the wick, centre to rim across the pool, fold after
+// fold along the marbling's lay. The front covers q in 0.7 s and the crest is
+// wide enough (0.27 of q) that a small indicator sees a wash rather than a
+// scanline. What it leaves behind does not go away: `held` settles at 0.42 and
+// stays while the state holds, which is the "settling rich" half of the brief.
+//
+// RESPONDING is decisive drive, and it is the harder of the two to do honestly
+// in a shader with no memory. The obvious implementation, speeding the clock
+// up, accumulates: leave the state after twenty seconds and the material jumps
+// back by twenty seconds' worth of extra travel. So the drive is built out of
+// three things that are all bounded:
+//
+//   lean    a directional advance that SATURATES, 1 - e^(-tau/0.5), so it
+//           arrives over about a second and a half and then holds. Worst case
+//           on leaving the state is one bounded nudge, not an unbounded jump.
+//   drive   a 0-to-1 ramp for anything that changes AMPLITUDE or COHERENCE:
+//           wider wander, tighter forms, sharper alignment. None of it
+//           accumulates, so none of it can jump.
+//   neither one touches brightness. "Answering now" is posture and motion.
+//
+// Both ramps are smoothstep or exponential from zero, so entering a state
+// never snaps. Leaving one is the Swift layer's problem and it crossfades the
+// whole parameter set over 0.6 s to cover it.
+struct MIState {
+    float success;   // 1 while the state is success
+    float sTau;      // seconds since the state was entered
+    float drive;     // 0 to 1, responding, eased in over 0.45 s
+    float lean;      // 0 to 1, responding, saturating: a bounded advance
+};
+
+static MIState mi_state(float stateIndex, float stateTau) {
+    MIState s;
+    float tau = max(stateTau, 0.0);
+    int idx = int(stateIndex + 0.5);
+    s.sTau = tau;
+    s.success = (idx == 3) ? 1.0 : 0.0;
+    float resp = (idx == 2) ? 1.0 : 0.0;
+    s.drive = resp * smoothstep(0.0, 0.45, tau);
+    s.lean = resp * (1.0 - exp(-tau / 0.50));
+    return s;
+}
+
+/// The surge, at one point, given where that point sits in the species' own
+/// progress coordinate. Returns 0 outside the success state, so every call site
+/// is `tv += mi_drink(...) * <how much ink is already here>` and paper that had
+/// nothing on it still has nothing on it.
+static inline float mi_drink(MIState st, float q) {
+    if (st.success < 0.5) { return 0.0; }
+    float d = st.sTau * (1.0 / 0.70) - clamp(q, 0.0, 1.0);
+    float crest = exp(-(d * d) / 0.075);      // the front passing
+    float held = smoothstep(0.0, 0.35, d);    // what it leaves behind
+    // A tenth of a second of rise so the flash begins rather than appears.
+    return smoothstep(0.0, 0.09, st.sTau) * (crest + 0.42 * held);
+}
+
 /// The last three steps, shared, in the order the pour does them.
 ///
 /// `glow` is an exposure on the LIGHT and not on the picture: the ground is
@@ -489,7 +560,8 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -499,10 +571,13 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float asym   = clamp(c3, 0.0, 1.0);
 
     // The law. One exponential, read twice.
+    MIState st = mi_state(stateIndex, stateTau);
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
     const float T = 1.25;
     float k = exp(-tau / T);                      // 1 at the drop, 0 arrived
-    float Rinf = (0.19 + 0.15 * spread) * S;
+    // RESPONDING: the blot pushes. A bounded advance on the front's own radius,
+    // which is this species' one verb said louder.
+    float Rinf = (0.19 + 0.15 * spread) * S * (1.0 + 0.13 * st.lean);
     float R = Rinf * sqrt(max(1.0 - k, 0.0));
 
     // The grain of the sheet, one fixed direction about 28 degrees off level.
@@ -523,8 +598,12 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // The live edge. Two octaves, not three: fingering wants to be a handful of
     // broad tongues at 20 pt, and a third octave on a ring of this radius puts
     // detail below the sample spacing where it can only shimmer.
+    // The fringe rate is what carries the verb once the arc is over. At 0.20 a
+    // settled blot was a still picture with a faint crawl on it; at 0.32 the
+    // fingers visibly reach and draw back, which is the thing a person names
+    // when they say "it blooms". Responding widens the reach of that working.
     float ring = 0.8 + 1.0 * tearK;               // lobes around the front
-    float fringe = mi_fbm3(float3(dir * ring, tau * 0.20 + 2.0), 2, 2.03, 0.5);
+    float fringe = mi_fbm3(float3(dir * ring, tau * 0.32 + 2.0), 2, 2.03, 0.5);
     // THE FLOURISH: a lobe runs. A blot does not keep spreading evenly. Every so
     // often one sector finds an easier run of fibre and pushes out ahead of the
     // rest, and then the front evens up again as the pressure equalises behind
@@ -535,7 +614,7 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float ga = gb.id * 6.2831853;
     float lobe = pow(max(dot(dir, float2(cos(ga), sin(ga))), 0.0), 3.0);
 
-    float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * fringe)
+    float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * (1.0 + 0.45 * st.drive) * fringe)
                          * (1.0 + gb.e * 0.17 * lobe);
 
     float sd = Rf - rr;                            // > 0 inside the front
@@ -574,6 +653,9 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float dens = core * (0.62 + 0.26 * mott) + 0.45 * wash;
     float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.2)
              + (0.16 + 0.14 * tearK) * tide;
+    // SUCCESS: the blot drinks from where the drop landed out to its own tide
+    // line, so the saturation arrives the way the ink did.
+    tv += mi_drink(st, rr / max(Rf, 1e-4)) * clamp(dens, 0.0, 1.2) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -629,7 +711,8 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -639,6 +722,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float contrast = clamp(c2, 0.0, 1.0);
     float driftK   = clamp(c3, 0.0, 1.0);
 
+    MIState st = mi_state(stateIndex, stateTau);
     float2 p = uv / S;
     // The sheet slides. Seventeen thousandths of a frame a second at the
     // default: over ten seconds that is a sixth of the picture, which is felt
@@ -646,8 +730,14 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // twice.
     p -= float2(0.86, 0.31) * (driftK * t * 0.058);
 
+    // RESPONDING: the comb commits. The bath leans along the lay and the first
+    // rake, the one that makes the gesture, is drawn deeper; the two answering
+    // rakes are left where they were, so the sheet folds decisively in ONE
+    // direction rather than merely folding harder everywhere.
+    const float2 LAY = float2(0.2588, 0.9659);
+    p -= LAY * (st.lean * 0.055);
     float A = 0.050 + 0.075 * comb;
-    p = mi_rake(p, float2( 0.9563,  0.2924),  7.3, A,         t * 0.57);
+    p = mi_rake(p, float2( 0.9563,  0.2924),  7.3, A * (1.0 + 0.55 * st.drive), t * 0.57);
     p = mi_rake(p, float2(-0.4067,  0.9135), 12.9, A * 0.55, -t * 0.41 + 1.7);
     p = mi_rake(p, float2( 0.6691, -0.7431), 21.7, A * 0.26,  t * 0.31 + 4.1);
 
@@ -690,6 +780,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // the body has to win. Weighted the other way the picture is hairlines on
     // black, which is a lightning storm rather than a bath of ink.
     float tv = 0.055 + 0.62 * mass + (0.07 + 0.13 * contrast) * vein;
+    // SUCCESS: the folds take up pigment in sequence along the lay, so the
+    // saturation reads as something moving through the bath rather than the
+    // bath being turned up.
+    tv += mi_drink(st, saturate(0.5 + dot(p, LAY) * 1.15)) * (mass + 0.6 * vein) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -737,11 +831,13 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     // Up is +y here and nowhere else in this file. This style is ABOUT the
     // direction, so it gets to own the sign.
+    MIState st = mi_state(stateIndex, stateTau);
     float2 q = float2(uv.x, -uv.y);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
@@ -773,17 +869,25 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float dxg = (q.x - xg) / (0.045 * S);
     front += gw.e * (0.18 + 0.10 * climb) * exp(-dxg * dxg);
 
+    // RESPONDING: the ink pushes up the sheet. A bounded advance on the front,
+    // which is this species saying its own verb harder.
+    front += st.lean * 0.085;
+
     float sd = front - q.y;                        // > 0 wet
     float wEdge = 0.030 - 0.018 * dry;
     float wet = smoothstep(-wEdge, wEdge, sd);
 
     // The tooth of the paper: high frequency across the fibres, low along them,
-    // which is what makes the texture read as fibre rather than as noise. The
-    // ratio is the whole effect and it wants to be severe, about seven to one;
-    // at two to one the climb is mottled rather than striated, which is what
-    // the first cut looked like and it could have been any of the other five.
-    // The y term carries the transport.
-    float3 gp = float3(q.x * (15.0 / S), (q.y - t * 0.060) * (2.2 / S), 9.0);
+    // which is what makes the texture read as fibre rather than as noise.
+    //
+    // THE RATIO IS A COMPROMISE AND IT MOVED. At seven to one the striation was
+    // beautiful and the style had no verb: a streak that long is nearly
+    // invariant under sliding along its own axis, so the transport term was
+    // running and nothing could be seen to climb. At four to one there is
+    // enough structure ALONG the fibre for the eye to follow a feature up the
+    // sheet, and the striation still reads as fibre and not as mottle. The
+    // whole species is called wick; the climb has to be visible.
+    float3 gp = float3(q.x * (13.0 / S), (q.y - t * 0.085) * (3.4 / S), 9.0);
     float grain = mi_fbm3(gp, 2, 2.03, 0.55);
 
     // The concentration gradient a chromatogram has: strong at the source,
@@ -803,6 +907,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
              // is most of what makes this interesting at 300 pt and it costs
              // nothing: the grain tap is already paid for.
              + 0.050 * (1.0 - wet) * (0.5 + 0.5 * grain);
+    // SUCCESS: the climb saturates root to tip. q runs from the reservoir at the
+    // foot to the wet line, so the surge travels the way the ink travelled.
+    tv += mi_drink(st, saturate((q.y + 0.42) / max(front + 0.42, 1e-3)))
+        * wet * conc * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -852,7 +960,8 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -862,13 +971,18 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float disturb = clamp(c2, 0.0, 1.0);
     float tiltK   = clamp(c3, 0.0, 1.0);
 
+    MIState st = mi_state(stateIndex, stateTau);
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
     float T = 1.6 / (0.55 + 0.90 * settle);
     float k = exp(-tau / T);                       // 1 suspended, 0 settled
     float clear = 1.0 - k;
 
     // The lean, plus the rock the vessel never loses.
-    float ang = (tiltK - 0.5) * 0.40 + 0.035 * sin(t * 0.31) + 0.022 * sin(t * 0.19 + 2.1);
+    // The vessel's rock, damped while responding: holding still is what
+    // decisiveness looks like in a species whose subject is coming to rest.
+    float rock = 1.0 - 0.55 * st.drive;
+    float ang = (tiltK - 0.5) * 0.40
+              + rock * (0.035 * sin(t * 0.31) + 0.022 * sin(t * 0.19 + 2.1));
     float ca = cos(ang), sa = sin(ang);
     float xAc =  uv.x * ca + (-uv.y) * sa;
     float yUp = -uv.x * sa + (-uv.y) * ca;
@@ -879,8 +993,11 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // The anisotropy the arc drives. At k = 1 both axes sit at 5.6, which is a
     // cloud; at k = 0 the horizontal has fallen to 2.2 and the vertical has
     // climbed past ten, which is a bed.
-    float fx = mix(2.2, 5.6, k) / S;
-    float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S;
+    // RESPONDING: the bed compacts. The laminae draw closer together and the
+    // horizontal frequency drops further, which is this species' own arrival
+    // pushed past where it would have stopped: more settled than settled.
+    float fx = mix(2.2, 5.6, k) / S * (1.0 - 0.18 * st.drive);
+    float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S * (1.0 + 0.30 * st.drive);
     // THE FLOURISH: a lens of the bed lifts and resettles. Something trapped
     // under the sediment works its way out, one patch of the laminae bows up
     // over it, and the layers come back down onto their level. It enters the
@@ -902,6 +1019,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // Compaction: the bottom of a settled bed carries more than its share,
     // because everything above it is pressing down on it.
     float tv = 0.045 + 0.62 * dens * env + 0.10 * bed * clear * dens;
+    // SUCCESS: the saturation rises through the bed, bottom layer first, the
+    // way a liquid wicks up through sediment that has already settled.
+    tv += mi_drink(st, saturate(0.5 - y * 1.6)) * dens * env * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -952,25 +1072,56 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
+    MIState st = mi_state(stateIndex, stateTau);
     float massK  = clamp(c0, 0.0, 1.0);
     float corona = clamp(c1, 0.0, 1.0);
     float morph  = clamp(c2, 0.0, 1.0);
     float offset = clamp(c3, 0.0, 1.0);
 
-    // 1.8 cycles a frame, not 2.3: at the higher pitch the level set breaks
-    // into four or five separate islands and the picture is a maze of lit
-    // edges, which is not a mass wearing light. One body with two or three
-    // lobes is the whole subject, and the pitch is what decides it.
-    const float F = 1.8;                            // domain scale, cycles a frame
+    // THE PITCH, twice revised, and the second revision undoes the first for a
+    // reason. It started at 2.3 and the level set broke into four or five
+    // separate islands: a maze of lit edges, not a mass. Dropping it to 1.8
+    // fixed that, but only because there was no radial well yet. With the well
+    // added, closure is guaranteed by the pedestal rather than by keeping the
+    // noise coarse, and 1.8 turned out to cost the species its verb: at barely
+    // one cycle across the body the field can only translate the whole mass, so
+    // it wobbled instead of reforming. At 2.9 there are three or four lobes on
+    // the body, each big enough to watch swell and be absorbed as the domain
+    // turns, and the well still guarantees they belong to one thing.
+    const float F = 2.9;                            // domain scale, cycles a frame
     float2 p = uv / S;
-    float3 q = float3(p * F + float2(0.036, -0.025) * t,
-                      t * (0.038 + 0.105 * morph) + 6.0);
-    float4 Fd = mi_fbmd3(q, 3, 2.03, 0.5);
+
+    // THE REFORM, and this is the rebuild. The mass used to change by drifting
+    // through the noise's third coordinate, and a field evolving in its own z
+    // has no direction: lobes appeared and vanished where they stood, which the
+    // eye reads as flicker or as noise wandering, never as a body doing
+    // something. Nobody could name that motion.
+    //
+    // So the domain TURNS. Rotating the sample frame about the centre while the
+    // well holds the body in place makes the lobes travel around the mass:
+    // one swells on this shoulder, rides around, and is absorbed on the other
+    // side. That is a nameable verb, it is what a dense thing suspended in
+    // something does, and it costs one sine and one cosine. The z drift stays
+    // but at a third of its old rate, so the shape still changes as it turns
+    // instead of being one rigid silhouette rotating, which would read as a
+    // logo spinning.
+    //
+    // The gain also drops from 0.5 to 0.42. Larger, fewer lobes: a lobe has to
+    // survive long enough to be watched arriving and leaving, and at the old
+    // gain the silhouette carried so much fine detail that no single feature
+    // was legible for the three seconds it takes to name a motion.
+    float spin = t * (0.075 + 0.14 * morph);
+    float cs = cos(spin), sn = sin(spin);
+    float2 pr = float2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+    float3 q = float3(pr * F + float2(0.018, -0.013) * t,
+                      t * (0.022 + 0.055 * morph) + 6.0);
+    float4 Fd = mi_fbmd3(q, 3, 2.03, 0.42);
     // THE BIAS, and without it this style does not exist. The level set of a
     // plain fBm is a winding curve that crosses the whole frame, so lighting
     // its edge draws a long lit ribbon: the picture has a bright thing in it
@@ -988,7 +1139,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // body is always inside the shore and always big enough to read at 20 pt.
     // The noise still owns the shape, moving the boundary by forty per cent of
     // its own radius, which is a lobed mass rather than a circle with texture.
-    const float B = 4.5;
+    // RESPONDING: the body draws itself in. A tighter well is a denser, more
+    // compact mass, which is what a thing about to answer looks like.
+    float B = 4.5 * (1.0 + 0.22 * st.drive);
 
     // THE FLOURISH: the mass leans and returns. The radial well is what holds
     // the body together, so moving the well is moving the body: for a couple of
@@ -999,14 +1152,21 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // being slid across the frame.
     MIBeat gh = mi_beat(t, 53.0, 2.3, 0.32);
     float gha = gh.id * 6.2831853;
-    float2 uvc = uv - float2(cos(gha), sin(gha)) * (gh.e * 0.052);
+    float2 uvc = uv - float2(cos(gha), sin(gha)) * (gh.e * 0.052)
+                    - float2(0.80, -0.60) * (st.lean * 0.045);
 
     float f = 0.42 + 0.55 * Fd.x - B * dot(uvc, uvc);
     // The chain rule, and it is not optional: the gradient comes back in the
     // noise domain, and a distance measured there is not a distance on screen.
     // The well's own gradient is carried with it, or the distance estimate is
     // wrong by exactly the term that makes the body a body.
-    float2 g = 0.55 * Fd.yz * (F / S) - 2.0 * B * uvc;
+    // The gradient comes back in the SPUN frame, so it is rotated out of it
+    // before anything measures a distance with it. The rotation is orthonormal,
+    // so its inverse is its transpose and this is two multiplies; skipping it
+    // would tilt the halo's width away from the body by exactly the spin angle,
+    // which would look like the glow slipping off its own mass.
+    float2 gq = 0.55 * Fd.yz * (F / S);
+    float2 g = float2(gq.x * cs + gq.y * sn, -gq.x * sn + gq.y * cs) - 2.0 * B * uvc;
     float gl = max(length(g), 1e-3);
 
     // The threshold sits ABOVE the field's mean, so the body is the minority of
@@ -1053,6 +1213,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
              + inside * core
              + (0.22 + 0.60 * corona) * halo * (0.62 + 0.38 * facing)
              + (0.09 + 0.10 * corona) * rim  * (0.55 + 0.45 * facing);
+    // SUCCESS: the scatter drinks outward from the body's own edge, so the
+    // arrival travels through the corona rather than switching it on.
+    tv += mi_drink(st, saturate(-d / 0.20))
+        * (halo + 0.6 * rim + 1.2 * inside * core) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -1101,11 +1265,13 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
+    MIState st = mi_state(stateIndex, stateTau);
     float tension = clamp(c0, 0.0, 1.0);
     float tremor  = clamp(c1, 0.0, 1.0);
     float sheenK  = clamp(c2, 0.0, 1.0);
@@ -1119,13 +1285,14 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 dir = rr > 1e-5 ? dv / rr : float2(1.0, 0.0);
 
     // The shore, read on a ring so it is periodic in theta with no seam, and
-    // moving through the third coordinate at about a fortieth of a cycle a
-    // second: still slower than anything else in this file, which is the point
-    // of the style. The tempo pass lifted the rest of the pack half again or
-    // more and this style deliberately took the smallest share of it, because
-    // whatever the others are doing, the pool has to stay the stillest thing in
-    // the set or it is not this species any more.
-    float rimN = mi_fbm3(float3(dir * 1.35, t * 0.026 + 17.0), 2, 2.03, 0.5);
+    // The shore CREEPS. This is the correction the motion pass demanded: at
+    // 0.026 the rim was mathematically moving and visually frozen, and a still
+    // pool that looks like a photograph of a pool has failed at being the
+    // stillest species rather than succeeded at it. Stillness has to be
+    // observed to be stillness: something must be seen to be barely moving.
+    // 0.048 is still the slowest clock in this file by a wide margin, and it is
+    // enough that the wetted edge is visibly finding its level.
+    float rimN = mi_fbm3(float3(dir * 1.35, t * 0.048 + 17.0), 2, 2.03, 0.5);
     float R = (0.225 + 0.070 * tension) * S * (1.0 + 0.20 * rimN);
 
     // A spherical cap, leaned, raised to 1.6. The exponent is the difference
@@ -1140,8 +1307,15 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     h = max(h, 0.0);
 
     // The surface, and its slope, in one tap.
+    // The surface both EVOLVES and DRIFTS. Evolving alone changes the highlight
+    // where it stands, which reads as a shimmer with no direction; the small
+    // lateral drift is what makes the reflection travel across the dish, and a
+    // travelling highlight is the thing a person names when they say the water
+    // is alive. RESPONDING pushes that drift, which is all the urgency this
+    // species is allowed: it answers by moving its light, not by moving itself.
     const float SF = 3.1;
-    float4 Sf = mi_fbmd3(float3(uv * (SF / S), t * (0.042 + 0.098 * tremor) + 41.0),
+    float2 sDrift = float2(0.026, -0.018) * (t * (1.0 + 1.6 * st.drive));
+    float4 Sf = mi_fbmd3(float3(uv * (SF / S) + sDrift, t * (0.062 + 0.130 * tremor) + 41.0),
                          3, 2.03, 0.5);
     float2 slope = Sf.yz * (SF / S) * (0.024 + 0.060 * tremor);
 
@@ -1152,7 +1326,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     // Jurin from the other side: the liquid climbs the wall over its capillary
     // length, and that climb tips the surface outward.
-    float lambda = (0.008 + 0.024 * tension) * S;
+    float lambda = (0.008 + 0.024 * tension) * S * (1.0 - 0.22 * st.drive);
     float men = exp(-max(R - rr, 0.0) / lambda) * pool;
     // Almost all of the meniscus goes into the SLOPE and only a little into the
     // brightness, and that split is the whole reason this shader is allowed to
@@ -1208,6 +1382,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
              + (0.22 + 0.32 * sheenK) * spec * pool
              + (0.10 + 0.12 * tension) * men
              + 0.075 * dried;
+    // SUCCESS: the dish takes up pigment from the middle out to the meniscus,
+    // so the last thing to saturate is the wall, where the light already is.
+    tv += mi_drink(st, saturate(rr / max(R, 1e-4))) * (h * pool + 0.7 * men) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -1260,10 +1437,12 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
+    MIState st = mi_state(stateIndex, stateTau);
     float bleed   = clamp(c0, 0.0, 1.0);
     float fiber   = clamp(c1, 0.0, 1.0);
     float dirK    = clamp(c2, 0.0, 1.0);
@@ -1296,7 +1475,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // still directional, because the ink still runs along the grain and barely
     // across it, but the direction is now a bias in a spreading mark rather than
     // a trajectory through empty space.
-    float Linf = (0.28 + 0.21 * bleed) * S;
+    // RESPONDING: the bleed advances confidently. A bounded push on the reach,
+    // which is the one thing this species does, done with conviction.
+    float Linf = (0.28 + 0.21 * bleed) * S * (1.0 + 0.15 * st.lean);
     float L = Linf + (L0 - Linf) * exp(-tau / T);
 
     float sSrc = -0.15 * S;
@@ -1415,6 +1596,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float tv = 0.045 + 0.70 * clamp(dens, 0.0, 1.3)
              + (0.13 + 0.15 * dryness) * tip * across
              + 0.065 * hint * (0.30 + 0.70 * fibre);
+    // SUCCESS: the stain drinks from the pen mark out to the reach, along the
+    // grain, which is the same path the ink took getting there.
+    tv += mi_drink(st, uN) * clamp(dens, 0.0, 1.3) * 0.26;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));
@@ -1475,11 +1659,13 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
-    float c0, float c1, float c2, float c3, float epoch
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
+    MIState st = mi_state(stateIndex, stateTau);
     float layers     = clamp(c0, 0.0, 1.0);
     float legibility = clamp(c1, 0.0, 1.0);
     float surfacing  = clamp(c2, 0.0, 1.0);
@@ -1518,7 +1704,16 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // moment, so some part of the sheet is always surfaced while another is
     // being taken back, which is both the species and the reason the total never
     // goes away. The floor is 0.30 for the same reason halation's corona has one.
-    float env = mi_noise3(float3(p * 2.6 + float2(-0.026, 0.038) * t, t * 0.062 + 19.0));
+    // THE SWEEP, and this is the motion-pass correction. The envelope used to
+    // drift slowly and evolve quickly, and a field whose z runs faster than it
+    // travels BOILS: patches brightened and dimmed where they stood, which is
+    // flicker, not surfacing. Surfacing is a directional act. So the drift went
+    // up by three and the evolution came down by half, and now a front of
+    // legibility moves across the page: the writing comes up ahead of it and
+    // goes back down behind, and you can point at which way it is going.
+    // RESPONDING drives that front harder, which is this species answering.
+    float2 sweep = float2(-0.140, 0.100) * (t * (1.0 + 1.5 * st.drive));
+    float env = mi_noise3(float3(p * 2.6 + sweep, t * 0.030 + 19.0));
     float lift = 0.30 + 0.70 * smoothstep(-0.24, 0.30, env);
 
     // THE FLOURISH: one line surfaces closer to legible. A single band of the
@@ -1574,8 +1769,16 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
         // three to one across against along, so a mark is narrow enough to sit
         // inside one row instead of spanning three of them. A stroke taller than
         // its line is not handwriting, it is a fence.
+        // Surfacing RISES. The marks are sampled a little further down the
+        // field where the page is giving them up, so a stroke lifts within its
+        // own line as it comes and settles back as it goes. It is a fiftieth of
+        // a frame at most and it is the difference between a region getting
+        // brighter and a region surfacing: one is a level, the other is an act
+        // with a direction in it. The rows themselves do not move, so nothing
+        // slides; only the ink comes up through the ruling.
         float sc = 1.0 - 0.28 * fi;
-        float3 sp = float3(e.x * (16.0 * sc / S), e.y * (5.4 * sc / S), 11.0 + fi * 13.0);
+        float3 sp = float3(e.x * (16.0 * sc / S),
+                           (e.y + 0.024 * lift) * (5.4 * sc / S), 11.0 + fi * 13.0);
         float ridge = saturate(1.0 - abs(mi_fbm3(sp, 2, 2.03, 0.5)) * (1.0 / 0.55));
 
         // Age erodes by SHARPENING. A higher exponent does not merely thin the
@@ -1584,7 +1787,10 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
         float aged = age * fi;                      // the second hand is the old one
         // The ghost line sharpens the OLDER hand as it passes, which is what
         // "closer to legible" means when nothing is allowed to become a letter.
-        float sharp = 1.8 + 4.6 * legibility + 3.2 * aged + 1.8 * ghost * fi;
+        // RESPONDING sharpens the hand: answering is the page being clearer
+        // about what it says, without ever being clear enough to read.
+        float sharp = 1.8 + 4.6 * legibility + 3.2 * aged + 1.8 * ghost * fi
+                    + 0.9 * st.drive;
         // At 20 pt a stroke this thin has nothing to stand on, so the exponent
         // relaxes toward the broad mass instead of aliasing into a strobe. The
         // page stops being readable before it starts being wrong.
@@ -1600,6 +1806,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float tooth = mi_noise3(float3(p * (26.0 / S), 3.0));
 
     float tv = 0.048 + 0.84 * clamp(writing, 0.0, 1.2) + 0.045 * (0.5 + 0.5 * tooth);
+    // SUCCESS: the page takes up pigment line by line down the sheet, the way
+    // it would have been written.
+    tv += mi_drink(st, saturate(0.5 + p.y * 1.4)) * clamp(writing, 0.0, 1.2) * 0.30;
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));

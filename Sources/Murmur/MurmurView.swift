@@ -3,14 +3,17 @@
 // colorEffect needs opaque pixels to work on and the shader composites over
 // that same ink anyway.
 //
-// The clock is the interesting part. `time` is not wall time; it is the
-// integrated phase divided by the current tempo, so that `time * speed`,
-// which is what every shader actually uses for its motion, stays continuous
-// while the tempo changes underneath it. See MurmurClock for why that
-// matters. With a steady tempo, which is almost always, it reduces to
-// elapsed seconds exactly.
+// A state change crosses the WHOLE design, character knobs included, over
+// MurmurState.transitionDuration. That is what makes it read as one material
+// rearranging itself rather than two materials swapped.
 //
-// Zero is when the view appears. That is deliberate: the arc styles measure
+// The clock is the subtle part. `time` is not wall time; it is the
+// integrated phase divided by the current tempo, so that `time * speed`,
+// which is what every shader uses for its motion, stays continuous while the
+// tempo changes underneath it. See MurmurClock for why that matters. With a
+// steady tempo, which is almost always, it reduces to elapsed seconds.
+//
+// Zero is when the view appears. The arc styles measure
 // `tau = max(time - epoch, 0)`, so with time zeroed at birth the epoch
 // argument is always 0 and a settle arc runs once, from the top, every time
 // the indicator comes on screen. Entering thinking or success rezeroes it,
@@ -29,8 +32,8 @@ public struct MurmurView: View {
     @Environment(\.displayScale) private var displayScale
     /// The zero point for `time`, and therefore for every arc.
     @State private var birth: Date
-    /// The current segment: what we are gliding away from, when it started,
-    /// and the phase every segment before it produced.
+    /// The current segment: what we are crossing from, when it started, and
+    /// the phase every segment before it produced.
     @State private var previousState: MurmurState
     @State private var stateChangedAt: Date
     @State private var phaseAtChange: Double = 0
@@ -51,7 +54,7 @@ public struct MurmurView: View {
         let now = Date.now
         self._birth = State(initialValue: now)
         self._stateChangedAt = State(initialValue: now)
-        // Nothing to glide from on the first frame, so the levels start
+        // Nothing to cross from on the first frame, so the design starts
         // already arrived. The entry still runs: appearing IS an arrival.
         self._previousState = State(initialValue: state)
     }
@@ -63,32 +66,33 @@ public struct MurmurView: View {
                     frame(at: context.date)
                 }
             } else {
-                // One deterministic frame, state fully arrived and no entry
-                // running. Screenshot rigs and the gallery's still cells take
-                // this path; any time value renders the correct frame, so 4
-                // seconds in is a fair portrait of a style that has settled
-                // but is still moving.
-                let treatment = configuration.treatment(for: state)
+                // One deterministic frame, design fully arrived and no entry
+                // running. stillTime doubles as the state age, so a still can
+                // be taken half a second in to catch a success flash or four
+                // seconds in to show the settled look.
+                let design = configuration.resolvedParameters(for: state)
                 field(
                     time: stillTime,
-                    speed: configuration.speed * treatment.speedFactor,
-                    glow: configuration.glow * treatment.glowFactor,
-                    depth: configuration.depth * treatment.depthFactor,
-                    hueShift: configuration.hueShift + treatment.hueShiftDelta
+                    speed: design.speed,
+                    glow: design.glow,
+                    depth: design.depth,
+                    hueShift: design.hueShift,
+                    formScale: design.formScale,
+                    character: design.character,
+                    stateTau: stillTime
                 )
             }
         }
         .clipShape(Circle())
         .onChange(of: state) { oldState, newState in
             let now = Date.now
-            let ending = configuration.treatment(for: oldState)
             // Bank what the segment that is ending produced, so the phase
             // carries across the change instead of restarting.
-            phaseAtChange += configuration.speed * MurmurClock.phase(
+            phaseAtChange += MurmurClock.phase(
                 through: stateChangedAt.distance(to: now),
-                from: configuration.treatment(for: previousState),
-                to: ending,
-                entry: ending.entry
+                from: configuration.resolvedParameters(for: previousState),
+                to: configuration.resolvedParameters(for: oldState),
+                entry: configuration.entry(for: oldState)
             )
             previousState = oldState
             stateChangedAt = now
@@ -107,36 +111,38 @@ public struct MurmurView: View {
         // silently beat their label.
     }
 
-    /// One frame: levels crossfading, entry running on top, phase integrated.
+    /// One frame: the designs crossing, the entry running on top, the phase
+    /// integrated so the shader's own clock never jumps.
     private func frame(at now: Date) -> some View {
         let tau = stateChangedAt.distance(to: now)
-        let from = configuration.treatment(for: previousState)
-        let to = configuration.treatment(for: state)
-        let entry = to.entry
-
-        // The levels ease across. The entry belongs to the state being
-        // entered, so it does not average with anything.
-        let levels = from.blended(toward: to, amount: MurmurClock.ease(tau))
+        let from = configuration.resolvedParameters(for: previousState)
+        let to = configuration.resolvedParameters(for: state)
+        // The entry belongs to the state being entered, so it does not
+        // average with anything.
+        let entry = configuration.entry(for: state)
+        let design = from.blended(toward: to, amount: MurmurClock.ease(tau))
 
         // What the shader is told the tempo is, and what the phase is
         // divided by. The two cancel, which is the whole trick.
-        let tempo = configuration.speed * levels.speedFactor * entry.speedBoost(at: tau)
+        let tempo = design.speed * entry.speedBoost(at: tau)
 
         // Everything banked, plus this segment so far, plus the stutter's
-        // lag. The lag scales with the steady tempo so a catch feels the
+        // lag. The lag scales with the state's own tempo so a catch feels the
         // same size whatever speed the designer set.
-        let run = phaseAtChange + configuration.speed * MurmurClock.phase(
+        let run = phaseAtChange + MurmurClock.phase(
             through: tau, from: from, to: to, entry: entry
         )
-        let lag = entry.phaseOffset(at: tau) * configuration.speed * to.speedFactor
-        let phase = max(run + lag, 0)
+        let phase = max(run + entry.phaseOffset(at: tau) * to.speed, 0)
 
         return field(
             time: phase / max(tempo, 1e-6),
             speed: tempo,
-            glow: configuration.glow * levels.glowFactor * entry.glowBoost(at: tau),
-            depth: configuration.depth * levels.depthFactor,
-            hueShift: configuration.hueShift + levels.hueShiftDelta
+            glow: design.glow * entry.glowBoost(at: tau),
+            depth: design.depth,
+            hueShift: design.hueShift,
+            formScale: design.formScale,
+            character: design.character,
+            stateTau: max(tau, 0)
         )
     }
 
@@ -145,16 +151,20 @@ public struct MurmurView: View {
         speed: Double,
         glow: Double,
         depth: Double,
-        hueShift: Double
+        hueShift: Double,
+        formScale: Double,
+        character: [Double],
+        stateTau: Double
     ) -> some View {
         // Hoisted out of the effect closure: it is @Sendable, so it captures
         // values, never the view.
         let name = configuration.style.shaderName
-        let character = configuration.resolvedCharacter
         let ink = configuration.ink.color
         let tone = configuration.tone.color
-        let formScale = configuration.formScale
         let scale = displayScale
+        // During a crossfade the shader is told where it is GOING. A pack
+        // branches on this, and half a branch is worse than either side.
+        let stateIndex = state.shaderIndex
 
         return Rectangle()
             .fill(ink)
@@ -177,7 +187,9 @@ public struct MurmurView: View {
                         .float(character[3]),
                         // Time is already zeroed at birth, and a state that
                         // restarts an arc rezeroes it. See the file header.
-                        .float(0)
+                        .float(0),
+                        .float(stateIndex),
+                        .float(stateTau)
                     )
                 )
             }
