@@ -331,6 +331,18 @@ static inline float mi_knee(float x, float knee) {
     return x < knee ? x : knee + (1.0 - knee) * (1.0 - exp(-(x - knee) / max(1.0 - knee, 1e-3)));
 }
 
+/// Copied with the rest of the kit, and it arrived late. The first cut of this
+/// file deliberately left the 1D kit out because nothing here wanted a
+/// wandering scalar on a line. The play wave brought this one function back on
+/// its own, because a well-mixed number from an integer index is exactly what
+/// an aperiodic clock is built out of. The value noise and the fBm that
+/// FieldLab stacks on top of it are still not copied, because still nothing
+/// here calls them.
+static inline float mi_hash1(float cell, float lane) {
+    return float(mi_hash(uint3(uint(int(cell) + 32768), uint(int(lane) + 32768), 0x9E3779B9u)) >> 8)
+         * (1.0 / 16777216.0);
+}
+
 // MARK: - The pack's own frame
 //
 // Three small things every shader in this file shares, and nothing else: there
@@ -357,6 +369,60 @@ static inline float2 mi_uv(float2 position, float2 size) {
 /// one, which in both cases is a form dissolving rather than a form ending.
 static inline float mi_shore(float2 uv) {
     return 1.0 - smoothstep(0.28, 0.46, length(uv));
+}
+
+// MARK: The flourish clock
+//
+// Every species in this pack performs ONE gesture: something the material does
+// occasionally and then lets go of. This is the clock they all share, and the
+// three properties it has are the three the gestures needed.
+//
+// APERIODIC, AND STILL DETERMINISTIC. Time is cut into slots of P = 6.5 s and
+// each slot holds exactly one occurrence, starting at a hashed offset inside a
+// window of B = 2.5 s. The interval between two occurrences is therefore
+// P + (h_next - h_prev) * B, which lands anywhere in [P - B, P + B] = 4 to 9
+// seconds and never twice the same. Nothing accumulates and nothing is
+// remembered: sample any t at all, from a screenshot rig or a scrubbed slider,
+// and the same occurrence is in the same place. A metronome would have been one
+// line shorter and the eye finds a metronome in about three repetitions.
+//
+// The arithmetic guarantees the slots never collide: the latest an occurrence
+// can start is B, and the longest any of them lasts is 2.5 s, so the last one
+// ends by 5.0 s inside a 6.5 s slot. That is why only the current slot is ever
+// tested, and why `dur` must stay at or under 2.5.
+//
+// FLAT AT BOTH ENDS. The envelope is a smoothstep up and a smoothstep down, so
+// its derivative is zero where it leaves rest and zero where it returns. The
+// material never snaps into a gesture or out of one. `rise` sits well under
+// half, because a flourish that takes as long to arrive as to relax reads as a
+// throb; quick out and slow back is what a gesture is.
+//
+// AND ZERO IS EXACTLY ZERO. Every gesture in this file is multiplied by the
+// envelope, so between occurrences each species is the material that was
+// approved, to the bit. The play is added on top of the resting state, never
+// mixed into it.
+//
+// The clock rides each species' own `t`, which already carries the speed dial,
+// so the 4-to-9 seconds is a statement about the designed tempo of 1.0.
+struct MIBeat {
+    float e;    // 0 at rest, 1 at the top of the gesture
+    float k;    // 0 to 1 through the gesture, for anything that travels
+    float id;   // this occurrence's own number, so no two are aimed alike
+};
+
+static MIBeat mi_beat(float t, float lane, float dur, float rise) {
+    const float P = 6.5;
+    const float B = 2.5;
+    float slot = floor(t / P);
+    float start = slot * P + mi_hash1(slot, lane) * B;
+    float k = (t - start) / max(dur, 1e-3);
+    MIBeat g;
+    g.id = mi_hash1(slot, lane + 101.0);
+    g.k = clamp(k, 0.0, 1.0);
+    float up = smoothstep(0.0, 1.0, clamp(k / max(rise, 1e-3), 0.0, 1.0));
+    float dn = 1.0 - smoothstep(0.0, 1.0, clamp((k - rise) / max(1.0 - rise, 1e-3), 0.0, 1.0));
+    g.e = up * dn;   // both clamps read zero outside the gesture, so rest is exact
+    return g;
 }
 
 /// The last three steps, shared, in the order the pour does them.
@@ -459,7 +525,18 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // detail below the sample spacing where it can only shimmer.
     float ring = 0.8 + 1.0 * tearK;               // lobes around the front
     float fringe = mi_fbm3(float3(dir * ring, tau * 0.20 + 2.0), 2, 2.03, 0.5);
-    float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * fringe);
+    // THE FLOURISH: a lobe runs. A blot does not keep spreading evenly. Every so
+    // often one sector finds an easier run of fibre and pushes out ahead of the
+    // rest, and then the front evens up again as the pressure equalises behind
+    // it. A soft cosine sector aimed somewhere new each time, added to the
+    // front's own radius and nowhere else, so the tide line and the wash follow
+    // it out and back without a single term changing brightness.
+    MIBeat gb = mi_beat(tau, 3.0, 2.2, 0.30);
+    float ga = gb.id * 6.2831853;
+    float lobe = pow(max(dot(dir, float2(cos(ga), sin(ga))), 0.0), 3.0);
+
+    float Rf = R * aniso * (1.0 + (0.10 + 0.42 * tearK) * fringe)
+                         * (1.0 + gb.e * 0.17 * lobe);
 
     float sd = Rf - rr;                            // > 0 inside the front
     // The front is a boundary in a wet porous medium, so it is never a rule: a
@@ -574,6 +651,18 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     p = mi_rake(p, float2(-0.4067,  0.9135), 12.9, A * 0.55, -t * 0.41 + 1.7);
     p = mi_rake(p, float2( 0.6691, -0.7431), 21.7, A * 0.26,  t * 0.31 + 4.1);
 
+    // THE FLOURISH: a fourth comb stroke. The three rakes above are the ones
+    // always in the bath. This is the marbler picking the comb up and drawing it
+    // through once more, at a new angle each time, then setting it down. It is
+    // the same operator as the other three and so it is still a shear: the extra
+    // fold moves ink without making any, which is why the pattern that comes
+    // back afterwards is the pattern that was there before, carried somewhere
+    // new rather than churned.
+    MIBeat gm = mi_beat(t, 11.0, 2.4, 0.28);
+    float gAng = gm.id * 3.1415927;
+    p = mi_rake(p, float2(cos(gAng), sin(gAng)), 9.7,
+                (0.055 + 0.045 * comb) * gm.e, t * 0.44 + gm.id * 6.2831853);
+
     // The sheet of ink the comb is drawn through. Broad: three octaves off a
     // base of 2.4 tops out around ten cycles a frame, which is structure a
     // 20 pt indicator can still hold.
@@ -672,6 +761,17 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // is the line seeking its level, so that is where the tempo had to go.
     float rag = mi_fbm3(float3(q.x * (5.5 / S), 0.0, t * 0.175 + 4.0), 3, 2.03, 0.5);
     float front = h0 + (0.050 + 0.100 * fiber) * rag;
+
+    // THE FLOURISH: one thread runs ahead. A single fibre, narrower than the
+    // raggedness of the line itself, that carries ink well past where the rest
+    // of the front has stalled and then lets it fall back as the pore drains.
+    // This is the one thing in a wicking sheet that looks like a decision, and
+    // it happens in the front's HEIGHT, so the tide line and the concentration
+    // gradient run up the thread with it.
+    MIBeat gw = mi_beat(t, 23.0, 2.0, 0.26);
+    float xg = (gw.id * 2.0 - 1.0) * 0.34 * S;
+    float dxg = (q.x - xg) / (0.045 * S);
+    front += gw.e * (0.18 + 0.10 * climb) * exp(-dxg * dxg);
 
     float sd = front - q.y;                        // > 0 wet
     float wEdge = 0.030 - 0.018 * dry;
@@ -781,7 +881,17 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // climbed past ten, which is a bed.
     float fx = mix(2.2, 5.6, k) / S;
     float fy = mix(6.5 + 7.5 * layers, 5.6, k) / S;
-    float n = mi_fbm3(float3(xAc * fx, y * fy, tau * 0.045 + 3.0), 2, 2.03, 0.5);
+    // THE FLOURISH: a lens of the bed lifts and resettles. Something trapped
+    // under the sediment works its way out, one patch of the laminae bows up
+    // over it, and the layers come back down onto their level. It enters the
+    // BAND coordinate only: the bed's envelope below is left on the unlensed y,
+    // so the picture never brightens anywhere, it deforms and recovers.
+    MIBeat gs = mi_beat(t, 37.0, 2.4, 0.34);
+    float xg = (gs.id * 2.0 - 1.0) * 0.30;
+    float dxs = (xAc - xg) / 0.16;
+    float yb = y + gs.e * 0.055 * exp(-dxs * dxs);
+
+    float n = mi_fbm3(float3(xAc * fx, yb * fy, tau * 0.045 + 3.0), 2, 2.03, 0.5);
     // Beds have edges. 1.55 rather than 1.15 is what separates one lamina from
     // the next instead of leaving a smear that could be any horizontal field.
     float dens = saturate(0.50 + 1.55 * n);
@@ -879,12 +989,24 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // The noise still owns the shape, moving the boundary by forty per cent of
     // its own radius, which is a lobed mass rather than a circle with texture.
     const float B = 4.5;
-    float f = 0.42 + 0.55 * Fd.x - B * dot(uv, uv);
+
+    // THE FLOURISH: the mass leans and returns. The radial well is what holds
+    // the body together, so moving the well is moving the body: for a couple of
+    // seconds its centre of gravity slides off centre in some direction and then
+    // comes back. The silhouette stretches on one side and gathers on the other
+    // while it goes, because the noise it is cut from does not travel with it,
+    // which is the difference between a mass shifting its weight and a sticker
+    // being slid across the frame.
+    MIBeat gh = mi_beat(t, 53.0, 2.3, 0.32);
+    float gha = gh.id * 6.2831853;
+    float2 uvc = uv - float2(cos(gha), sin(gha)) * (gh.e * 0.052);
+
+    float f = 0.42 + 0.55 * Fd.x - B * dot(uvc, uvc);
     // The chain rule, and it is not optional: the gradient comes back in the
     // noise domain, and a distance measured there is not a distance on screen.
     // The well's own gradient is carried with it, or the distance estimate is
     // wrong by exactly the term that makes the body a body.
-    float2 g = 0.55 * Fd.yz * (F / S) - 2.0 * B * uv;
+    float2 g = 0.55 * Fd.yz * (F / S) - 2.0 * B * uvc;
     float gl = max(length(g), 1e-3);
 
     // The threshold sits ABOVE the field's mean, so the body is the minority of
@@ -1041,6 +1163,31 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // a table actually looks like and is not a shape anybody drew.
     slope += dir * (men * (0.34 + 0.40 * tension));
 
+    // THE FLOURISH: one ring from an unseen touch, and it is the smallest
+    // gesture in the pack because this is the stillest species in it. Something
+    // met the surface somewhere off to one side and a single ripple runs out
+    // from it and dies.
+    //
+    // It is added to the SLOPE and contributes no light of its own, exactly like
+    // the meniscus above and for the same reason: a ring painted as brightness
+    // is a drawn circle, while a ring that tips the surface is caught by the one
+    // overhead light and therefore arrives as a bright arc on the side facing
+    // the source and a dark one on the other. You see the water move, not a
+    // shape appear.
+    //
+    // The profile is x*exp(-x^2), the derivative of a gaussian, because that is
+    // literally what the slope of a single ripple crest looks like: a rise and
+    // an equal fall with no net displacement left behind. The 2.33 normalises
+    // its peak to one. The crest travels outward on the gesture's own phase, so
+    // it expands and fades rather than blinking.
+    MIBeat gp = mi_beat(t, 71.0, 2.4, 0.22);
+    float rga = gp.id * 6.2831853;
+    float2 dR = uv - float2(cos(rga), sin(rga)) * ((0.10 + 0.10 * gp.id) * S);
+    float rg = length(dR);
+    float xr = (rg - gp.k * 0.34 * S) / (0.055 * S);
+    float ripple = 2.33 * xr * exp(-xr * xr);
+    slope += (rg > 1e-5 ? dR / rg : float2(0.0)) * (gp.e * 0.052 * ripple * pool);
+
     // The light sits nearly overhead, a little to the upper left. Nearly is
     // load bearing: put it out at forty degrees and a flat surface returns
     // almost nothing through a high exponent, and the pool goes black except
@@ -1144,6 +1291,18 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
 
     float sSrc = -0.24 * S;
     float u = s - sSrc;                            // 0 at the source, forward is +
+    float uN = saturate(u / max(Linf, 1e-4));      // 0 at the root, 1 at full reach
+
+    // THE FLOURISH: the tip bends to a new fibre and back. A bleed does not run
+    // down one bundle forever; it finds a neighbouring one, leans across into it
+    // and drifts back. Applied across the fibre and weighted by uN SQUARED, so
+    // the root stays pinned exactly where the pen put it and only the reach
+    // swings, which is the curtain's own pinned-at-the-crest trick borrowed into
+    // a horizontal species. It enters before the comb and the cross-section are
+    // read, so the whole plume bends: teeth, striation and edges together, and
+    // not a rigid rotation of a finished picture.
+    MIBeat gf = mi_beat(tau, 5.0, 2.2, 0.30);
+    n += (gf.id * 2.0 - 1.0) * gf.e * 0.115 * uN * uN * S;
 
     // The width the fan settles at, needed before the comb because the comb is
     // measured against it.
@@ -1188,7 +1347,6 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // ruler. The root is already a mark, not a point, because a pen laid down
     // has width before it has bled anywhere. Starting the fan near zero instead
     // drew a bright hairline with a haze on it, which reads as a comet.
-    float uN = saturate(u / max(Linf, 1e-4));
     float W = Wref * (0.85 + 0.65 * uN) * (1.0 + 0.16 * fib);
     // A super-gaussian, exp(-(n/W)^4), and the fourth power is the point. A
     // plain gaussian cross-section peaks on the axis, and a plume with a peak
@@ -1317,6 +1475,22 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     float env = mi_noise3(float3(p * 2.6 + float2(-0.026, 0.038) * t, t * 0.062 + 19.0));
     float lift = 0.30 + 0.70 * smoothstep(-0.24, 0.30, env);
 
+    // THE FLOURISH: one line surfaces closer to legible. A single band of the
+    // page comes further up than the envelope was going to let it, holds for a
+    // moment at the edge of being readable, and sinks again.
+    //
+    // It works the species' OWN coordinate rather than a brightness dial: `lift`
+    // is the depth mechanism this whole shader is built on, so pushing one band
+    // of it is the same operation the sheet performs everywhere else, just
+    // locally and briefly. The band also sharpens the older hand where it
+    // passes, which is the part that reads as legibility rather than as light,
+    // and it is capped short of resolving because a palimpsest that finishes a
+    // sentence has stopped being one.
+    MIBeat gl = mi_beat(t, 89.0, 2.4, 0.30);
+    float dyl = (p.y - (gl.id * 2.0 - 1.0) * 0.34) / 0.055;
+    float ghost = gl.e * exp(-dyl * dyl);
+    lift = min(1.0, lift + 0.55 * ghost);
+
     // Capped below 1, always. Reaching full density is what "resolving" would
     // mean and this species is defined by not getting there.
     float reach = (0.52 + 0.52 * surfacing) * lift;
@@ -1362,7 +1536,9 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
         // stroke, it breaks it wherever the ridge dips, which is exactly how
         // scraped ink fails: not evenly fainter, but in pieces.
         float aged = age * fi;                      // the second hand is the old one
-        float sharp = 2.2 + 6.0 * legibility + 3.2 * aged;
+        // The ghost line sharpens the OLDER hand as it passes, which is what
+        // "closer to legible" means when nothing is allowed to become a letter.
+        float sharp = 1.8 + 4.6 * legibility + 3.2 * aged + 1.8 * ghost * fi;
         // At 20 pt a stroke this thin has nothing to stand on, so the exponent
         // relaxes toward the broad mass instead of aliasing into a strobe. The
         // page stops being readable before it starts being wrong.
@@ -1377,7 +1553,7 @@ static inline float2 mi_rake(float2 p, float2 axis, float freq, float amp, float
     // page, it is a background.
     float tooth = mi_noise3(float3(p * (26.0 / S), 3.0));
 
-    float tv = 0.048 + 0.78 * clamp(writing, 0.0, 1.2) + 0.045 * (0.5 + 0.5 * tooth);
+    float tv = 0.048 + 0.84 * clamp(writing, 0.0, 1.2) + 0.045 * (0.5 + 0.5 * tooth);
 
     MIPalette pal = mi_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mi_srgb_to_linear(float3(inkColor.rgb));

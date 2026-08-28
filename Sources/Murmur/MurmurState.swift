@@ -23,7 +23,8 @@ import Foundation
 public enum MurmurState: String, CaseIterable, Codable, Sendable {
     /// Present, waiting, doing nothing. The material at its quietest.
     case idle
-    /// Working. The designed tempo of every style.
+    /// Working, and the state a MurmurView shows unless told otherwise.
+    /// It opens the material up rather than passing it through.
     case thinking
     /// Streaming an answer out. Quicker and brighter.
     case responding
@@ -34,38 +35,44 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String { rawValue.capitalized }
 
-    /// The tuned numbers. Starting points from the device review.
+    /// The tuned numbers. Retuned on Kris's second device pass: the first
+    /// table was too narrow to read. Idle and thinking now have to be
+    /// distinguishable from across a room, so idle drops to about a quarter
+    /// of thinking's tempo instead of half.
     public var defaultTreatment: MurmurStateTreatment {
         switch self {
-        // Slow and dim, but never stopped. A frozen indicator reads as a
-        // broken shader, which is the lesson the atmosphere field already
-        // taught us. Nothing announces idle, so there is no entry.
+        // Nearly still, dim, unmistakably resting. Never actually stopped:
+        // a frozen indicator reads as a broken shader, which is the lesson
+        // the atmosphere field already taught us. Nothing announces idle,
+        // so there is no entry.
         case .idle:
             MurmurStateTreatment(
-                speedFactor: 0.45, glowFactor: 0.70, depthFactor: 0.85,
+                speedFactor: 0.30, glowFactor: 0.65, depthFactor: 0.75,
                 hueShiftDelta: 0, entry: .none
             )
-        // Waking is the point: a thought starting should look like something
-        // took a breath in, not like a loop that was already running.
+        // The out-of-box look, because thinking is the default state. It
+        // does MORE than the raw material rather than passing it through:
+        // the palette opens, the light lifts, the motion picks up. A style
+        // at rest is the ingredient; this is the ingredient turned on.
         case .thinking:
             MurmurStateTreatment(
-                speedFactor: 1.00, glowFactor: 1.00, depthFactor: 1.00,
+                speedFactor: 1.15, glowFactor: 1.20, depthFactor: 1.25,
                 hueShiftDelta: 0, entry: .wake
             )
-        // The one state the eye should notice changing. Faster and a little
-        // brighter, not louder: the ceiling stays dim. No entry, because
+        // The one state the eye should notice changing. Quicker and
+        // brighter still, though the ceiling stays dim. No entry, because
         // streaming is a continuation of thinking rather than an event.
         case .responding:
             MurmurStateTreatment(
-                speedFactor: 1.35, glowFactor: 1.15, depthFactor: 1.00,
+                speedFactor: 1.45, glowFactor: 1.30, depthFactor: 1.25,
                 hueShiftDelta: 0, entry: .none
             )
-        // The completion breath. Brightness holds while the motion drops,
-        // so arrival reads as settling rather than as stopping, and the
-        // swell is the moment of arrival itself.
+        // The completion breath. Everything relaxes back toward the raw
+        // material while the light holds, so arrival reads as settling
+        // rather than as stopping, and the swell is the arrival itself.
         case .success:
             MurmurStateTreatment(
-                speedFactor: 0.60, glowFactor: 1.05, depthFactor: 1.00,
+                speedFactor: 0.55, glowFactor: 1.05, depthFactor: 1.00,
                 hueShiftDelta: 0, entry: .swell
             )
         // Down the rail, not off it. The negative hue walk takes the amber
@@ -73,7 +80,7 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
         // that the lost glow used to; the stutter is the material catching.
         case .error:
             MurmurStateTreatment(
-                speedFactor: 0.70, glowFactor: 0.85, depthFactor: 1.15,
+                speedFactor: 0.65, glowFactor: 0.80, depthFactor: 1.20,
                 hueShiftDelta: -0.35, entry: .stutter
             )
         }

@@ -392,6 +392,50 @@ static inline float ms_aa(float cycles, float2 size, float pixelScale) {
     return 1.0 - smoothstep(0.16, 0.36, perPixel);
 }
 
+/// THE FLOURISH CLOCK, and it is the pack's play mechanism.
+///
+/// Every species here performs ONE gesture: a thing the material does now and
+/// then and then lets go of. The clock says when, and the three rules it exists
+/// to keep are all in its arithmetic.
+///
+/// APERIODIC, NEVER A METRONOME. Time is cut into 6.5 second slots and each slot
+/// holds exactly one gesture, but WHERE in its slot the gesture falls is hashed
+/// per slot. The interval between two onsets is therefore the slot length plus
+/// the difference of two independent jitters -- about four to nine seconds, with
+/// no two gaps the same and nothing for the eye to lock onto. A gesture on a
+/// timer stops being play and becomes a tick.
+///
+/// DETERMINISTIC. The slot index is floor(t / SLOT) and everything else is a
+/// hash of it, so any t at all renders the correct frame: a screenshot rig, a
+/// scrubbed slider and a resumed app all agree, exactly as the rest of the file
+/// does. There is no state between frames anywhere in this pack and play does
+/// not get to be the exception.
+///
+/// NOTHING SNAPS. The envelope is sin^2(pi u), which is zero with zero slope at
+/// both ends. It does not begin, it arrives; it does not stop, it finishes. A
+/// linear ramp or a smoothstep to a hold would both put a corner in the motion,
+/// and a corner is the difference between a flourish and a glitch.
+///
+/// The gesture starts between 1.15 and 3.35 seconds into its slot and lasts
+/// between 1.6 and 3.0, so it always finishes inside its own slot and two
+/// gestures never overlap.
+///
+/// Returns (envelope, progress, a per-gesture random, the slot index). The
+/// random is what lets each occurrence differ -- which way the flock splits,
+/// which thread is pulled, which repetition comes back close -- so the play is
+/// never the same twice either.
+static float4 ms_flourish(float t, float lane) {
+    const float SLOT = 6.5;
+    float slot = floor(t / SLOT);
+    float local = t - slot * SLOT;
+    float start = 1.15 + 2.20 * ms_hash1(slot, lane);
+    float dur   = 1.60 + 1.40 * ms_hash1(slot + 811.0, lane);
+    float u = (local - start) / dur;
+    float sn = sin(3.14159265 * clamp(u, 0.0, 1.0));
+    float env = (u <= 0.0 || u >= 1.0) ? 0.0 : sn * sn;
+    return float4(env, clamp(u, 0.0, 1.0), ms_hash1(slot + 1607.0, lane), slot);
+}
+
 /// The house finish, shared: ink underneath, the field composited into it by the
 /// containment, the same knee the route curtain puts on its surface colour, and
 /// the dither last. Every species ends on this line.
@@ -458,6 +502,19 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // leads the outside, which is the way round a real roll goes.
     float r = length(uv);
     float2 q = ms_rot(uv, bank * (1.0 + 1.35 * turn * (0.26 - r))) / S;
+
+    // THE SPLIT: the flock deciding. Every few seconds the mass is drawn apart
+    // across a seam and comes back together. The two halves move in OPPOSITE
+    // directions along the seam's normal, which is what a split is; a single
+    // displacement would only be a lurch. The sign is taken with a smoothstep
+    // rather than sign() because sign() has a discontinuity down the middle of
+    // the seam and would draw a hairline crack through the flock. At envelope
+    // zero this term is exactly zero and the material is the one Kris approved.
+    float4 fSplit = ms_flourish(t, 3.0);
+    float seam = fSplit.z * 6.2831853;
+    float2 snorm = float2(cos(seam), sin(seam));
+    float side = 2.0 * smoothstep(-0.11, 0.11, dot(uv, snorm)) - 1.0;
+    q += snorm * (side * fSplit.x * 0.085 / S);
 
     // THE TRAVEL. A flock does not hover, and at the family's lifted tempo the
     // fold has to be seen CROSSING the mass rather than boiling in place -- a
@@ -631,7 +688,18 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // The wander is worth several radians, not a fraction of one: at K around
     // thirty the phase runs to thirty radians across the frame, so a displacement
     // under a radian is invisible and the weave comes out as machine-ruled.
-    float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 + br1 * 7.0 - t * 0.68;
+    // THE PULL: one thread drawn taut through the cloth, then let go. A narrow
+    // gaussian in the across-coordinate picks a single thread's worth of the
+    // weave and runs its phase forward, which slides that one thread through the
+    // cloth while its neighbours hold. It also stops WANDERING for the duration,
+    // because that is what taut means: a thread under tension is a thread that
+    // has stopped meandering. Both halves ride the same envelope home.
+    float4 fPull = ms_flourish(t, 12.0);
+    float pz = (dot(qd, d2) - (fPull.z - 0.5) * 0.70) / 0.075;
+    float pull = fPull.x * exp(-pz * pz);
+
+    float ph1 = dot(qd, d1) * K + w1 * wander * 5.5 * (1.0 - 0.65 * pull)
+              + br1 * 7.0 - t * 0.68 + pull * 5.20;
     float ph2 = dot(qd, d2) * K + w2 * wander * 5.5 + br2 * 7.0 + t * 0.54;
 
     float warp = mix(0.5, 0.5 + 0.5 * sin(ph1), aa);
@@ -732,6 +800,15 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // THE ATTENTION. Slower and wider as dwell rises.
     float rate = mix(0.92, 0.26, dwell);
     float2 ac = 0.16 * float2(sin(t * rate * 0.83), sin(t * rate * 0.61 + 2.1));
+
+    // THE SECOND LOOK: attention darts off its path and comes back. It moves the
+    // ATTENTION, not the light -- the threshold goes with it, so what surfaces
+    // during the dart is whatever the latent field happens to hold over there,
+    // which is different every time because the field is. A brightness flick
+    // would have shown the same shape brighter; this shows a different thought.
+    float4 fLook = ms_flourish(t, 21.0);
+    float lookA = fLook.z * 6.2831853;
+    ac += float2(cos(lookA), sin(lookA)) * (fLook.x * 0.135);
     float rad = mix(0.245, 0.320, dwell);
     float ad = length(uv - ac) / rad;
     float att = exp(-ad * ad);
@@ -860,11 +937,20 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float needle = ms_fbm1(ruv.x * 3.10 + t * 0.170, 3, 17.0) * (0.022 + 0.062 * drift);
     float across = ruv.y - needle;
 
+    // THE SLIP: the station wanders off frequency and re-locks. The whole line
+    // slides across the dial and loses its edge while it is off, then settles
+    // back onto the same station -- the dial is never actually retuned, which is
+    // why this is play and not a second arc. Both terms are geometry: where the
+    // line is and how wide it is. Nothing about the light changes.
+    float4 fSlip = ms_flourish(t, 30.0);
+    float slip = fSlip.x;
+    across += slip * (fSlip.z * 2.0 - 1.0) * 0.058;
+
     // THE HALF-WIDTH, which is the whole arc in one number. At birth it is wider
     // than the disc, so the "band" is a flat wash and the picture is whatever
     // the noise is doing -- static. At rest it is a line. `lock` chooses how
     // fine a line.
-    float sigma = mix(0.46, mix(0.115, 0.042, lock), arc);
+    float sigma = mix(0.46, mix(0.115, 0.042, lock), arc) * (1.0 + 0.60 * slip);
     float prof = exp(-(across * across) / (sigma * sigma));
 
     // The ends taper well before the rim. Without this the settled state is a
@@ -1002,7 +1088,17 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float phase = dot(q, float2(0.62, 0.38)) * 4.20 + bend * 9.00;
 
     float rate = mix(0.57, 2.35, pulseRate);
-    float th = phase - t * rate * 2.0;
+    // THE SURGE: one stretch of the medium briefly carries the signal faster,
+    // so an impulse runs ahead of the rest of the front and then falls back into
+    // step. It is a phase advance inside a soft region -- a change in WHERE the
+    // wave is, which is the only honest way to say "faster" in a field whose
+    // motion lives in its phase.
+    float4 fSurge = ms_flourish(t, 44.0);
+    float surgeA = fSurge.z * 6.2831853;
+    float2 sc = 0.26 * float2(cos(surgeA), sin(surgeA));
+    float sz = length(uv - sc) / 0.30;
+
+    float th = phase - t * rate * 2.0 - fSurge.x * exp(-sz * sz) * 3.40;
     float skew = th + 0.55 * sin(th);                 // steep front, long wake
     float k = mix(3.40, 1.50, afterglow);             // and how long
     float pulse = exp(k * (cos(skew) - 1.0));
@@ -1084,6 +1180,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float sep = 0.30 + 0.70 * layers;
     float base = 0.140 + 0.300 * drift;
 
+    float4 fPart = ms_flourish(t, 57.0);
+
     float acc = 0.0;     // light gathered, already attenuated by what is in front
     float T = 1.0;       // what is left of the light path
     for (int i = 0; i < 3; i++) {
@@ -1097,7 +1195,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         float f = 1.12 * (1.0 + 1.15 * fi * sep);
         float rate = base / (1.0 + 2.10 * fi * parallax);
         float head = 0.34 - 0.40 * fi;
-        float2 slide = float2(cos(head), sin(head)) * (rate * t);
+        // THE PARTING: the scrims draw apart and close again. The near sheet
+        // and the far sheet are pushed OPPOSITE ways, so the gaps between them
+        // widen and more of the thing behind arrives -- and it arrives because
+        // the geometry opened, not because anything was turned up. That is the
+        // whole species restated as a gesture: depth is what you see through.
+        float2 slide = float2(cos(head), sin(head))
+                     * (rate * t + fPart.x * (1.0 - fi) * 0.070);
 
         float n = ms_fbm3(float3(q * f + slide, t * 0.030 + fi * 7.3), 2, 2.03, 0.50);
         float d = clamp(0.5 + 1.35 * n, 0.0, 1.0);
@@ -1223,10 +1327,17 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float lag  = 0.22 + 0.55 * offset;     // seconds between them
     float live = 1.2 + 2.8 * repeats;      // how far down the series we hear
 
+    float4 fNear = ms_flourish(t, 66.0);
+
     float acc = 0.0;
     for (int i = 0; i < 4; i++) {
         float k = float(i);
-        float2 c = wander - dir * (step * k);
+        // THE NEAR ANSWER: one repetition comes back closer than it should, and
+        // a little more definite for it. Which one is hashed per gesture, so it
+        // is a different member of the series each time. It is the series itself
+        // misbehaving rather than a new thing appearing.
+        float near = (abs(k - (1.0 + floor(fNear.z * 3.0))) < 0.5) ? fNear.x : 0.0;
+        float2 c = wander - dir * (step * k * (1.0 - 0.55 * near));
         float2 p = (uv - c) / S;
 
         // The lateness. This is the line that makes it an echo.
@@ -1249,7 +1360,7 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
         // edge IS a wide threshold. By the fourth ghost the window is wider than
         // the field's whole range, so what is left is a soft lobe -- which is
         // what a fourth echo should be. No second sampling and no blur pass.
-        float w = 0.20 + (0.24 + 0.52 * blur) * k;
+        float w = (0.20 + (0.24 + 0.52 * blur) * k) * (1.0 - 0.26 * near);
         float mass = smoothstep(0.56 - w, 0.56 + w, d);
 
         // Wide and shallow. Its only job is to keep the ghost away from a rim
@@ -1333,7 +1444,24 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     // THE STROKE. Compressed along the pull, stretched across it.
     float fq = 1.50 + 2.40 * marks;
-    float2 sq = float2(dot(q, d) * 0.34, dot(q, e) * 2.70) * fq;
+    // THE NEAR WORD: somewhere on the page the hand presses on and a mark runs
+    // further than the others before it goes. Two things happen inside one soft
+    // patch, and both are form. The domain's compression ALONG the pull tightens,
+    // so the stroke extends instead of ending -- a longer, more continuous mark.
+    // And the presence window's falling edge is delayed, so that mark gets
+    // nearer to formed than this species otherwise allows.
+    //
+    // It still never resolves. There is no letterform anywhere in the
+    // construction to resolve INTO: a longer stroke is a longer stroke. And the
+    // delayed edge takes the peak from about 0.46 to about 0.65, which is closer
+    // to arriving and still not arrival. The gesture makes the almost more
+    // almost; it does not make it a word.
+    float4 fWord = ms_flourish(t, 73.0);
+    float wordA = fWord.z * 6.2831853;
+    float wz = length(uv - 0.22 * float2(cos(wordA), sin(wordA))) / 0.32;
+    float word = fWord.x * exp(-wz * wz);
+
+    float2 sq = float2(dot(q, d) * 0.34 * (1.0 - 0.45 * word), dot(q, e) * 2.70) * fq;
     float m = ms_fbm3(float3(sq, t * 0.115), 2, 2.03, 0.52);
 
     // The crest, not the body: a mark, not a smear. Wet ink lays a fatter line.
@@ -1354,7 +1482,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float peak = 0.30 + 0.30 * formation;
     float w2 = mix(0.20, 0.12, dissolve);
     float rise = smoothstep(peak - 0.16, peak + 0.10, L);
-    float fall = 1.0 - smoothstep(peak - w2 * 0.50, peak + w2, L);
+    float fall = 1.0 - smoothstep(peak - w2 * 0.50 + 0.060 * word,
+                                  peak + w2 + 0.100 * word, L);
     // A page that has been written on is never quite blank between marks, and
     // an indicator that empties out for a second and a half reads as switched
     // off. The residue is the ink already in the paper: the same stroke

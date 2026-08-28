@@ -63,6 +63,40 @@
 // describes an event rather than a texture and it has to keep meaning what it
 // says; only the medium under it sped up.
 //
+// THE PLAY, which is the newest layer and the one most easily got wrong. Each
+// of the eight performs ONE gesture: a flourish it does and then lets go of,
+// recurring aperiodically every four to nine seconds off mg_beat's hash. The
+// gestures, one line each:
+//
+//   caustic  a swell passes and the web gathers to a focus under it, then
+//            disperses. The gesture is a local rise in the FOCUSING STRENGTH,
+//            so more of the field crosses the fold threshold there.
+//   aurora   a wave runs along the curtain and it settles, reaching each lamina
+//            slightly later than the one in front.
+//   ember    a gust leans the column over and it recovers, the top leaning
+//            further than the base the way a rising column actually does.
+//   lantern  the fog parts AROUND the light: the outer veil lifts, the halo
+//            contracts, the source stands out, and then it closes again.
+//   mirage   a stronger stratum rolls down the road, tearing the light into
+//            more slices as it passes.
+//   oculus   an eddy crosses the beam and the air in the light turns with it.
+//   dapple   a gust swings the near canopy and a patch chases across the floor.
+//   eclipse  the mass scoots ahead along its own path and settles back, which
+//            swings the bright crescent round the limb and back.
+//
+// THREE RULES THEY ALL KEEP. The gesture lives in COORDINATES or in the medium,
+// never in a brightness multiplier: where the light level changes it is because
+// something moved in front of it or because the geometry that concentrates light
+// changed, which is the family law applied to flourishes. It enters and leaves
+// on mg_beat's envelope, whose ends are flat, so nothing snaps. And it is an
+// exact algebraic identity at rest, so between gestures each style is bit for
+// bit the material that was approved rather than a near copy of it.
+//
+// Each style draws on its own hash lane, so eight of these sitting in a gallery
+// never flourish together. That would read as a system doing something rather
+// than as eight materials each doing their own thing, and it is the first thing
+// a shared lane would have cost.
+//
 // THE CONTAINMENT. The view clips to a circle. A clip that lands on lit pixels
 // draws a hard rim, and a hard rim on an organic form is the one edge this
 // house never ships, so every style brings its light down to pure ink well
@@ -390,6 +424,83 @@ static inline float mg_hold(float2 uv, float reach) {
     return 1.0 - smoothstep(a, a + 0.30, r);
 }
 
+// MARK: - The beat
+//
+// The play wave's one shared mechanism. Every style in this pack performs a
+// gesture now: a flourish it does and then lets go of. This is what tells it
+// when.
+
+/// Where a gesture has got to, at one instant.
+struct MGBeat {
+    float env;    // 0 between gestures; one calm rise and release, peaking at 1
+    float phase;  // 0 to 1 across the gesture, for anything that travels
+    float seed;   // a per-gesture random, so no two flourishes are alike
+};
+
+/// THE APERIODIC BEAT. A metronome is the failure mode here: anything that
+/// recurs on a fixed period stops being a flourish within about three
+/// repetitions and becomes a tic, and the eye locks onto it and will not let go.
+/// So the spacing is hashed, and it is hashed the way the rest of this pack does
+/// time, which is to say it is a closed-form function of t with no state.
+///
+/// Time is cut into slots of L seconds and gesture k begins somewhere inside
+/// slot k, at an offset the hash picks out of a window of J:
+///
+///     onset(k) = k L + hash(k) J
+///     gap      = onset(k+1) - onset(k) = L + (hash(k+1) - hash(k)) J
+///
+/// so gaps land anywhere in [L - J, L + J], with no two consecutive gaps alike.
+/// J is derived from L rather than passed, as whichever of L - 4.05 and 8.95 - L
+/// is smaller, which is the widest jitter that keeps EVERY gap inside the four
+/// to nine seconds the brief asks for whatever period a style chooses.
+///
+/// EACH STYLE PASSES A DIFFERENT L, and that is not decoration. An earlier cut
+/// gave all eight the same 6.5 s slot grid, and while their jitter spread them
+/// out inside a window, their mean rate was identical, so they stayed
+/// phase-locked to one rhythm forever and never drifted through each other. Put
+/// eight of those in a gallery and the eye finds the shared pulse behind them
+/// within a minute. Periods between 5.6 and 7.4 are mutually incommensurate
+/// enough that the set never comes back into register.
+///
+/// Only two slots are ever examined, because a gesture cannot outlive the slot
+/// after its own: D is clamped under L - J, which is also what guarantees that
+/// two gestures of the same style never overlap.
+///
+/// THE ENVELOPE is a product of two smoothsteps rather than a bump function,
+/// because both of a smoothstep's ends are flat and that is the whole
+/// requirement: nothing may snap on, and nothing may snap off. It peaks at
+/// exactly 1 at u = 0.34, so the flourish arrives in about a third of its life
+/// and spends the other two thirds letting go, which is the difference between a
+/// gesture and a twitch.
+///
+/// AND IT RETURNS EXACTLY ZERO between gestures, which is load-bearing. Every
+/// gesture below enters its style either as `x * (1 + a env)` or as `x + a env`,
+/// so at rest each one is an exact algebraic identity and the resting material
+/// is the material that was approved, not a near copy of it.
+///
+/// `t` here is the style's own speed-scaled clock, so a flourish is part of the
+/// tempo and speeds up with everything else. The four to nine seconds is at
+/// speed 1.0, which is what "the designed tempo" means.
+static MGBeat mg_beat(float t, float lane, float period, float dur) {
+    float L = clamp(period, 5.60, 7.40);
+    float J = min(L - 4.05, 8.95 - L);          // every gap inside 4 ... 9 s
+    float D = clamp(dur, 0.60, L - J - 0.15);   // or gestures would overlap
+
+    MGBeat b;
+    b.env = 0.0; b.phase = 0.0; b.seed = 0.0;
+    float slot = floor(t / L);
+    for (int i = -1; i <= 0; i++) {
+        float k = slot + float(i);
+        float u = (t - (k * L + mg_hash1(k, lane) * J)) / D;
+        if (u > 0.0 && u < 1.0) {
+            b.phase = u;
+            b.seed = mg_hash1(k, lane + 313.0);
+            b.env = smoothstep(0.0, 0.34, u) * (1.0 - smoothstep(0.34, 1.0, u));
+        }
+    }
+    return b;
+}
+
 // MARK: - 1. Caustic
 
 // CAUSTIC. Light refracted through moving water, landing on a floor.
@@ -483,7 +594,29 @@ static inline float mg_hold(float2 uv, float reach) {
     // still water is not this species.
     float2 drift = float2(0.104, 0.038) * t * (0.30 + 1.55 * swim);
     float churn = t * (0.235 - 0.085 * swim);
-    float3 p = float3((uv + drift) * f, churn);
+
+    // THE GATHER. A swell crosses the surface and the light under it comes to a
+    // focus, then disperses. It is done as a local rise in the FOCUSING
+    // STRENGTH, which is the honest place for it: a swell is a patch of surface
+    // with more curvature, more curvature is a shorter focal length, and a
+    // shorter focal length puts more of the field past the fold threshold. So
+    // more web appears where the swell is, brighter, and then goes. Nothing
+    // multiplies a brightness anywhere in this gesture.
+    MGBeat g = mg_beat(t, 5.0, 6.7, 2.6);
+    float ga = g.seed * 6.2831853;
+    // A second value out of the one hash. Multiplying by an irrational-ish
+    // constant and taking the fraction decorrelates it well enough to choose a
+    // radius with, and it saves a second hash in every one of the eight.
+    float g2 = fract(g.seed * 7.31);
+    float2 gp = float2(cos(ga), sin(ga)) * (0.09 + 0.16 * g2) * S;
+    float gsig = 0.20 * S;
+    float2 gd = uv - gp;
+    float swell = g.env * exp(-dot(gd, gd) / (gsig * gsig));
+
+    // The swell also acts as a weak lens on the domain, drawing the surface it
+    // reads very slightly toward its own centre. At rest this is uv exactly.
+    float2 uvw = uv - gd * (0.20 * swell);
+    float3 p = float3((uvw + drift) * f, churn);
 
     // The Hessian, by differencing the analytic gradient. e = 0.10 of a cell is
     // small enough to be a second derivative and large enough to low pass the
@@ -498,7 +631,7 @@ static inline float mg_hold(float2 uv, float reach) {
     float hxy = (sx.z - s0.z) * inv;
     float hyy = (sy.z - s0.z) * inv;
 
-    float k = 0.06 + 0.20 * deepK;
+    float k = (0.06 + 0.20 * deepK) * (1.0 + 0.90 * swell);
     float det = (1.0 - k * hxx) * (1.0 - k * hyy) - k * k * hxy * hxy;
 
     // The fold, with a width instead of a singularity. Bounded in (0, 1] by
@@ -617,6 +750,16 @@ static inline float mg_hold(float2 uv, float reach) {
     float H = 0.09 + 0.22 * heightK;
     float border = 0.078 - 0.058 * thin;
 
+    // THE WAVE. A ripple runs along the curtain and it settles. This is what a
+    // real one does during a substorm and it is the most curtain-like thing a
+    // curtain can do, so it is the gesture. It reaches each lamina a little
+    // later than the one in front of it, which is the part that makes it read as
+    // a wave passing THROUGH a depth of sheet rather than across a flat one.
+    MGBeat g = mg_beat(t, 17.0, 5.9, 2.8);
+    float wdir = (g.seed < 0.5) ? -1.0 : 1.0;
+    float wtravel = mix(-0.62, 0.62, g.phase) * wdir;
+    float wamp = (0.085 + 0.055 * fract(g.seed * 7.31)) * g.env;
+
     float sheet = 0.0;
     for (int i = 0; i < 3; i++) {
         float fi = float(i);
@@ -632,7 +775,12 @@ static inline float mg_hold(float2 uv, float reach) {
         float rate = (0.110 + 0.230 * wander) * (1.0 + 0.42 * fi);
         float big = mg_fbm1(xi * 3.4 + t * rate, 2, lane) * 0.115;
         float fine = mg_fbm1(xi * 7.5 - t * rate * 0.50, 2, lane + 7.0) * 0.030;
-        float foot = 0.050 + 0.030 * fi + (big + fine) * (0.35 + 1.30 * foldK);
+        // The wave lifts the sheet's lower edge as it passes, trailing by a
+        // tenth of a frame per lamina. At rest wamp is zero and this term is
+        // exactly nothing.
+        float wd = xi - (wtravel - 0.10 * fi * wdir);
+        float wave = wamp * exp(-(wd * wd) / (0.155 * 0.155));
+        float foot = 0.050 + 0.030 * fi + (big + fine) * (0.35 + 1.30 * foldK) + wave;
 
         float h = up - foot;
         // Sharp below, diffuse above. Reverse these two and the species is fog.
@@ -754,6 +902,17 @@ static inline float mg_hold(float2 uv, float reach) {
     float3 wp = float3(x * 2.1, h * 1.7 - t * (0.55 + 0.95 * updraft), t * 0.30);
     float warp = mg_fbm3(wp, 2, 2.03, 0.5);
     float dx = warp * (0.030 + 0.080 * shimmer) * smoothstep(0.0, 0.32, h);
+
+    // THE GUST. Something crosses the fire, the column leans over, and it
+    // recovers. The lean grows with height because that is what a column of
+    // rising gas does when it is pushed: the base is anchored to the fuel and
+    // only the free part above it can go anywhere. A displacement rather than a
+    // rate, so it returns to zero at the end of the gesture instead of leaving
+    // the plume permanently further along than it should be.
+    MGBeat g = mg_beat(t, 29.0, 6.3, 2.5);
+    float gdir = (g.seed < 0.5) ? -1.0 : 1.0;
+    float gust = gdir * (0.048 + 0.032 * fract(g.seed * 7.31)) * g.env;
+    dx += gust * smoothstep(0.0, 0.34, h);
     float xs = x + dx;
 
     // THE BED. Patches, not a ramp. Its own slow crawl in the third axis is the
@@ -768,7 +927,9 @@ static inline float mg_hold(float2 uv, float reach) {
 
     // THE PLUME. Domain scrolls down so structure travels up; horizontal
     // frequency opens with height so the column widens as it climbs.
-    float spread = 1.0 + (0.85 + 1.55 * updraft) * max(h, 0.0);
+    // The gust opens the column out as it passes, which is the other half of
+    // being pushed. Exactly 1.0 at rest.
+    float spread = (1.0 + (0.85 + 1.55 * updraft) * max(h, 0.0)) * (1.0 + 0.34 * g.env);
     float3 pp = float3(xs * (2.6 / spread),
                        h * (2.30 - 0.80 * updraft) - t * (0.94 + 1.55 * updraft),
                        t * 0.195);
@@ -816,10 +977,25 @@ static inline float mg_hold(float2 uv, float reach) {
 /// The domain is compressed 2.2x across, because fog in still air lies in
 /// horizontal sheets, and the anisotropy is a second reason nothing here ever
 /// comes out circular.
-static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK) {
+///
+/// THE PARTING rides in here rather than at the call sites, and it has to: the
+/// pixel's density, the lamp's, and the four march samples must all agree about
+/// where the fog is thin, or the shadows stop being cast by the thing the eye is
+/// looking at. `clearAt` is the centre it opens around and `clearAmt` is how far
+/// it opens. At zero this returns the resting density exactly.
+static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK,
+                           float2 clearAt, float clearAmt) {
     float2 q = (p + flow) * float2(ff / 2.2, ff);
     float n = 0.5 + 0.5 * mg_fbm3(float3(q, fz), 2, 2.03, 0.5);
-    return (0.16 + 0.30 * fogK) + (0.55 + 1.45 * fogK) * smoothstep(0.40, 0.95, n);
+    float rho = (0.16 + 0.30 * fogK) + (0.55 + 1.45 * fogK) * smoothstep(0.40, 0.95, n);
+    // The clearing spares the fog immediately around the lamp and takes the
+    // OUTER veil, which is the whole point of the gesture: thinning the fog at
+    // the source would only dim it, since in this model the visible glow IS the
+    // fog. Lifting the veil around it leaves the core where it was and takes
+    // away the smear, and a core with the smear gone is a light that has almost
+    // resolved.
+    float d = length(p - clearAt);
+    return rho * (1.0 - clearAmt * smoothstep(0.055, 0.290, d));
 }
 
 // LANTERN. One light behind moving fog.
@@ -913,8 +1089,15 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // The density HERE, which is the thing the eye is actually looking at, and
     // the density AT THE LAMP, which is the thickness the light has to get out
     // of before it can light anything at all.
-    float rho0 = mg_fog(uv, flow, ff, fz, fogK);
-    float rhoL = mg_fog(lamp, flow, ff, fz, fogK);
+    // THE PARTING. The fog opens around the light, the outer veil lifts, and the
+    // presence in the middle stands clear for a moment before it closes again.
+    // The lamp's power is untouched by this, as it is by everything else: what
+    // changes is how much medium is standing in the way.
+    MGBeat g = mg_beat(t, 41.0, 7.1, 2.9);
+    float clearAmt = (0.58 + 0.22 * fract(g.seed * 7.31)) * g.env;
+
+    float rho0 = mg_fog(uv, flow, ff, fz, fogK, lamp, clearAmt);
+    float rhoL = mg_fog(lamp, flow, ff, fz, fogK, lamp, clearAmt);
 
     // The occlusion between the lamp and here. Four samples, and the fixed count
     // is the point: the loop bound never depends on the distance to the lamp, so
@@ -924,7 +1107,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float tau = 0.0;
     for (int i = 1; i <= 4; i++) {
         float s = (float(i) - 0.5) * 0.25;
-        tau += mg_fog(uv + ray * s, flow, ff, fz, fogK);
+        tau += mg_fog(uv + ray * s, flow, ff, fz, fogK, lamp, clearAmt);
     }
     tau *= len * 0.25;
     float shade = exp(-(2.4 + 5.0 * fogK) * tau);
@@ -1074,8 +1257,19 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float m = 1.20 + 0.90 * dist;
     float mirror = smoothstep(-0.025, 0.040, d);
     float yy = mix(d, -d * m, mirror);
+    // THE SURGE. A stronger stratum rolls down the road, and where it passes the
+    // image tears into more slices than it otherwise would, because the fold
+    // threshold is a threshold on the DISPLACEMENT AMPLITUDE and this raises it.
+    // Nothing is brightened; more of the light is simply folded twice for a
+    // moment. Exactly 1.0 between gestures.
+    MGBeat g = mg_beat(t, 53.0, 5.6, 2.4);
+    float sdir = (g.seed < 0.5) ? -1.0 : 1.0;
+    float stravel = mix(-0.55, 0.55, g.phase) * sdir;
+    float sd = x - stravel;
+    float surge = g.env * exp(-(sd * sd) / (0.26 * 0.26));
+
     float grip = smoothstep(-0.055, 0.115, d);
-    float ys = yy + band * (0.075 + 0.160 * bend) * grip;
+    float ys = yy + band * (0.075 + 0.160 * bend) * (1.0 + 1.20 * surge) * grip;
 
     // THE LIGHT. Small, compact and off to the left, because a source on the
     // axis reads as a target and this wants to read as something a long way down
@@ -1278,7 +1472,22 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // sits exactly on the scale rule: 0.070 uv, three points at 46 pt. Anything
     // finer becomes motes, and motes are the one thing this package must never
     // draw.
-    float3 ap = float3(uv * (7.0 / S) + float2(t * 0.044, -t * 0.116), t * 0.285);
+    // THE EDDY. A little turn of air crosses the beam and the light in it stirs.
+    // It is a ROTATION OF THE SAMPLING COORDINATE, which is the cheapest honest
+    // way to put a vortex in a medium and the only one that leaves the aperture
+    // and its arc completely alone. At rest the angle is zero, so the rotation
+    // is the identity matrix and uvAir is uv to the bit.
+    MGBeat g = mg_beat(t, 67.0, 6.9, 2.7);
+    float ea = g.seed * 6.2831853;
+    float e2 = fract(g.seed * 7.31);
+    float2 ep = float2(cos(ea), sin(ea)) * (0.085 + 0.100 * e2) * S;
+    float2 ed = uv - ep;
+    float esig = 0.130 * S;
+    float turn = g.env * 1.35 * exp(-dot(ed, ed) / (esig * esig)) * ((e2 < 0.5) ? -1.0 : 1.0);
+    float ec = cos(turn), es = sin(turn);
+    float2 uvAir = ep + float2(ec * ed.x - es * ed.y, es * ed.x + ec * ed.y);
+
+    float3 ap = float3(uvAir * (7.0 / S) + float2(t * 0.044, -t * 0.116), t * 0.285);
     float air = 0.5 + 0.5 * mg_fbm3(ap, 2, 2.03, 0.5);
     air = 1.0 - dustK * 0.55 * (1.0 - air);
 
@@ -1393,6 +1602,16 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float soft = 0.10 + 0.30 * fall;
     float blur = 1.0 - 0.28 * fall;
 
+    // THE CHASE. A gust swings the near canopy harder than the far one, the two
+    // gap sets slide out of register, and a patch of light runs across the floor
+    // and comes back. It is weighted toward layer 0 on purpose: displacing both
+    // layers together would slide the whole picture, and it is the RELATIVE
+    // motion of the two that makes a patch travel.
+    MGBeat g = mg_beat(t, 79.0, 6.1, 2.6);
+    float ca = g.seed * 6.2831853;
+    float2 chase = float2(cos(ca), sin(ca))
+                 * (0.085 + 0.055 * fract(g.seed * 7.31)) * g.env;
+
     // THE TWO LAYERS. The far one projects larger and drifts the other way, so
     // the alignments come and go rather than travelling across the frame.
     float trans = 1.0;
@@ -1412,7 +1631,8 @@ static inline float3 mg_open_law(float tau, float openTime) {
         float2 gust = float2(sin(t * (0.83 - 0.21 * fi) + fi * 2.3),
                              cos(t * (0.61 + 0.17 * fi) + fi * 1.1))
                     * (0.012 + 0.045 * breeze);
-        float3 q = float3((uv + dr + gust) * freq, t * (0.17 - 0.05 * fi));
+        float3 q = float3((uv + dr + gust + chase * (1.0 - 0.55 * fi)) * freq,
+                          t * (0.17 - 0.05 * fi));
         float n = mg_fbm3(q, 2, 2.03, 0.5);
         // The gap: light passes where the leaf field is thin. `patch` moves the
         // cut, so it opens and closes the canopy without changing its scale.
@@ -1535,7 +1755,16 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // the mass never retraces the same loop and never comes to rest, and its
     // offset from the light stays inside a band by construction: it cannot
     // leave the light and it cannot centre on it.
-    float th = t * (0.18 + 0.36 * driftK);
+    // THE SCOOT. The mass makes one quicker run along its path and settles back.
+    // It is added to the PHASE and not to the position, which matters: the phase
+    // only moves the mass along the path it was already on, so the bounded
+    // wander that guarantees the light is never cleared and never centred holds
+    // exactly through the gesture instead of being something to re-check. At
+    // rest the added phase is zero.
+    MGBeat g = mg_beat(t, 91.0, 7.4, 2.6);
+    float scoot = g.env * (0.42 + 0.30 * fract(g.seed * 7.31))
+                * ((g.seed < 0.5) ? -1.0 : 1.0);
+    float th = t * (0.18 + 0.36 * driftK) + scoot;
     float2 orbit = float2(cos(th), sin(th * 0.77) * 0.72) * (0.062 + 0.070 * occK) * S;
     float2 op = lp + orbit;
     float2 dO = uv - op;

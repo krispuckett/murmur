@@ -110,6 +110,44 @@ import Testing
     #expect(thinking < responding)
     // Success is the settle after work, so it drops back below thinking.
     #expect(MurmurState.success.defaultTreatment.speedFactor < thinking)
+    // Error is slower than working but not as still as resting.
+    #expect(idle < MurmurState.error.defaultTreatment.speedFactor)
+    #expect(MurmurState.error.defaultTreatment.speedFactor < thinking)
+}
+
+@Test func idleAndThinkingAreObviouslyDifferent() {
+    let idle = MurmurState.idle.defaultTreatment
+    let thinking = MurmurState.thinking.defaultTreatment
+    // Kris's bar: tell them apart from across a room. A narrow spread is
+    // what the first table got wrong, so the gap is now a test.
+    #expect(idle.speedFactor <= thinking.speedFactor * 0.35, "tempo spread too narrow")
+    #expect(idle.glowFactor <= thinking.glowFactor * 0.6, "light spread too narrow")
+    #expect(idle.depthFactor < thinking.depthFactor)
+}
+
+@Test func thinkingOpensTheMaterialUp() {
+    // Thinking is the default state, so its treatment is the out-of-box
+    // look. It has to do more than the raw material, not pass it through:
+    // more motion, more light, more palette range.
+    let thinking = MurmurState.thinking.defaultTreatment
+    #expect(thinking.speedFactor > 1, "more motion")
+    #expect(thinking.glowFactor > 1, "more light")
+    #expect(thinking.depthFactor > 1, "more color")
+
+    // Idle is the other side of that: quieter than the raw material.
+    let idle = MurmurState.idle.defaultTreatment
+    #expect(idle.speedFactor < 1)
+    #expect(idle.glowFactor < 1)
+    #expect(idle.depthFactor < 1)
+}
+
+@Test func respondingIsTheBrightestAndQuickest() {
+    let responding = MurmurState.responding.defaultTreatment
+    for state in MurmurState.allCases where state != .responding {
+        let other = state.defaultTreatment
+        #expect(responding.speedFactor > other.speedFactor, "quicker than \(state.rawValue)")
+        #expect(responding.glowFactor >= other.glowFactor, "brighter than \(state.rawValue)")
+    }
 }
 
 @Test func onlyThinkingAndSuccessRestartTheArc() {
