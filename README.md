@@ -87,11 +87,13 @@ Five families, eight species each. Names are `MurmurStyle` cases.
 | signal | murmuration, loom, cipher, tuning, current, veil, echo, glyph |
 | orb | breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein |
 
-The four field families are per-pixel generative fields, each shaped into a
-clear figure. The orb family is the canonical AI dot-sphere, rebuilt in the
-Murmur material: a fibonacci lattice on a rotating sphere, amber dots with
-cream peaks and a few tone-colored accents, rendered per pixel with a
-constant-time inverse spherical-fibonacci lookup.
+Every species is an orb: one compact presence that could be the assistant
+itself, and the species is what that orb is made of and how it behaves.
+Liquid sloshes inside it, ink blooms within it, light plays on it, signal
+travels through it. The orb family proper is the canonical AI dot-sphere: a
+fibonacci lattice on a rotating sphere rendered per pixel with a
+constant-time inverse spherical-fibonacci lookup, with a material dial
+running from pale and restrained to molten amber.
 
 Seven species (confluence, bloom, strata, oculus, tuning, feather, gather) have an arrival arc:
 they run once from birth toward a settled state when the view appears, and
