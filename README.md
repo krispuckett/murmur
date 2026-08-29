@@ -2,6 +2,12 @@
 
 Responsive AI presences for SwiftUI. Volumetric glass orbs, rendered in Metal, that work with your app.
 
+![The collection](Assets/collection.png)
+
+| opal | droplet | helix |
+|---|---|---|
+| ![opal](Assets/opal.gif) | ![droplet](Assets/droplet.gif) | ![helix](Assets/helix.gif) |
+
 - **18 glass species** (aura, droplet, limn, comet, nebula, prism, duet, still, fathom, arc, opal, flux, tempest, helix, geode, sol, abyss, chorus) plus a 48-species archive
 - **6 states**: idle, listening, thinking, responding, success, error, with designed transitions
 - **Live signals**: `level` (voice) and `activity` (typing / token stream) move the material
