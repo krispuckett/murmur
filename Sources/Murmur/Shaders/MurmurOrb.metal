@@ -28,28 +28,38 @@
 //
 // WHAT "IN OUR STYLE" HAD TO MEAN, concretely, or this would have been a clone:
 //
-//   THE DOTS WEAR THE RAIL. Not one pixel in this file is white. A front dot is
-//   an amber BODY with a CREAM PEAK at its centre where the light sits; a dot on
-//   the shaded flank of the sphere is amber all through; a dot on the back
-//   hemisphere sinks toward the rail's warm shadow stop and never toward grey.
-//   That is the value hierarchy the device review asked for, and here it has a
-//   second job: it is also the thing that makes a flat scatter of circles read
-//   as a SPHERE.
+//   THE DOTS WEAR THE RAIL. Not one pixel in this file is white, at either end
+//   of the material dial. A dot's body, its peak, its shaded flank and its
+//   far-side ghost are four positions on the SAME single-hue rail the rest of
+//   Murmur walks, and the material dial is nothing but a choice of which stretch
+//   of that rail the material lives on. That is the value hierarchy the device
+//   review asked for, and here it has a second job: it is also the thing that
+//   makes a flat scatter of circles read as a SPHERE.
 //
 //   THE ACCENTS ARE COLOUR, NOT BRIGHTNESS. A fraction of the dots -- chosen by
 //   a hash of the LATTICE INDEX, so a dot keeps its accent while it is jostled,
-//   swept, wound and re-seated -- refuse to go cream. They walk the same energy
-//   onto a band that tops out at the tone's saturated stop, so where their
-//   neighbours go pale they stay gold. In a one-hue palette that is the only
-//   honest way to have an accent at all, and it is why the accent set does not
-//   flicker: it is a property of the dot, never of the pixel.
+//   swept, wound and re-seated -- refuse to climb past the tone's saturated
+//   stop. Where their neighbours go pale they stay gold. In a one-hue palette
+//   that is the only honest way to have an accent at all, and it is why the
+//   accent set does not flicker: it is a property of the dot, never of the
+//   pixel.
 //
 //   THE GROUND IS INK AND THE SILHOUETTE IS THE FIGURE. The sphere brings itself
 //   to nothing at its own limb, well inside the circle clip, so the clip is a
 //   guarantee and not the design. Under the dots there is a very faint warm body
-//   -- about a twentieth of the energy of a lit dot -- because a sphere with
-//   nothing between its dots is a handful of confetti, and the figure law wants
-//   an object.
+//   because a sphere with nothing between its dots is a handful of confetti, and
+//   the figure law wants an object.
+//
+// THE MATERIAL IS A DIAL, NOT A DECISION, and this is the correction that came
+// back from the device. c3 on every species is `material`: 0 is pale and
+// restrained -- soft cream dots, a quiet terminator, a sparse scatter of gold
+// accents, no bloom -- and 1 is the molten amber lantern this pack was first
+// built as. The molten end is not a preset sitting beside the pale one; it is
+// literally the constants the first cut shipped with, so nothing that was
+// approved has moved. What the dial does in between is described in full at
+// mo_material, and the short version is that it moves the material UP THE RAIL
+// rather than turning a brightness down. The default is 0.3: the reference
+// register, with a hint of warmth in it.
 //
 // THE HARD PART, AND HOW IT IS DONE. A dot sphere in a fragment shader is a
 // nearest-point query: for this pixel, which lattice point is under it, and how
@@ -314,25 +324,28 @@ static inline float3 mo_settle_law(float tau, float settleTime) {
     return float3(v, D, e);
 }
 
-/// THE VALUE HIERARCHY, as one curve, copied from the signal pack where it was
-/// written. Three tiers or it fails: ink ground, amber body, CREAM PEAKS.
+/// THE VALUE HIERARCHY, copied from the signal pack where it was written, and
+/// then generalised by exactly one number so this pack can run it in two
+/// registers. Three tiers either way: ink ground, a body, and PEAKS.
 ///
-/// One number gets all three by spending the rail unevenly. The bottom
-/// seventy-eight per cent of the energy is compressed into the rail's first
-/// seventy-two, which is the whole amber body from shadow to tone, so most of
-/// the picture is warm and readable and none of it is near white. The last
-/// twenty-two per cent of the energy is spent on the rail's last twenty-eight,
-/// where the specular lives, so only the figure's key structure goes cream --
-/// and when it goes it goes decisively rather than creeping.
+/// The law is a two-segment spend of the rail. `K` is where the split falls: the
+/// bottom K of the energy is compressed into the rail's first `lo`, and the rest
+/// of the energy is spent on the run from `lo` up to `hi`, where the pale
+/// specular lives. At K = 0.78, lo = 0.72, hi = 1.00 this is the copied law
+/// unchanged, digit for digit -- most of the picture warm and readable, none of
+/// it near white, and only the key structure going cream. Moving K DOWN moves
+/// the whole picture up the rail: energy reaches the pale end sooner, the body
+/// of the figure lives above the tone stop instead of below it, and what was a
+/// molten object becomes a pale one. That single number is the spine of the
+/// material dial; see mo_material.
 ///
 /// The join is smoothed over a fifth of the range, because a slope kink in a
 /// map this shallow shows up as a contour line in a smooth field. It is the
 /// same reason mo_shade eases its own segment joins.
-static inline float mo_tier(float e) {
+static inline float mo_tier(float e, float K, float lo, float hi) {
     float x = clamp(e, 0.0, 1.0);
-    const float K = 0.78;
-    float body = (x / K) * 0.72;
-    float peak = 0.72 + ((x - K) / (1.0 - K)) * 0.28;
+    float body = (x / K) * lo;
+    float peak = lo + ((x - K) / (1.0 - K)) * (hi - lo);
     return mix(body, peak, smoothstep(K - 0.10, K + 0.10, x));
 }
 
@@ -679,51 +692,150 @@ static MOLattice mo_lattice(float3 p, float n) {
 /// hash of the position would have been one character shorter and would have
 /// made the accents crawl over a rotating sphere like static.
 ///
-/// The dial is scaled by 0.62 rather than used raw, so the roster's default of
-/// 0.3 puts under a fifth of the lattice on the saturated stop. A third of the
-/// ball refusing to reach cream would have flattened the very hierarchy the
-/// accents are supposed to sit inside. The gate at the bottom is so that
-/// accentShare = 0 means none, exactly, rather than the few dots whose hash
-/// happens to land in the smoothstep's skirt.
+/// `share` arrives already decided by the material dial rather than by a user
+/// knob, because how many accents a sphere wants is not independent of what the
+/// sphere is made of: pale dots make a gold one obvious, so eight per cent is a
+/// scatter; molten dots hide it, so twenty per cent is the same read.
 static inline float mo_accent(float index, float share) {
-    float sh = clamp(share, 0.0, 1.0);
-    float thr = sh * 0.62;
+    float thr = clamp(share, 0.0, 1.0);
     float h = mo_hash1(index, 704.0);
-    return (1.0 - smoothstep(thr - 0.035, thr + 0.035, h)) * smoothstep(0.0, 0.06, sh);
+    return (1.0 - smoothstep(thr - 0.035, thr + 0.035, h)) * smoothstep(0.0, 0.02, thr);
+}
+
+// MARK: - The material dial
+
+/// THE MATERIAL DIAL, which is c3 on every species in this family.
+///
+/// The first cut of this pack had one material: molten. Warm amber dot bodies,
+/// cream peaks, a strong terminator, a bloom on the brightest dots. It is a
+/// beautiful object and it is the wrong register for most of the places one of
+/// these will actually run -- the device verdict was "we can't exactly use that
+/// orb material", and the reason is that the reference indicator's RESTRAINT is
+/// part of how it reads as an AI assistant rather than as a lamp. A thinking
+/// indicator sits next to text, at 20 to 46 points, for minutes at a time. It
+/// should not be the brightest thing on the screen.
+///
+/// So the material is now a dial rather than a decision, and it runs between two
+/// complete registers rather than fading one out:
+///
+///   0  PALE. Soft cream dots -- the rail's own top stop, #FFDEB2 at the house
+///      tone, a warm paper -- with almost no value range inside a dot, a quiet
+///      terminator, a far hemisphere that sinks to a deep warm shadow, no bloom
+///      at all, and a sparse eight per cent of dots holding at the tone's
+///      saturated stop. Elegant, legible, and content to be furniture.
+///   1  MOLTEN. Everything the first cut had, unchanged: amber bodies, cream
+///      peaks, the wide terminator, the bloom, a fifth of the lattice on the
+///      saturated stop.
+///
+/// WHAT ACTUALLY MOVES, and why it is these seven things and not a brightness.
+/// A dial that dimmed the molten register would have given a dim molten orb,
+/// which is worse than either end. What changes instead is WHERE ON THE RAIL the
+/// material lives and how much contrast it carries:
+///
+///   the tier split   the spine. Moving K from 0.78 to 0.42 lifts the whole
+///                    picture over the tone stop, so a dot's body is pale rather
+///                    than amber. Nothing else can do this; everything else here
+///                    is in service of it.
+///   the key light    compressed at the pale end, from a range of 0.98 down to
+///                    0.40. A pale ball with a molten terminator reads as a
+///                    dented one. The roundness is carried by dot SIZE and by
+///                    the dimmed far hemisphere instead, which is how the
+///                    reference does it and why it looks calm.
+///   the dot's core   nearly flat at the pale end (0.88 to 1.10 across a dot
+///                    instead of 0.60 to 1.32). A pale dot with a hot centre is
+///                    a bead; a pale dot that is one value is a dot.
+///   accent share     eight per cent to twenty. See mo_accent.
+///   accent warmth    the accent band's top runs to the tone stop exactly at the
+///                    pale end, so an accent is the most SATURATED thing on the
+///                    ball while its neighbours are the palest. At the molten
+///                    end the neighbours are already warm, so the band lifts a
+///                    little to keep the accent distinguishable.
+///   the far side     dimmed harder at the pale end, because the pale ramp lifts
+///                    everything and the back hemisphere has to be pushed back
+///                    down or the ball goes transparent.
+///   the bloom        gone at the pale end. This is the one that was doing the
+///                    most damage: emission on a small bright object at a normal
+///                    reading distance is what makes it a lantern.
+///
+/// ONE HUE THROUGHOUT. Nothing here reaches for a second colour or desaturates
+/// toward grey to get "paper". The pale end is the rail's own s3, which is a
+/// warm off-white by construction, and the accents are the rail's own s2. The
+/// palette law is not bent to get the reference register; the reference register
+/// turns out to already be inside the rail, near the top, where this pack had
+/// simply never gone.
+struct MOMaterial {
+    float m;                   // the dial, for anything that wants it raw
+    float tierK, tierLo, tierHi;
+    float accShare, accLo, accHi;
+    float keyLo, keyHi;        // front hemisphere terminator
+    float keyBLo, keyBHi;      // far hemisphere terminator
+    float coreLo, coreHi;      // the value ramp inside one dot
+    float backMul;             // extra dimming of the far hemisphere
+    float bodyMul;             // the faint body between the dots
+    float emis;                // bloom, as a multiple of the species' own
+};
+
+static MOMaterial mo_material(float dial) {
+    float m = clamp(dial, 0.0, 1.0);
+    MOMaterial o;
+    o.m = m;
+    // The molten column is the copied law and the first cut's own constants,
+    // digit for digit, so material = 1 is exactly the orb that was approved.
+    o.tierK   = mix(0.42, 0.78, m);
+    o.tierLo  = 0.72;
+    o.tierHi  = mix(0.97, 1.00, m);
+    o.accShare = mix(0.085, 0.200, m);
+    o.accLo   = mix(0.24, 0.30, m);
+    o.accHi   = mix(0.78, 0.80, m);
+    o.keyLo   = mix(0.72, 0.26, m);
+    o.keyHi   = mix(0.40, 0.98, m);
+    o.keyBLo  = mix(0.66, 0.44, m);
+    o.keyBHi  = mix(0.34, 0.60, m);
+    o.coreLo  = mix(0.88, 0.60, m);
+    o.coreHi  = mix(0.22, 0.72, m);
+    o.backMul = mix(0.55, 1.00, m);
+    o.bodyMul = mix(0.45, 1.00, m);
+    o.emis    = m;
+    return o;
 }
 
 /// THE ONE PLACE ENERGY BECOMES LIGHT, and every dot in this pack goes through
 /// it, which is most of what keeps the family reading as one family.
 ///
-/// The base ramp is the signal pack's: mo_tier spends the rail unevenly so an
-/// empty pixel is ink to the bit, a dot's body is amber, and only a dot's lit
-/// core reaches the pale specular.
+/// The base ramp is mo_tier under whatever split the material dial has chosen:
+/// an empty pixel is ink to the bit at either end, and where the body and the
+/// peak of a dot land on the rail between there is the material.
 ///
 /// The accent ramp is this pack's own. An accent walks the SAME energy onto a
-/// band that starts at the shadow stop and tops out at 0.80, which is the tone's
-/// saturated stop and one notch short of where the cream begins. So an accent
-/// dot in full light is not a brighter dot: it is a dot that stayed gold while
-/// its neighbours went pale, which is the only kind of accent a single-hue
-/// palette can honestly have.
+/// band that starts near the shadow stop and tops out at the tone's saturated
+/// stop, one notch short of where the cream begins. So an accent dot in full
+/// light is never a brighter dot: it is a dot that stayed gold while its
+/// neighbours went pale, which is the only kind of accent a single-hue palette
+/// can honestly have. It is also why the accents get MORE legible as the dial
+/// goes pale rather than less -- the band barely moves, and everything around it
+/// climbs past it.
 ///
 /// `accentFrac` is faded out at low energy before it is used. Without that, the
 /// dying rim of an accent dot would sit at the shadow stop instead of falling to
 /// ink, and every accent would wear a visible ring.
 static inline float3 mo_lit(MOPalette pal, float e, float accentFrac,
-                            float glow, float emis) {
+                            float glow, float emis, MOMaterial mat) {
     float G = max(glow, 0.0);
     // `glow` enters where it cannot lie: it scales the energy BEFORE the rail
     // walk, so a lower setting walks less far and reads cooler and deeper rather
     // than merely faded. At glow = 0 a third survives, because an indicator that
     // can be switched off by a dial is a bug and not a dial.
     float en = clamp(mo_knee(max(e, 0.0) * (0.35 + 0.65 * G), 0.92), 0.0, 1.0);
-    float tier = mo_tier(en);
+    float tier = mo_tier(en, mat.tierK, mat.tierLo, mat.tierHi);
     float aF = clamp(accentFrac, 0.0, 1.0) * smoothstep(0.02, 0.24, en);
-    float tRail = clamp(mix(tier, 0.30 + 0.50 * tier, aF), 0.0, 1.0);
+    float tRail = clamp(mix(tier, mat.accLo + (mat.accHi - mat.accLo) * tier, aF),
+                        0.0, 1.0);
     float3 col = mo_shade(pal, tRail);
     // Emission is gated to the specular, plus a smaller gate lower down for the
     // accents -- a saturated dot that emits nothing reads as a hole in the
-    // lattice, which is the opposite of an accent.
+    // lattice, which is the opposite of an accent. `emis` arrives with the
+    // material's say already folded into it by the caller, because how much
+    // bloom there is depends on the state as well as the material.
     float em = emis * G * (smoothstep(0.72, 1.0, tRail)
                          + 0.60 * aF * smoothstep(0.44, 0.80, tRail));
     return col * (1.0 + em);
@@ -741,8 +853,7 @@ struct MOSpec {
                      // 4 gather, 5 stir, 6 daybreak, 7 skein
     float n;         // lattice count
     float rad;       // base dot radius, as a chord on the unit sphere
-    float accent;    // accentShare, straight from c3
-    float back;      // how far the far hemisphere sinks
+    float back;      // how far the far hemisphere sinks, before the material's say
     float key;       // how much of the fixed key light this species wears
     float k0, k1;    // the species' own two character knobs
     float a0, a1, a2, a3;
@@ -1020,8 +1131,8 @@ static float2 mo_level(MOSpec sp, float3 q, float3 view, float index) {
 /// it crosses smoothly and the seam disappears.
 struct MOHemi { float cov, energy, accent; };
 
-static MOHemi mo_hemi(MOSpec sp, MOLattice L, float3 look, float3 view,
-                      float radScale, float softFloor, bool isBack) {
+static MOHemi mo_hemi(MOSpec sp, MOMaterial mat, MOLattice L, float3 look,
+                      float3 view, float radScale, float softFloor, bool isBack) {
     float cov = 0.0, wsum = 0.0, coreW = 0.0, accW = 0.0, litW = 0.0;
     for (int s = 0; s < 4; s++) {
         float3 q = L.q[s];
@@ -1038,7 +1149,7 @@ static MOHemi mo_hemi(MOSpec sp, MOLattice L, float3 look, float3 view,
         cov = max(cov, c);
         wsum += c;
         coreW += c * smoothstep(0.34, 0.96, u);
-        accW  += c * mo_accent(L.i[s], sp.accent);
+        accW  += c * mo_accent(L.i[s], mat.accShare);
         litW  += c * md.x;
     }
     float inv = 1.0 / max(wsum, 1.0e-4);
@@ -1049,11 +1160,14 @@ static MOHemi mo_hemi(MOSpec sp, MOLattice L, float3 look, float3 view,
     // ball is not an accent, it is a distraction behind the thing you are
     // looking at.
     o.accent = isBack ? 0.0 : accW * inv;
-    // THE DOT'S OWN VALUE RAMP: an amber BODY with a CREAM PEAK at its centre.
-    // The back hemisphere gets almost none of it, because a dot behind the
-    // sphere that carries a specular is a dot that is not behind anything.
+    // THE DOT'S OWN VALUE RAMP, and the material dial owns it. At the molten end
+    // a dot is a body with a hot centre; at the pale end it is very nearly one
+    // flat value, because a pale dot with a bright core is a bead and a dot
+    // sphere made of beads is jewellery. The back hemisphere is nearly flat at
+    // both ends -- a dot behind the sphere that carries a specular is a dot that
+    // is not behind anything.
     o.energy = cov * (litW * inv) * (isBack ? (0.84 + 0.22 * core)
-                                            : (0.60 + 0.72 * core));
+                                            : (mat.coreLo + mat.coreHi * core));
     return o;
 }
 
@@ -1076,7 +1190,7 @@ static inline float3x3 mo_frame(float spin, float tip) {
 }
 
 /// THE BALL. Every species ends here, and this is the whole picture.
-static half4 mo_orb(MOSpec sp, float3x3 bodyFromView, float R,
+static half4 mo_orb(MOSpec sp, MOMaterial mat, float3x3 bodyFromView, float R,
                     float2 position, float2 size, float pixelScale,
                     half4 inkColor, half4 toneColor,
                     float hueShift, float depth, float glow, float emis) {
@@ -1120,10 +1234,13 @@ static half4 mo_orb(MOSpec sp, float3x3 bodyFromView, float R,
     float3 pFar  = normalize(O + dir * (-b + sq));
 
     // The key light, wrapped and raised to 1.7 so the terminator falls the way a
-    // sphere's does rather than the way a cone's does. The lit shoulder passes
-    // 1.2 because the value hierarchy needs somewhere for the cream to come
-    // from, and the shaded flank floors at 0.26 rather than at zero because a
-    // dot on the dark side of a ball is still a dot.
+    // sphere's does rather than the way a cone's does. HOW WIDE it swings is the
+    // material's call: at the molten end the lit shoulder passes 1.2 and the
+    // shaded flank floors at 0.26, which is the modelling a warm object wants;
+    // at the pale end the whole swing is a third of that, because a pale ball
+    // with a molten terminator reads as a dented one. What carries the roundness
+    // there instead is dot size and the dimmed far hemisphere, which is how the
+    // reference does it and most of why it looks calm.
     //
     // The saturate is not decoration and it is not defensive clutter: it is the
     // INVARIANT that the pow below depends on. Both arguments are unit vectors,
@@ -1135,8 +1252,8 @@ static half4 mo_orb(MOSpec sp, float3x3 bodyFromView, float R,
     // hole back. See MO_KEY.
     float lamF = saturate(0.5 + 0.5 * dot(pNear, MO_KEY));
     float lamB = saturate(0.5 + 0.5 * dot(pFar,  MO_KEY));
-    float keyF = mix(1.0, 0.26 + 0.98 * pow(lamF, 1.7), sp.key);
-    float keyB = mix(1.0, 0.44 + 0.60 * pow(lamB, 1.7), sp.key);
+    float keyF = mix(1.0, mat.keyLo  + mat.keyHi  * pow(lamF, 1.7), sp.key);
+    float keyB = mix(1.0, mat.keyBLo + mat.keyBHi * pow(lamB, 1.7), sp.key);
 
     float3 lookF = mo_warp(sp, bodyFromView * pNear);
     float3 lookB = mo_warp(sp, bodyFromView * pFar);
@@ -1147,25 +1264,54 @@ static half4 mo_orb(MOSpec sp, float3x3 bodyFromView, float R,
     float radF = 0.62 + 0.44 * (0.5 + 0.5 * pNear.z);
     float radB = (0.62 + 0.44 * (0.5 + 0.5 * pFar.z)) * 0.88;
 
-    MOHemi fr = mo_hemi(sp, mo_lattice(lookF, sp.n), lookF, pNear, radF, 1.5 * pxS, false);
-    MOHemi bk = mo_hemi(sp, mo_lattice(lookB, sp.n), lookB, pFar,  radB, 1.5 * pxS, true);
+    MOHemi fr = mo_hemi(sp, mat, mo_lattice(lookF, sp.n), lookF, pNear, radF, 1.5 * pxS, false);
+    MOHemi bk = mo_hemi(sp, mat, mo_lattice(lookB, sp.n), lookB, pFar,  radB, 1.5 * pxS, true);
 
     // THE BODY. A very faint warm presence between the dots, about a twentieth
     // of a lit dot's energy and shaded by the same key. Without it the figure is
     // a handful of confetti that happens to be arranged on a sphere; with it
     // there is an object, and the figure law is satisfied at 20 pt where the
-    // individual dots are three pixels wide.
-    float body = 0.050 + 0.062 * keyF;
+    // individual dots are three pixels wide. The pale register takes most of it
+    // away, because the pale ramp would otherwise turn a whisper between the
+    // dots into a visible disc behind them.
+    float body = (0.050 + 0.062 * keyF) * mat.bodyMul;
 
     // The far hemisphere is dimmed hard and then OCCLUDED by whatever is in
     // front of it, which is the depth cue that costs nothing and does the most
     // work: back dots appear in the gaps between front dots and disappear
-    // behind them, and the eye reads a solid ball from that alone.
+    // behind them, and the eye reads a solid ball from that alone. It is dimmed
+    // harder still at the pale end: the pale ramp lifts everything, and a far
+    // hemisphere that comes up with it is a transparent ball.
     float sil = 1.0 - smoothstep(1.0 - sEdge, 1.0, rs2);
-    float e = (fr.energy * keyF + bk.energy * keyB * sp.back * (1.0 - fr.cov) + body) * sil;
+    float e = (fr.energy * keyF
+             + bk.energy * keyB * sp.back * mat.backMul * (1.0 - fr.cov)
+             + body) * sil;
+
+    // THE ARRIVAL BORROWS THE BLOOM BACK, and this is what makes SUCCESS legible
+    // at the pale end of the dial.
+    //
+    // The wavefront brightens each dot as it passes, which is the whole design
+    // -- but a pale orb's lit dots are already sitting at the very top of the
+    // rail, with nowhere left to go. On the molten register there is a third of
+    // the rail in hand and the surge reads; on the pale one the front would have
+    // crossed the lit face of the ball and done nothing to it.
+    //
+    // So where the material has given up its bloom, the arrival is allowed to
+    // borrow it for the length of the front and no longer. The term is the same
+    // gaussian on the same sweep axis the per-dot crest uses, gated by front
+    // COVERAGE so the light appears on the dots and never in the gaps between
+    // them: the surge travels through the lattice because it is the lattice,
+    // lit. At material 1 this is identically zero -- the molten orb already has
+    // its bloom and does not need to borrow -- so nothing that was approved
+    // moves. A small share is held after the front has gone, which is the
+    // settled brightness the state design asks for.
+    float fw = (dot(pNear, MO_SWEEP) - sp.wave) * 3.33;
+    float arrival = max(sp.crest * exp(-fw * fw) * fr.cov, 0.22 * sp.settled);
+    float emisNow = emis * (mat.emis + (1.0 - mat.emis) * clamp(arrival, 0.0, 1.0));
 
     MOPalette pal = mo_palette(inkColor, toneColor, hueShift, depth);
-    float3 field = mo_lit(pal, e, fr.accent * smoothstep(0.05, 0.35, fr.cov), glow, emis);
+    float3 field = mo_lit(pal, e, fr.accent * smoothstep(0.05, 0.35, fr.cov),
+                          glow, emisNow, mat);
 
     return mo_finish(field, inkLin, mo_containment(uv, 0.84), position, pixelScale);
 }
@@ -1222,11 +1368,13 @@ static inline float mo_radius(float n, float dotSize) {
     float breath    = clamp(c0, 0.0, 1.0);
     float depthFade = clamp(c1, 0.0, 1.0);
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 0;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.72;
     sp.key  = 1.0;
     sp.k0 = breath; sp.k1 = depthFade;
@@ -1249,7 +1397,7 @@ static inline float mo_radius(float n, float dotSize) {
     float tip  = 1.2708 + 0.055 * sin(t * 0.083);
 
     float R = MO_R * (1.0 + 0.042 * sp.a0 * (0.5 + 0.5 * sin(t * 0.66)));
-    return mo_orb(sp, mo_frame(spin, tip), R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.32);
 }
 
@@ -1296,11 +1444,13 @@ static inline float mo_radius(float n, float dotSize) {
 
     float rate = 0.16 + 0.40 * flow;
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 1;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.72;
     sp.key  = 1.0;
     sp.k0 = bands; sp.k1 = flow;
@@ -1319,7 +1469,7 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.30 + 0.075 * mo_fbm1(t * 0.109, 2, 12.0) + 0.44 * st.turn;
     float tip  = 1.2708 + 0.050 * sin(t * 0.071);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.32);
 }
 
@@ -1369,11 +1519,13 @@ static inline float mo_radius(float n, float dotSize) {
 
     float rate = 0.13 + 0.26 * sparkle;
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 2;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.66;
     sp.key  = 1.0;
     sp.k0 = sparkle; sp.k1 = spread;
@@ -1393,7 +1545,7 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.34 + 0.090 * mo_fbm1(t * 0.121, 2, 21.0) + 0.46 * st.turn;
     float tip  = 1.2708 + 0.060 * sin(t * 0.091 + 2.1);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.36);
 }
 
@@ -1449,11 +1601,13 @@ static inline float mo_radius(float n, float dotSize) {
                + 0.26 * fl.x;
     beat = clamp(beat, 0.0, 1.15);
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 3;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.70;
     sp.key  = 1.0;
     sp.k0 = swirl; sp.k1 = pole;
@@ -1474,7 +1628,7 @@ static inline float mo_radius(float n, float dotSize) {
     // pole and a pole you cannot see is a pole that is not in the picture.
     float tip  = 1.1900 + 0.055 * sin(t * 0.079 + 0.7);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.33);
 }
 
@@ -1535,11 +1689,13 @@ static inline float mo_radius(float n, float dotSize) {
     // lattice completing.
     float arc = clamp(max(1.0 - law.z, st.accord), 0.0, 1.0);
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 4;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.72;
     sp.key  = 1.0;
     sp.k0 = pull; sp.k1 = ring;
@@ -1564,7 +1720,7 @@ static inline float mo_radius(float n, float dotSize) {
     // gathers -- nine per cent, which nobody sees as a size change and everybody
     // reads as a drawing-in.
     float R = MO_R * (1.0 + 0.085 * law.z);
-    return mo_orb(sp, mo_frame(spin, tip), R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.34);
 }
 
@@ -1614,11 +1770,13 @@ static inline float mo_radius(float n, float dotSize) {
 
     float env = pow(fl.x, mix(0.75, 2.20, settle));
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 5;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.72;
     sp.key  = 1.0;
     sp.k0 = jitter; sp.k1 = settle;
@@ -1634,7 +1792,7 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.35 + 0.095 * mo_fbm1(t * 0.127, 2, 58.0) + 0.50 * st.turn;
     float tip  = 1.2708 + 0.065 * sin(t * 0.095 + 1.4);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.32);
 }
 
@@ -1686,11 +1844,13 @@ static inline float mo_radius(float n, float dotSize) {
     // turn so the day does not jump to a new hour when the state changes.
     float sa = t * rate + rate * 1.25 * st.turn;
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 6;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.58;
     // A quarter of the fixed key survives, purely so the ball still has a little
     // modelling when the sun is edge on. The sun does the rest.
@@ -1713,7 +1873,7 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.24 + 0.070 * mo_fbm1(t * 0.101, 2, 66.0) + 0.40 * st.turn;
     float tip  = 1.2708 + 0.045 * sin(t * 0.067);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.35);
 }
 
@@ -1762,11 +1922,13 @@ static inline float mo_radius(float n, float dotSize) {
 
     float rate = 0.28 + 0.40 * trail;
 
+    // c3 is the material dial for every species in this family.
+    MOMaterial mat = mo_material(c3);
+
     MOSpec sp;
     sp.kind = 7;
     sp.n    = mo_count(size, formScale);
     sp.rad  = mo_radius(sp.n, c2);
-    sp.accent = c3;
     sp.back = 0.70;
     sp.key  = 1.0;
     sp.k0 = winding; sp.k1 = trail;
@@ -1790,6 +1952,6 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.31 + 0.085 * mo_fbm1(t * 0.119, 2, 79.0) + 0.46 * st.turn;
     float tip  = 1.2708 + 0.055 * sin(t * 0.073 + 0.4);
 
-    return mo_orb(sp, mo_frame(spin, tip), MO_R, position, size, pixelScale,
+    return mo_orb(sp, mat, mo_frame(spin, tip), MO_R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.34);
 }

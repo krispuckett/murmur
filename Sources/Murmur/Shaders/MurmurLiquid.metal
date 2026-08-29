@@ -324,7 +324,63 @@ static inline half4 ml_out(float3 linearRGB, float2 pixel) {
 /// texture stamped into a hole.
 static inline float ml_bowl(float2 uv) {
     float r = length(uv) * 2.0;                  // 1.0 at the view's own circle
-    return 1.0 - smoothstep(0.54, 0.90, r);
+    // The fade moved outward when the pack became orbs. It used to start at 0.54
+    // and do most of the shaping; now each species has a LIMB of its own at 0.38
+    // and the bowl's only remaining job is to guarantee pure ink before the
+    // clip. Left where it was it would have dimmed every presence from the
+    // shoulders in, which is the one thing a solid body must not do.
+    return 1.0 - smoothstep(0.80, 0.96, r);
+}
+
+// MARK: - The presence
+//
+// THE ORB. Every species in this pack is now one compact centred body that could
+// be the assistant itself, and the species is what that body is MADE OF. So the
+// sphere is built once, here, and each style wraps its own material onto it.
+//
+// WHY A CHART AND NOT A SHADED BALL. The cheap way to draw a sphere is to shade
+// a circle with a light and call it done, and it always looks like a button.
+// What actually sells curvature is that the MATERIAL obeys it: forms compress
+// toward the edge, flows bend as they cross, structure disappears round the
+// side. That needs coordinates, so this returns the surface point itself.
+//
+//   n     the unit surface point of the front hemisphere, which is also its
+//         normal, and the right domain for any 3D field: sampling noise at n
+//         wraps with no seam anywhere and foreshortens for free.
+//   lam   longitude, and phi latitude. On the VISIBLE hemisphere both run
+//         cleanly from -pi/2 to pi/2 with no pole and no wrap in sight, so a
+//         flow drawn in them is a flow on a globe. Turning the body is adding
+//         to lam. Both compress hard near the limb, which is exactly the
+//         foreshortening a real surface has and the thing that reads as round.
+//   shade the light falling off around the curve, plus a soft key from the
+//         upper left so the eye is told which way the surface turns.
+//
+// The limb is SOFT. Organic forms never have hard edges, and a body whose rim
+// is a cut looks like a sticker; the presence has to sit in the ink rather than
+// on it.
+struct MLOrb {
+    float3 n;
+    float  z;       // n.z: 1 facing the viewer, 0 at the limb
+    float  mask;    // the presence itself
+    float  lam;     // longitude
+    float  phi;     // latitude
+    float  shade;   // curvature made visible
+};
+
+static inline MLOrb ml_orb(float2 uv, float radius) {
+    MLOrb o;
+    float2 s = uv / max(radius, 1e-4);
+    float d = length(s);
+    float dc = min(d, 1.0);
+    float z = sqrt(max(1.0 - dc * dc, 0.0));
+    o.n = float3(s.x, s.y, z);
+    o.z = z;
+    o.mask = 1.0 - smoothstep(0.86, 1.02, d);
+    o.lam = atan2(s.x, max(z, 1e-3));
+    o.phi = asin(clamp(s.y, -1.0, 1.0));
+    float key = 0.58 + 0.42 * saturate(dot(o.n, normalize(float3(-0.34, -0.46, 0.82))));
+    o.shade = mix(0.34, 1.0, pow(max(z, 0.0), 0.55)) * key;
+    return o;
 }
 
 /// THE WRITE. Every species ends here, and the order is the argument.
@@ -588,107 +644,74 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // The core wanders. Two incommensurate rates, so it traces a slow open curve
     // that never repeats inside a session and never looks like an orbit.
     float2 core = (0.028 + 0.070 * drift) * float2(sin(T * 0.199), cos(T * 0.155 + 1.7));
-    float2 p = uv - core;
-    float r = length(p);
+    float2 pc = uv - core;
+    MLOrb orb = ml_orb(pc, 0.38);
+    float r = length(pc);
 
     const float RC = 0.17;   // core softening: keeps omega finite at the middle
     const float R0 = 0.25;   // the reference ring the speed is pinned to
     float fall = mix(0.55, 1.45, shear);
     float prof = pow((R0 + RC) / (r + RC), fall);
 
-    // THE TWIST IS SPLIT, AND THE DIFFERENTIAL HALF IS BOUNDED. This is the
-    // correction to a claim made in an earlier comment here, which said the
-    // noise's own renewal stopped the coil winding shut. It does not, and the
-    // reasoning was wrong in an instructive way: renewal changes WHICH material
-    // is being sampled, but the winding lives in the MAP from screen to domain,
-    // and that map keeps accumulating omega(r) * t whatever the material does.
-    // Rendered at two minutes the flagship style was a bullseye of concentric
-    // rings, and at five it was aliasing into moire. The first sheets only ran
-    // to thirteen seconds, which is how it survived three waves of review.
-    //
-    // A rigid rotation is harmless: it turns the picture and never tightens it.
-    // Only the DIFFERENCE between one radius and another winds anything up. So
-    // the rim's own rate is separated out and allowed to run forever, and the
-    // excess above it accumulates through a knee instead of a straight line:
-    // linear for the first ten seconds, so every approved frame is untouched,
-    // then asymptotic to a twist worth about seventeen seconds. The coil tightens
-    // to the shape it was approved at and then stays there, still turning.
-    const float PR_R = 0.677;             // (R0 + RC) / (0.45 + RC), the bowl's rim
+    // THE TWIST IS SPLIT, AND THE DIFFERENTIAL HALF IS BOUNDED. Renewal does not
+    // stop a coil winding shut: it changes WHICH material is sampled, while the
+    // winding lives in the map from screen to domain and keeps accumulating
+    // omega(r) * t regardless. Left alone this style was a bullseye of fine
+    // rings at two minutes. A rigid rotation is harmless, so the rim's own rate
+    // runs forever and only the excess above it goes through a knee: linear for
+    // ten seconds, then asymptotic. The coil tightens to its approved shape and
+    // stays there, turning.
+    const float PR_R = 0.677;
     const float KMAX = 24.0;
     float PR = pow(PR_R, fall);
     float amp = 0.110 + 0.300 * swirl;
-    // THE RIGID RATE IS LIFTED OFF THE RIM'S OWN VALUE, and that is the motion
-    // fix. Once the differential twist was bounded, the only thing left running
-    // forever was the rim's rotation, and at a turn every thirty six seconds the
-    // honest description of this style became "it kind of shifts around". A
-    // vortex's verb is CIRCLES. Adding 0.52 to the profile takes the whole
-    // picture round in about twenty seconds, which the eye reads as turning
-    // without ever reading as a spinner, and it costs nothing in shape: a rigid
-    // rotation moves the orientation and cannot tighten or loosen a coil.
     float rigid = amp * (PR + 0.52);               // may run forever
     float diff = amp * max(prof - PR, 0.0);        // must not
     float TW = KMAX * ml_knee((T + 7.0) / KMAX, 0.70);
 
-    // THE TIC: THE COIL TIGHTENS. An extra twist winds on and unwinds, and it
-    // rides the SAME radial profile the rotation does, so the core takes about a
-    // third of a turn more than the rim and the arms draw in on themselves
-    // before letting go. It is an angular OFFSET and not a rate, which is the
-    // whole trick: a rate boost would leave the field permanently further round
-    // than it should be, since the twist is measured against accumulated time.
-    // An offset returns the material to exactly where the clock says it belongs.
+    // THE TIC: THE COIL TIGHTENS. An angular OFFSET riding the same radial
+    // profile the rotation does, so the core takes about a third of a turn more
+    // than the rim and the arms draw in on themselves before letting go. An
+    // offset and not a rate: a rate boost would leave the field permanently
+    // further round than the clock says it should be.
     float2 tic = ml_tic(T + 0.0, 3.0, 2.3);
-
-    // Time enters HERE, in the coordinate, and only here.
-    //
-    // The field is not born unwound. Rendered from a standing start it is a
-    // scatter of round blobs for its first several seconds and only becomes an
-    // eddy once the differential rotation has had time to draw them out, and a
-    // thinking indicator does not get several seconds to become itself. So the
-    // twist is measured from seven seconds before the view appeared. That is not a
-    // cheat: seven seconds is where winding and renewal balance, so it is the
-    // state the field settles into and stays in. Starting there means the first
-    // frame is the steady state and every frame after it is too.
-    // Responding leans on the turn, as a distance rather than a rate.
     float th = rigid * (T + 7.0) + amp * 0.95 * st.push
              + diff * TW + tic.x * 0.50 * prof;
-    float cs = cos(th), sn = sin(th);
-    float2 q = float2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
 
-    float f = 3.8 / S;     // about three broad forms across the disc
-    float3 dom = float3(q * f, (0.085 + 0.110 * drift) * T);
+    // THE SPIRAL IS TURNED ON THE BODY, NOT ON THE FRAME. Rotating the flat
+    // pixel gave a spiral drawn on a disc; rotating the SURFACE POINT about the
+    // view axis gives the same spiral lying on a sphere, and it foreshortens on
+    // its own as the arms run round toward the limb. That compression is what
+    // the eye reads as roundness, and no amount of shading substitutes for it.
+    float cs = cos(th), sn = sin(th);
+    float3 q3 = float3(cs * orb.n.x - sn * orb.n.y,
+                       sn * orb.n.x + cs * orb.n.y, orb.n.z);
+
+    float f = 2.8 / S;
+    float3 dom = q3 * f + float3(0.0, 0.0, (0.085 + 0.110 * drift) * T);
     float n = ml_fbm3(dom, 3, 2.03, 0.5);
     float g = ml_noise3(dom * 2.85 + float3(11.3, 5.1, 0.0));
 
     float mass = 0.5 + 1.00 * n + 0.17 * grain * g;
-    // A wide, soft threshold. Narrower and the arms grow edges; wider and the
-    // whole disc is one grey wash with a turn somewhere inside it.
-    // Responding tightens the arms: the same field cut harder, so the material
-    // gathers into fewer, more definite streams instead of a broad wash.
-    // Narrowing the transition from BOTH ends is what "tighter" means. Sliding
+    // Narrowing the transition from BOTH ends is what "tighter" means; sliding
     // it down instead just admits more material, which is a brightness change
-    // wearing a form change's name, and responding is not a lamp.
-    float dens = smoothstep(0.36 + 0.06 * st.drive, 0.88 - 0.10 * st.drive, mass);
-    dens *= 0.52 + 0.48 * smoothstep(0.02, 0.19, r);   // the core's void
+    // wearing a form change's name.
+    float dens = smoothstep(0.36 + 0.06 * st.drive, 0.88 - 0.10 * st.drive, mass) * orb.mask;
 
-    // SUCCESS: the surge chases around the turn, twice, riding the ROTATED angle
-    // so it follows the arms rather than sweeping the screen. Wrapped, because
-    // an angle has no end, and a seam in an arrival would be the one frame
-    // everybody notices.
-    float ang01 = atan2(q.y, q.x) * (1.0 / 6.2831853) + 0.5;
+    // SUCCESS: the surge chases around the turn, twice, riding the rotated
+    // longitude so it follows the arms rather than sweeping the screen.
+    float ang01 = atan2(q3.y, q3.x) * (1.0 / 6.2831853) + 0.5;
     dens *= 1.0 + 1.00 * ml_crest_wrap(ang01, st, 0.26) + 0.16 * st.lift;
+
+    // THE LIT ARM. A broad envelope turning with the material picks one arm as
+    // the subject, and only that arm's core is allowed past the tone.
+    float armSel = 0.5 + 0.5 * cos(atan2(q3.y, q3.x) - 0.34 * T);
+    float key = smoothstep(0.72, 0.99, dens * (0.52 + 0.78 * armSel)) * orb.z;
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    // THE LIT ARM. The spiral had four or five arms all at the same value, which
-    // is a pattern; a figure has a subject. A broad angular envelope turning with
-    // the material picks one arm as the lit one, and only the brightest core of
-    // THAT arm is allowed past the tone. Everything else stays amber, so the
-    // cream is a highlight along a single curve rather than a general glow.
-    float armSel = 0.5 + 0.5 * cos(atan2(q.y, q.x) - 0.34 * T);
-    float key = smoothstep(0.72, 0.99, dens * (0.52 + 0.78 * armSel));
-
-    float t = ml_tier(0.045 + 0.60 * dens, key);
+    float t = ml_tier(0.045 + 0.94 * dens * orb.shade, key);
     float hot = smoothstep(0.58, 1.00, dens) + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
@@ -783,8 +806,17 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float ea = 0.065 * T + 0.9;
     float2 core = ecc * float2(cos(ea), sin(ea));
     float2 p = uv - core;
+    MLOrb orb = ml_orb(p, 0.38);
     float r = length(p);
     float2 dir = p / max(r, 1e-5);
+    // THE FALL IS MEASURED ALONG THE SURFACE, not across the picture. The arc
+    // from the point facing us out to the limb is the honest distance for
+    // anything travelling ON a sphere, and using it instead of the flat radius
+    // is what makes the streams crowd as they round the edge. Scaled so the
+    // visible hemisphere spans exactly the range the flat version used, which
+    // keeps every constant below meaning what it meant.
+    float arcN = asin(clamp(r / 0.38, 0.0, 1.0)) * (1.0 / 1.5708);
+    float rr = arcN * 0.45;
 
     // The curl. Differential, so the mouth turns faster than the rim: enough that
     // the wisps lean into the mouth instead of pointing at it, which is most of
@@ -858,7 +890,7 @@ static inline float2 ml_tic(float t, float lane, float dur) {
                  + 0.60 * (0.55 + 0.90 * pull) * st.push
                  + tic.x * 0.30;
     float Rc = 2.55 / S;                       // sixteen streams around
-    float radial = (r + RC) * (4.1 / S);       // about two and a half to one
+    float radial = (rr + RC) * (4.1 / S);      // about two and a half to one
     float3 dom = float3(cos(aa) * Rc, sin(aa) * Rc, radial - travel);
     float n = ml_fbm3(dom, 3, 2.03, 0.5);
 
@@ -873,15 +905,15 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // Responding tightens the streams: the same field, cut higher, so the wash
     // between them falls away and what is left is the fall itself.
     float streams = smoothstep(0.30 + 0.08 * st.drive, 0.92 - 0.09 * st.drive, 0.5 + 1.05 * n);
-    float conv = smoothstep(0.48, 0.10, r);          // 0 at the rim, 1 at the mouth
+    float conv = smoothstep(0.48, 0.10, rr);         // 0 at the rim, 1 at the mouth
     // The mouth's edge is RAGGED, on the same warp that irregularises the
     // streams. A clean circle of extinction is a punched hole, and every form
     // terminating on it at once is what made the last cut a sunburst.
-    float throat = smoothstep(0.025, 0.165 + 0.075 * warp + 0.100 * tic.x, r);
+    float throat = smoothstep(0.025, 0.165 + 0.075 * warp + 0.100 * tic.x, rr);
 
     float floorLight = 0.20 + 0.22 * conv;           // the presence floor
     float dens = (floorLight + (0.50 + 0.40 * conv) * streams)
-               * throat * (0.25 + 1.05 * env);
+               * throat * (0.25 + 1.05 * env) * orb.mask;
     // The convergence multiplier is a third of what it first was. Stacked on top
     // of the presence floor it was driving the collar to 0.99 on the rail, and a
     // well whose mouth is white paper is lit from inside, which is the opposite
@@ -893,7 +925,7 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // one direction this material never otherwise goes. s01 runs 0 at the throat
     // to 1 at the rim, so the light blooms outward through the streams it
     // arrived down. It multiplies what is there: the dark stays dark.
-    float crest = ml_crest(clamp(r / 0.45, 0.0, 1.0), st, 0.30);
+    float crest = ml_crest(clamp(arcN, 0.0, 1.0), st, 0.30);
     dens *= 1.0 + 0.85 * crest + 0.14 * st.lift;
 
     float bright = ml_knee(dens * lum * 0.62, 0.58);
@@ -904,9 +936,9 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // THE RING GOES CREAM. The figure is a bright annulus around a dark mouth, so
     // the key is exactly where the convergence is high and the material is
     // dense: the inner ring's own strongest streams, and nothing further out.
-    float key = smoothstep(0.62, 0.97, bright) * smoothstep(0.06, 0.42, conv);
+    float key = smoothstep(0.62, 0.97, bright) * smoothstep(0.06, 0.42, conv) * orb.z;
 
-    float t = ml_tier(0.050 + 0.72 * bright, key);
+    float t = ml_tier(0.050 + 0.80 * bright * orb.shade, key);
     float hot = smoothstep(0.66, 1.00, bright) * 0.70 + 0.50 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
@@ -965,60 +997,65 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float per = clamp(c3, 0.0, 1.0);
     MLState st = ml_state(stateIndex, stateTau);
 
+    MLOrb orb = ml_orb(uv, 0.38);
+
     float P = mix(10.0, 4.0, per);
     float w = 6.2831853 / P;
     float ph = w * T;
-    // THE TIC: THE BIG ONE. Every so often a wash comes in taller than the rest:
-    // the body throws further across and the surface stands higher while it
-    // passes. Both are form, and the level is the honest place to put it,
-    // because a bigger wave is more water arriving and not the same water lit
-    // harder. Sway is pos/A, so scaling A leaves the LEAN untouched and only the
-    // travel grows, which is what one big set does.
+
+    // THE TIC: THE BIG ONE. Every so often a wash comes in taller than the rest.
     float2 tic = ml_tic(T + 3.1, 19.0, 2.8);
-    // Responding throws further and leans harder. Both are amplitudes, not
-    // rates, so the wash keeps its phase and simply commits to it.
     float A = (0.16 + 0.30 * reach) * (1.0 + 0.30 * tic.x + 0.28 * st.drive);
     float pos = -A * cos(ph);              // position: the integral of the speed
     float vel = sin(ph);                   // normalised speed, +1 crossing right
     float sway = pos / max(A, 1e-4);       // -1..1, which side the weight is on
 
-    // The surface. uv.y grows DOWNWARD, so positive `below` is under water.
-    // The base level sits a little above centre so the water is most of the
-    // disc: a body of light with a lit surface, not a half-filled circle.
-    float ripple = 0.030 * S * ml_fbm1((uv.x - pos) * 2.4 / S + 0.49 * T, 3, 5.0);
-    float h = -0.080 + 0.55 * lean * (1.0 + 0.40 * st.drive) * sway * uv.x
-           + ripple - 0.070 * tic.x;
-    float below = uv.y - h;
+    // THE WATERLINE IS A PLANE CUTTING A SPHERE, and that is the whole reason
+    // this reads as liquid INSIDE something rather than a filled semicircle.
+    // A level in screen space is a straight line and says the body is flat. The
+    // set of surface points at one height against a tilted plane is a circle on
+    // the sphere, and a circle on a sphere projects to an ELLIPSE: the waterline
+    // curves, its ends ride up the limb, and it swings bodily as the plane tips.
+    // The z term is what tilts the plane toward the viewer; without it the
+    // circle is edge-on and projects back to the straight line we started with.
+    float3 up = normalize(float3(0.62 * lean * sway, -1.0, 0.44));
+    float hgt = dot(orb.n, up);
 
-    float f = 4.1 / S;
-    // The lean is in the material too: the body shears with depth the way a
-    // column of water does when the whole bowl is tipped.
-    float3 dom = float3((uv.x - pos - 0.30 * lean * sway * below) * f,
-                        uv.y * f * 0.90, 0.070 * T);
+    // The surface is torn by a travelling fBm read along the body, so no part of
+    // it is ever a clean curve, and the ripple rides WITH the wash.
+    float ripple = 0.055 * ml_fbm1((orb.lam - pos * 2.2) * 1.9 / S + 0.49 * T, 3, 5.0);
+    // SUCCESS: the brightest wash this water throws, crossing the way it does,
+    // and it raises the LEVEL as it goes, because a bigger wash is more water.
+    float surge = ml_crest(clamp(orb.lam * 0.64 + 0.5, 0.0, 1.0), st, 0.32);
+    // Only a little of the surge goes into the LEVEL. Raising it further looked
+    // obvious and made the arrival dimmer, because depth here means extinction:
+    // the extra water arrives already dark. The wash's light lives in its foam.
+    float level = 0.055 + ripple - 0.115 * tic.x - 0.10 * surge;
+    float below = level - hgt;             // positive under water
+
+    // The liquid itself, sampled on the body so it turns with the slosh.
+    float f = 2.6 / S;
+    float3 dom = float3(orb.n.x - pos * 0.55, orb.n.y, orb.n.z) * f
+               + float3(0.0, 0.0, 0.070 * T);
     float n = ml_fbm3(dom, 3, 2.03, 0.5);
 
     float body = smoothstep(-0.045, 0.075, below);
-    // The light lives near the surface and is extinguished with depth, Beer's
-    // law with a fifth of the disc as its length. The first cut had the mass
-    // getting BRIGHTER downward, on the theory that deeper is denser, and the
-    // result was an evenly lit half-disc that read as a battery at half charge.
-    // Falling off into the dark under the surface is what makes it a wash: the
-    // eye follows the lit layer leaning, and the bowl has no bottom to measure.
-    float weight = 0.30 + 0.70 * exp(-max(below, 0.0) / 0.20);
-    float dens = body * weight * (0.30 + 1.05 * saturate(0.5 + 0.95 * n));
+    // Light extinguished with depth, so the lit layer leans and the bottom of
+    // the globe falls away instead of reading as a filled gauge.
+    float weight = 0.30 + 0.70 * exp(-max(below, 0.0) / 0.42);
+    float dens = body * weight * (0.30 + 1.05 * saturate(0.5 + 0.95 * n)) * orb.mask;
 
-    // SUCCESS: the brightest wash this water throws, crossing the way the water
-    // crosses. It multiplies the body, so the air above the surface stays air.
-    float surge = ml_crest(clamp(uv.x * 1.11 + 0.5, 0.0, 1.0), st, 0.32);
-    dens *= 1.0 + 0.85 * surge + 0.14 * st.lift;
+    // The surge also raises the level, which is what a bigger wash IS. Riding it
+    // on density alone left this the faintest arrival in the pack: the water
+    // brightened where it already was instead of more water arriving.
+    dens *= 1.0 + 1.25 * surge + 0.14 * st.lift;
 
-    // The crest, straddling the surface and torn by the same field, so no part
-    // of it is ever a rule. Gaussian rather than a band: a band has two edges.
-    float edge = below - 0.010 - 0.030 * n;
-    float crest = exp(-(edge * edge) / (0.042 * 0.042)) * foam * (0.30 + 0.70 * abs(vel));
-    // The air over the water. A sixth of the disc of falloff, so the cap above
-    // the surface is dim rather than empty.
-    float mist = 0.13 * exp(-max(-below, 0.0) / 0.13);
+    // The foam, straddling the waterline and torn by the same field.
+    float edge = below - 0.012 - 0.045 * n;
+    float crest = exp(-(edge * edge) / (0.052 * 0.052)) * foam * (0.30 + 0.70 * abs(vel)) * orb.mask
+               * (1.0 + 2.6 * surge);
+    // The air over the water, so the cap above the line is dim rather than empty.
+    float mist = 0.13 * exp(-max(-below, 0.0) / 0.20) * orb.mask;
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
@@ -1033,10 +1070,16 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // above it never fired at all: the style kept its old rust ceiling while
     // every number in it said otherwise. The knob scales how much cream, never
     // whether there is any.
-    float lineT = exp(-(edge * edge) / (0.042 * 0.042));
-    float key = smoothstep(0.45, 0.95, lineT) * (0.35 + 0.65 * foam);
+    float lineT = exp(-(edge * edge) / (0.052 * 0.052)) * orb.mask;
+    float key = smoothstep(0.45, 0.95, lineT) * (0.35 + 0.65 * foam) * orb.z * (1.0 + 1.5 * surge);
 
-    float t = ml_tier(0.045 + 0.50 * dens + 0.18 * crest + mist, key);
+    // THE GLASS ITSELF. Half a globe of liquid with nothing above it reads as a
+    // crescent, not as a body: the presence has to be whole even where it is
+    // empty. A dim shell brightening toward the limb is what a clear sphere
+    // actually does with light, and it costs one term.
+    float shell = orb.mask * (0.045 + 0.150 * pow(1.0 - orb.z, 3.0));
+
+    float t = ml_tier(0.045 + shell + (0.62 * dens + 0.18 * crest + mist) * orb.shade, key);
     float hot = smoothstep(0.60, 1.00, dens) * 0.40 + crest * 0.70 + 0.45 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
@@ -1099,85 +1142,58 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float bias = clamp(c3, 0.0, 1.0);
     MLState st = ml_state(stateIndex, stateTau);
 
-    // THE INTERFACE IS AN S, AND THAT IS THE FIGURE. A straight horizontal split
-    // reads as a texture with a stripe through it; a curved one reads as two
-    // BODIES pressed against each other, which is what this species was always
-    // actually about. One gentle bend across the disc is enough, and it drifts,
-    // so the two currents look like they are still negotiating.
+    // THE TWO CURRENTS RUN AROUND THE BODY. Latitude bands on a sphere, shearing
+    // past each other in longitude: what a gas giant does, and what this species
+    // has always been describing. The interface between them is a curve on the
+    // surface, so it wraps in three dimensions instead of crossing a flat frame,
+    // and both bands foreshorten toward the limb because lam and phi do.
+    MLOrb orb = ml_orb(uv, 0.38);
     float sPhase = 0.085 * T;
-    float iface = 0.52 * (bias - 0.5)
-                + 0.115 * sin(uv.x * 4.2 + sPhase)
-                + 0.030 * sin(T * 0.099);
-    float slope = 0.115 * 4.2 * cos(uv.x * 4.2 + sPhase);
-    // Perpendicular distance, so the shear line keeps one width along its curve.
-    float across = (uv.y - iface) / sqrt(1.0 + slope * slope);
-    // A tighter handover. Blended over four tenths of the disc the two bodies
-    // spend most of their area mixed, which averages their values back together
-    // and undoes the separation above. A tenth is still soft enough that no edge
-    // appears anywhere, and it lets each body actually be its own value.
-    float mUp = 1.0 - smoothstep(-0.10, 0.10, across);
-    float overlap = 4.0 * mUp * (1.0 - mUp);
+    float iface = 0.62 * (bias - 0.5)
+                + 0.30 * sin(orb.lam * 2.1 + sPhase)
+                + 0.08 * sin(T * 0.099);
+    float across = orb.phi - iface;
+    float mUp = 1.0 - smoothstep(-0.26, 0.26, across);
 
     float u = 0.030 + 0.095 * slip;
-    float f = 3.6 / S;
+    float f = 2.7 / S;
 
-    // THE TIC: THE SHEAR KICK. The two currents take one extra step past each
-    // other and come back. A bounded offset on the two advections, equal and
-    // opposite, so the seam churns harder for a couple of seconds and settles.
+    // THE TIC: THE SHEAR KICK. One extra step past each other and back, equal
+    // and opposite, so the seam churns for a couple of seconds and settles.
     float2 tic = ml_tic(T + 4.4, 29.0, 2.2);
-    float kick = tic.x * 0.090;
+    float kick = tic.x * 0.32;
 
-    // The currents are drawn out along the slide so each has a direction, and
-    // then NOT drawn out any further. An earlier pass stretched them four or
-    // five to one and the style became the slowest thing in the pack: a long
-    // horizontal streak sliding horizontally looks the same at every instant, so
-    // there is nothing to track. That is the aperture problem, reached by trying
-    // too hard to avoid it. Just under two to one says which way each body runs
-    // and still lets the eye follow it. TWO OCTAVES: the per-octave rotation
-    // would scramble the very anisotropy doing the work.
-    float3 qa = float3((uv.x - u * T - kick - 0.75 * u * st.push) * f * 0.62,
-                       uv.y * f * 1.15,  2.0 + 0.060 * T);
-    float3 qb = float3((uv.x + u * T + kick + 0.75 * u * st.push) * f * 0.66,
-                       uv.y * f * 1.07, 23.0 + 0.054 * T);
-    float na = ml_fbm3(qa, 2, 2.03, 0.5);
-    float nb = ml_fbm3(qb, 2, 2.03, 0.5);
+    // Each band is sampled on the body at its own longitude offset, so the two
+    // genuinely counter-rotate. Drawn out along the flow, but only to about two
+    // to one: stretched further, a long streak sliding along its own axis looks
+    // identical at every instant and the motion disappears entirely.
+    float lamA = orb.lam - u * T * 2.6 - kick - 2.0 * u * st.push;
+    float lamB = orb.lam + u * T * 2.6 + kick + 2.0 * u * st.push;
+    float3 nA = float3(sin(lamA) * cos(orb.phi), sin(orb.phi), cos(lamA) * cos(orb.phi));
+    float3 nB = float3(sin(lamB) * cos(orb.phi), sin(orb.phi), cos(lamB) * cos(orb.phi));
+    float na = ml_fbm3(nA * f * float3(0.62, 1.15, 0.62) + float3(0.0, 0.0, 2.0 + 0.060 * T), 2, 2.03, 0.5);
+    float nb = ml_fbm3(nB * f * float3(0.66, 1.07, 0.66) + float3(0.0, 0.0, 23.0 + 0.054 * T), 2, 2.03, 0.5);
 
-    // ONE LOBE SITS DARKER THAN THE OTHER, which is the cheapest and most
-    // reliable way to say "two". Identical twins either side of a line read as
-    // one mottled patch with a crease in it; a lighter body above a heavier one
-    // reads as two things at a glance, before any motion has been seen at all.
-    // Each body is a value PLATEAU with its texture riding on top, not a field
-    // swinging over the whole range. Given the full range, the two lobes overlap
-    // in value everywhere and the difference between them is lost inside the
-    // difference within them: what you see is one mottled patch with a crease.
-    // Compressed to the top half of their range and then separated, the upper
-    // body sits clearly lighter than the lower one at every point, and "two
-    // layers" is legible before anything has moved.
+    // ONE BAND SITS DARKER THAN THE OTHER, which is the cheapest and most
+    // reliable way to say "two". Each is a value PLATEAU with its texture riding
+    // on top; given the full range the two overlap everywhere and what you see
+    // is one mottled ball with a crease in it.
     float bodyA = 0.52 + 0.48 * smoothstep(0.24 + 0.09 * st.drive, 0.94 - 0.09 * st.drive, 0.5 + 0.95 * na);
     float bodyB = 0.52 + 0.48 * smoothstep(0.24 + 0.09 * st.drive, 0.94 - 0.09 * st.drive, 0.5 + 0.95 * nb);
-    float base = mUp * bodyA + (1.0 - mUp) * bodyB * 0.38;
+    float base = (mUp * bodyA + (1.0 - mUp) * bodyB * 0.38) * orb.mask;
 
-    // SUCCESS: the surge runs the way the upper current runs.
-    float crest = ml_crest(clamp(uv.x * 1.11 + 0.5, 0.0, 1.0), st, 0.32);
+    // SUCCESS: the surge runs the way the upper band runs.
+    float crest = ml_crest(clamp(orb.lam * 0.64 + 0.5, 0.0, 1.0), st, 0.32);
     base *= 1.0 + 1.90 * crest + 0.22 * st.lift;
 
-    // THE SHEAR LINE. Where the two fields agree, along an interface that is now
-    // a curve: a bright braid following the S. Contrast tightens it, and it can
-    // never reach a width at which the material would have an edge.
+    // THE SHEAR LINE, a bright braid following the interface round the body. The
+    // seam modulates a band that is always there rather than gating it: gated,
+    // it broke into a dashed run wherever the two fields happened to disagree.
     float d = na - nb;
     float wid = 0.075 + 0.170 * (1.0 - contrast);
     float seam = (wid * wid) / (wid * wid + d * d);
-    // Gated to the interface itself rather than to a broad band, so it reads as
-    // a LINE and not as a region that happens to be brighter.
-    // The line is a LINE first and an interference pattern second. Gating it
-    // entirely on `seam` broke it into a dashed run wherever the two fields
-    // happened to disagree, and a dashed shear line does not read as an
-    // interface at all. The seam now modulates a band that is always there.
-    float line = (0.38 + 0.62 * seam) * exp(-(across * across) / (0.072 * 0.072));
-    float braid = seam * overlap * (0.30 + 0.55 * contrast);
-
-    MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
-    float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
+    float line = (0.38 + 0.62 * seam) * exp(-(across * across) / (0.17 * 0.17)) * orb.mask * orb.z;
+    float braid = seam * 4.0 * mUp * (1.0 - mUp) * (0.30 + 0.55 * contrast) * orb.mask * orb.z;
 
     // The two bodies carry the picture and the braid trims it. THE SHEAR LINE is
     // the key, and it is the one place in this style allowed past the tone: a
@@ -1187,8 +1203,11 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // stop this style going grey, and it worked, but it was holding down the
     // exact structure that had to be brightest. Capping the BODY and letting the
     // KEY through is the same protection with the figure left intact.
-    float key = smoothstep(0.45, 0.95, line);
-    float t = ml_tier(0.045 + (0.30 + 0.44 * veil) * base + 0.20 * braid, key);
+    MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
+    float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
+
+    float key = smoothstep(0.45, 0.95, line) * orb.z;
+    float t = ml_tier(0.045 + ((0.34 + 0.46 * veil) * base + 0.20 * braid) * orb.shade, key);
     float hot = braid * 0.40 + smoothstep(0.74, 1.00, base) * 0.16 + 0.55 * key;
     // Emitting at 0.80, not the pack's usual 0.88: on a field already sitting at
     // the tone, pale light does not read as hotter amber, it reads as grey.
@@ -1248,31 +1267,30 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float flow = clamp(c3, 0.0, 1.0);
     MLState st = ml_state(stateIndex, stateTau);
 
-    float xa = uv.x / S;
-    // THE TIC: THE OXBOW. The channel swings a wider loop and eases back. The
-    // throw grows and the path slides at the same time, so it is not a shape
-    // being scaled in place: the river reaches out, finds a longer way round,
-    // and returns to the line it was on. Both terms are on the centreline, which
-    // means the slope, the width normal and the water inside all follow for
-    // free, the way they do when a real channel migrates.
-    float2 tic = ml_tic(T + 2.2, 37.0, 3.0);
-    float pth = 0.049 * T + 0.065 * tic.x;    // the river re-cuts itself, slowly
-    const float PF = 1.15;                    // the path's pitch, in xa
-    const float DX = 0.055;                   // the slope's half step, in xa
+    // THE RIVER RUNS ON A SMALL PLANET. The channel is drawn in the body's own
+    // longitude and latitude, so it bends with the surface and narrows as it
+    // rounds the limb: a line crossing a globe rather than a line crossing a
+    // frame. Everything below is the calligraphic stroke it always was; only the
+    // chart it is drawn on has changed.
+    MLOrb orb = ml_orb(uv, 0.38);
+    float xa = orb.lam / S;
+    float pth = 0.049 * T;
+    // Longitude runs -pi/2 to pi/2 across the visible hemisphere, which is three
+    // times the span the flat frame gave, so the pitch that drew one arc there
+    // drew seven here and the river came out as the stripes on a peeled fruit.
+    // Pitch is always relative to the domain it is read over.
+    const float PF = 0.42;                    // the path's pitch, in xa
+    const float DX = 0.150;                   // the slope's half step, in xa
 
-    // THE WANDER IS DOMAIN DRIFT, NOT JITTER, and that distinction is the whole
-    // fix. Three fBm octaves at a pitch of 3.2 gave the disc three bends with
-    // kinks between them, and three bends with kinks is a seismograph trace.
-    // Read as an EQ meter it is not merely wrong, it is a banned shape.
-    //
-    // So the path is ONE smooth value-noise arc at a pitch of 1.15, which is
-    // about one cell across the whole disc: a single broad curve, sometimes a C,
-    // sometimes a lazy S, never a zigzag. The second term is a quarter-weight
-    // whisper at twice the pitch, enough that the arc is not a parabola. All the
-    // CHANGE comes from `pth` sliding the domain underneath at a fortieth of a
-    // cell a second, so the river re-cuts itself over about twenty seconds
-    // without ever moving fast enough to watch. Slow domain drift, not per-x
-    // detail: the same amount of life, none of the graph.
+    // THE TIC: THE OXBOW. The channel swings a wider loop and eases back, throw
+    // and path sliding together, so the river reaches out and returns to its
+    // line rather than being scaled in place.
+    float2 tic = ml_tic(T + 2.2, 37.0, 3.0);
+
+    // PITCH MATTERS MORE THAN THROW. Three fBm octaves at too high a pitch gave
+    // a heart-monitor saw; too low a pitch gives a single bend, which is a
+    // chevron and a drawn glyph. One smooth arc plus a quarter-weight whisper is
+    // the shape, and all the CHANGE comes from the domain drifting underneath.
     float w0 = ml_vnoise1(xa * PF + pth, 7.0)
              + 0.24 * ml_vnoise1(xa * PF * 2.3 + pth * 1.4, 23.0);
     float wA = ml_vnoise1((xa - DX) * PF + pth, 7.0)
@@ -1280,63 +1298,37 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     float wB = ml_vnoise1((xa + DX) * PF + pth, 7.0)
              + 0.24 * ml_vnoise1((xa + DX) * PF * 2.3 + pth * 1.4, 23.0);
 
-    float amp = (0.13 + 0.22 * wander) * (1.0 + 0.38 * tic.x);
+    float amp = (0.30 + 0.50 * wander) * (1.0 + 0.38 * tic.x);
     float yc = amp * w0;
     float slope = amp * (wB - wA) / (2.0 * DX) / S;
-    float dist = (uv.y - yc) / sqrt(1.0 + slope * slope);
+    // Latitude distance to the centreline, corrected for the bank angle so the
+    // channel keeps one width where it turns.
+    float dist = (orb.phi - yc) / sqrt(1.0 + slope * slope);
 
-    // The width breathes along the length. A channel of constant width is a
-    // pipe; rivers pool and pinch. The pitch of the breathing came down with the
-    // path's, for the same reason: at 3.2 the pinches were close enough together
-    // to read as teeth.
-    float wv = (0.055 + 0.085 * width) * S * (1.0 - 0.16 * st.drive);
-    wv *= 0.80 + 0.36 * (0.5 + 0.5 * ml_vnoise1(xa * 1.5 + 3.3, 19.0));
+    float wv = (0.135 + 0.200 * width) * S * (1.0 - 0.16 * st.drive);
+    wv *= 0.80 + 0.36 * (0.5 + 0.5 * ml_vnoise1(xa * 0.55 + 3.3, 19.0));
     float uu = dist / max(wv, 1e-4);
 
-    // The light runs faster down the channel than it did. The arc re-cutting is
-    // this style's slowest motion and its most obvious one, which left the verb
-    // reading as "it wanders" when it should read as "it FLOWS": the wandering
-    // is the shape, the flowing is the subject. Responding adds its urgency as a
-    // distance, so the water speeds up from where it already was.
     float travel = (0.50 + 1.30 * flow) * T + (0.75 + 1.20 * flow) * st.push;
-    // The cross-channel coordinate is CLAMPED before it goes into the water
-    // field, and that clamp is not tidiness. uu grows without bound away from
-    // the centreline, so an unclamped sample makes the width modulation below a
-    // function of how far out you are, and the channel grows feathers: vertical
-    // streaks combed out of it at every bend. Two channel widths of cross
-    // variation is all the water has; past that it is the same water.
-    float3 qf = float3(xa * 3.4 - travel, clamp(uu, -2.0, 2.0) * 0.42, 4.0 + 0.042 * T);
+    float3 qf = float3(xa * 1.1 - travel, clamp(uu, -2.0, 2.0) * 0.42, 4.0 + 0.042 * T);
     float water = saturate(0.45 + 0.95 * ml_fbm3(qf, 3, 2.03, 0.5));
 
-    // SUCCESS: a bright head runs the length of the channel, the way a release
-    // upstream actually arrives.
-    float surge = ml_crest(clamp(uv.x * 1.11 + 0.5, 0.0, 1.0), st, 0.26);
-    // The surge widens the channel as well as lighting it, because `water` is a
-    // saturating term and brightness alone runs out of room: a flood is more
-    // water, not the same water shining harder.
+    // SUCCESS: a bright head runs the length of the channel.
+    float surge = ml_crest(clamp(orb.lam * 0.64 + 0.5, 0.0, 1.0), st, 0.26);
     water = saturate(water * (1.0 + 2.4 * surge) + 0.20 * st.lift);
 
-    // The water swells and pinches the channel it is in, so the SILHOUETTE
-    // moves with the flow and not just the brightness inside a fixed outline.
-    // Without this the meander is a stroke with a texture painted on it, which
-    // is what the first render was and what a drawn line would have been. The
-    // range is gentler than it was: a channel whose width swings by half its own
-    // size grows vertical combs where the path is steep.
+    // THREE WIDTHS: a narrow spine only the middle of the water reaches, the
+    // water, and its light in the air. A calligraphic stroke has a core, a body
+    // and an edge; two widths is a glow shaped like a river.
     float k = uu / (0.78 + 0.44 * water + 0.55 * surge);
-    // THREE WIDTHS, NOT TWO, AND THAT IS WHAT MAKES IT A DRAWN LINE. The channel
-    // used to be a soft glow with a halo, which is a patch of light shaped like
-    // a river. A calligraphic stroke has a core, a body and an edge: g0 is a
-    // narrow spine that only the middle of the water reaches, g1 is the water
-    // itself, g2 is its light in the air. The spine is the only part allowed
-    // past the tone, so the line reads as drawn rather than as spilled.
-    float g0 = exp(-7.0 * k * k);             // the spine
-    float g1 = exp(-1.55 * k * k);            // the water
-    float g2 = exp(-0.30 * k * k);            // its light in the air
+    float g0 = exp(-7.0 * k * k) * orb.mask;
+    float g1 = exp(-1.55 * k * k) * orb.mask;
+    float g2 = exp(-0.30 * k * k) * orb.mask;
 
     // The ground. Two octaves is enough: it is meant to have form at 300 pt and
     // to be invisible at 20, and a third octave only buys noise at both.
-    float3 qm = float3(uv.x * 2.6 / S, uv.y * 2.6 / S, 30.0 + 0.063 * T);
-    float ground = smoothstep(0.25, 0.95, 0.5 + 1.0 * ml_fbm3(qm, 2, 2.03, 0.5));
+    float3 qm = orb.n * (2.4 / S) + float3(0.0, 0.0, 30.0 + 0.063 * T);
+    float ground = smoothstep(0.25, 0.95, 0.5 + 1.0 * ml_fbm3(qm, 2, 2.03, 0.5)) * orb.mask;
 
     // THE BANKS ARE SHOULDERS, NOT A RING. The first cut used a tight Gaussian
     // at a fixed distance and drew a dark outline around the water, which is a
@@ -1353,9 +1345,9 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
 
-    float key = g0 * smoothstep(0.30, 0.85, water);
-    float t = ml_tier(0.045 + 0.17 * ground * cut
-                    + g1 * (0.12 + 0.38 * water) + g2 * (0.05 + 0.07 * water), key);
+    float key = g0 * smoothstep(0.30, 0.85, water) * orb.z;
+    float t = ml_tier(0.045 + (0.20 * ground * cut
+                    + g1 * (0.14 + 0.42 * water) + g2 * (0.05 + 0.07 * water)) * orb.shade, key);
     float hot = g1 * (0.20 + 0.80 * water) * 0.55 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
@@ -1464,70 +1456,45 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float e = law.z;
     float travel = law.y * 1.53 * max(speed, 0.0) + 1.20 * st.push;
 
-    // THE JOINED FLOW LEAVES ALONG ITS OWN HEADING. Built on the frame's x axis
-    // this style settled into a horizontal band, which is a silhouette three
-    // other species in the roster already own, and a confluence that ends up
-    // looking like everything else has no identity left. So the whole figure is
-    // constructed in a rotated frame: `o` is the outflow's heading, a quarter
-    // radian below horizontal, and the junction sits up and back from the middle
-    // of the disc. The composition is then lopsided in both axes at every moment
-    // of the arc, which is the only reliable way a circle full of soft light
-    // stays recognisable at cell size.
+    // THE Y IS DRAWN ON THE BODY. Two surface flows meeting into one, laid out
+    // in the sphere's own longitude and latitude, so the fork bends with the
+    // curvature and its arms foreshorten as they run toward the limb. The whole
+    // figure sits on a diagonal of its own rather than along the frame's axes,
+    // which is what keeps it lopsided and recognisable at cell size.
+    MLOrb orb = ml_orb(uv, 0.38);
     const float OUT = 0.42;
     float2 o = float2(cos(OUT), sin(OUT));
     float2 nrm = float2(-o.y, o.x);
-    float2 qv = uv - float2(-0.10, -0.07);
+    float2 qv = float2(orb.lam, orb.phi) - float2(-0.28, -0.18);
     float sAx = dot(qv, o);                      // along the outflow
     float nAx = dot(qv, nrm);                    // across it
 
-    // The FORK ITSELF closes, and that is what makes the arc legible. The first
-    // cut moved only the separation at the meeting and the meeting's position,
-    // and both are small next to the arms' spread, so birth and rest were the
-    // same picture a few points apart. Swinging the spread means the shape goes
-    // from a wide Y to a single flow with a taper behind it. It closes to 45 per
-    // cent and not to nothing: joined is the rest state, but a confluence that
-    // forgets it was ever two rivers is just a river.
-    // THE TIC: THE SURGE. A pulse of water comes down ONE arm, chosen fresh each
-    // time by the tic's own hash, so it is never the same side twice running.
-    // That arm swells while the surge passes and the turbulence at the meeting
-    // spreads with it, then both settle. Two flows that always contribute
-    // equally are a diagram; rivers take turns.
+    // THE TIC: THE SURGE. A pulse comes down ONE arm, chosen fresh each time.
     float2 tic = ml_tic(T + 5.3, 43.0, 2.5);
     float armB = step(0.5, tic.y);
 
-    // Responding closes the fork further: the two flows commit to being one.
-    // THE FORK STAYS OPEN. It used to close to 45 per cent of its birth spread,
-    // which made the settled state very nearly one channel: honest to the arc
-    // and fatal to the figure, because this species IS a Y and a Y that has
-    // healed over is a line. It now rests at 80 per cent, so the arrival still
-    // reads as two flows committing to each other while the shape stays legible
-    // at a glance for as long as the indicator is on screen.
-    float spread = mix(0.14, 0.55, angleK) * (0.80 + 0.20 * e) * (1.0 - 0.22 * st.drive);
-    float sep = 0.018 + (0.030 + 0.120 * approach) * e;
-    float sj = 0.22 * e;                         // the meeting, sliding upstream
-    float conv = 1.0 - smoothstep(sj - 0.26, sj + 0.14, sAx);
-    float su = max(sj - sAx, 0.0);               // how far upstream of it we are
+    // The fork rests at 80 per cent of its birth spread, not 45: the arc still
+    // reads as two flows committing to each other, and the shape stays a Y for
+    // as long as the indicator is on screen. A Y that has healed over is a line.
+    float spread = mix(0.34, 1.20, angleK) * (0.80 + 0.20 * e) * (1.0 - 0.22 * st.drive);
+    float sep = 0.045 + (0.075 + 0.300 * approach) * e;
+    float sj = 0.55 * e;
+    float conv = 1.0 - smoothstep(sj - 0.62, sj + 0.34, sAx);
+    float su = max(sj - sAx, 0.0);
 
-    // The arms wander. Straight arms are a glyph; the wander is under one
-    // channel width so downstream the two paths weave INSIDE the joined channel
-    // instead of separating back out into two.
-    // The pitch is 4.5 because across a disc 0.9 wide anything lower is a
-    // constant offset wearing a noise function's name, and two arms offset by a
-    // constant are two straight lines.
-    float wig = 0.038 * S;
+    float wig = 0.10 * S;
     float armN = (sep + spread * su) * conv;
-    float cA = -armN + wig * ml_fbm1(sAx * 4.5 / S - travel * 0.55, 2, 13.0);
-    float cB =  armN + wig * ml_fbm1(sAx * 4.5 / S - travel * 0.55, 2, 47.0);
+    float cA = -armN + wig * ml_fbm1(sAx * 1.9 / S - travel * 0.55, 2, 13.0);
+    float cB =  armN + wig * ml_fbm1(sAx * 1.9 / S - travel * 0.55, 2, 47.0);
 
-    // The joined channel is wider than either arm, because it is carrying both,
-    // and each arm breathes on its own lane. The two are NOT twins: B runs about
-    // a fifth wider, because two identical inflows read as a mirrored diagram
-    // and no two rivers are the same size.
-    float wBase = 0.040 * S * (1.0 + 0.50 * (1.0 - conv));
+    // The joined channel is wider, because it carries both, and the two arms are
+    // NOT twins: B runs a fifth wider, since two identical inflows read as a
+    // mirrored diagram and no two rivers are the same size.
+    float wBase = 0.105 * S * (1.0 + 0.50 * (1.0 - conv));
     float wvA = wBase * (1.0 + 0.72 * tic.x * (1.0 - armB))
-             * (0.90 + 0.44 * (0.5 + 0.5 * ml_vnoise1(sAx * 2.6 / S - travel * 0.5, 63.0)));
+             * (0.90 + 0.44 * (0.5 + 0.5 * ml_vnoise1(sAx * 1.1 / S - travel * 0.5, 63.0)));
     float wvB = wBase * 1.18 * (1.0 + 0.72 * tic.x * armB)
-              * (0.90 + 0.44 * (0.5 + 0.5 * ml_vnoise1(sAx * 2.6 / S - travel * 0.5 + 5.7, 71.0)));
+              * (0.90 + 0.44 * (0.5 + 0.5 * ml_vnoise1(sAx * 1.1 / S - travel * 0.5 + 5.7, 71.0)));
     float ua = (nAx - cA) / max(wvA, 1e-4);
     float ub = (nAx - cB) / max(wvB, 1e-4);
 
@@ -1535,8 +1502,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // combs feathers out of the channel wherever it turns. The pitch along is
     // 4.8 and not 7: at 7 the water broke into a row of separate bright beads
     // down the channel, and this family does not do dots under any name.
-    float3 qA = float3(sAx * 4.8 / S - travel, clamp(ua, -2.0, 2.0) * 0.45,  3.0);
-    float3 qB = float3(sAx * 4.8 / S - travel, clamp(ub, -2.0, 2.0) * 0.45, 26.0);
+    float3 qA = float3(sAx * 2.0 / S - travel, clamp(ua, -2.0, 2.0) * 0.45,  3.0);
+    float3 qB = float3(sAx * 2.0 / S - travel, clamp(ub, -2.0, 2.0) * 0.45, 26.0);
     float wA = saturate(0.45 + 0.95 * ml_fbm3(qA, 3, 2.03, 0.5));
     float wB = saturate(0.45 + 0.95 * ml_fbm3(qB, 3, 2.03, 0.5));
 
@@ -1549,15 +1516,15 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // The lacing. A slow scalar travelling downstream decides which water is on
     // top at each point along the joined channel, and it only applies where the
     // channel IS joined: upstream each arm is entirely its own.
-    float lace = clamp(0.5 + 0.55 * ml_vnoise1(sAx * 4.2 / S - travel * 0.8, 41.0), 0.0, 1.0);
+    float lace = clamp(0.5 + 0.55 * ml_vnoise1(sAx * 1.8 / S - travel * 0.8, 41.0), 0.0, 1.0);
     float sA = mix(0.5, mix(0.5, lace, mingle), 1.0 - conv);
 
     float lightA = gA1 * (0.14 + 0.46 * wA) * (0.70 + 0.60 * sA);
     float lightB = gB1 * (0.14 + 0.46 * wB) * (0.70 + 0.60 * (1.0 - sA));
-    float chan = lightA + lightB - lightA * lightB;      // soft union, not a sum
+    float chan = (lightA + lightB - lightA * lightB) * orb.mask;   // soft union, not a sum
 
     // SUCCESS: the surge comes down the joined channel, from the fork out.
-    float surge = ml_crest(clamp(sAx * 1.15 + 0.42, 0.0, 1.0), st, 0.28);
+    float surge = ml_crest(clamp(sAx * 0.62 + 0.42, 0.0, 1.0), st, 0.28);
     chan = saturate(chan * (1.0 + 2.3 * surge) + 0.16 * st.lift * chan);
 
     // THE MEETING IS ALIVE. The shimmer used to be spread down the whole channel,
@@ -1567,13 +1534,13 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // travels with the flow, so it reads as disturbance and not as glitter, and
     // it walks upstream with `sj` as the arc runs.
     float ds = sAx - sj;
-    float mw = 0.085 * (1.0 + 0.75 * tic.x);
-    float meet = exp(-(ds * ds) / (mw * mw)) * exp(-(nAx * nAx) / (0.075 * 0.075));
-    float shN = ml_noise3(float3(sAx * 7.0 / S - travel * 1.9, nAx * 7.0 / S, 0.40 * travel));
+    float mw = 0.20 * (1.0 + 0.75 * tic.x);
+    float meet = exp(-(ds * ds) / (mw * mw)) * exp(-(nAx * nAx) / (0.18 * 0.18)) * orb.mask;
+    float shN = ml_noise3(float3(sAx * 3.0 / S - travel * 1.9, nAx * 3.0 / S, 0.40 * travel));
     float churnUp = (0.10 + 0.30 * shimmer) * meet * (0.45 + 0.55 * (0.5 + 0.5 * shN));
 
-    float3 qh = float3(uv.x * 2.4 / S, uv.y * 2.4 / S, 40.0 + 0.049 * T);
-    float haze = smoothstep(0.28, 0.96, 0.5 + 1.0 * ml_fbm3(qh, 2, 2.03, 0.5));
+    float3 qh = orb.n * (2.2 / S) + float3(0.0, 0.0, 40.0 + 0.049 * T);
+    float haze = smoothstep(0.28, 0.96, 0.5 + 1.0 * ml_fbm3(qh, 2, 2.03, 0.5)) * orb.mask;
 
     MLPalette pal = ml_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = ml_srgb_to_linear(float3(inkColor.rgb));
@@ -1582,8 +1549,9 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // say: this is where they meet. `meet` is already a tight Gaussian on the
     // junction, so gating the key with it puts cream exactly at the crotch of
     // the Y and nowhere else along either arm.
-    float key = smoothstep(0.45, 0.95, chan) * (0.30 + 0.90 * meet);
-    float t = ml_tier(0.045 + 0.12 * haze + 0.58 * chan + 0.05 * (gA2 + gB2) + churnUp, key);
+    float key = smoothstep(0.45, 0.95, chan) * (0.30 + 0.90 * meet) * orb.z;
+    float t = ml_tier(0.045 + (0.15 * haze + 0.64 * chan
+                    + 0.05 * (gA2 + gB2) * orb.mask + churnUp) * orb.shade, key);
     float hot = chan * chan * 0.75 + churnUp * 0.70 + 0.55 * key;
     return ml_write(pal, inkLin, t, hot, 0.88, glow, ml_bowl(uv), position * pixelScale);
 }
@@ -1687,7 +1655,7 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // that always shows.
     // The writhe is smaller than it was. A droplet has a smooth outline; at forty
     // per cent of the body radius the silhouette was too lumpy to name.
-    float2 p = uv + float2(w1, w2) * ((0.035 + 0.055 * heat) * (1.0 + 0.55 * tic.x)) * S;
+    float2 p = uv + float2(w1, w2) * ((0.030 + 0.050 * heat) * (1.0 + 0.55 * tic.x)) * S;
 
     // The body's radius, and it is set against the drip's reach below rather
     // than chosen on its own. The first cut had the reach at two thirds of R,
@@ -1695,7 +1663,15 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // formed: the whole mechanism was running and none of it was visible. The
     // reach has to clear R by about a third for the sum to cross its level in
     // the gap and draw the neck that is the point of the style.
-    float R = (0.185 + 0.075 * massK) * S;
+    // THE ORB IS THE MASS. The body's own radius now matches the pack's presence
+    // radius, so at rest the silhouette is a sphere and the drip is a departure
+    // FROM a sphere rather than one lobe of a lumpy pair. That is the difference
+    // between "a molten presence" and "some blobs".
+    // Small enough that the drip has somewhere to go. Matched to the pack's own
+    // presence radius the body filled the disc and the drip had no room to clear
+    // it: the reach came out SHORTER than the radius and every drip lived inside
+    // the mass again, which is the failure this style has now had twice.
+    float R = (0.245 + 0.055 * massK) * S;
 
     // The drips, and the ring the body makes when it takes one back.
     float ring = 0.0;
@@ -1731,12 +1707,12 @@ static inline float3 ml_join_law(float tau, float joinTime) {
         float heavy = (abs(fi - heavyIdx) < 0.5) ? tic.x : 0.0;
         // The drip is SMALLER than the body it hangs from. Sized near it, the two
         // read as a stacked pair of blobs, which is a peanut and not a droplet.
-        float rr = R * ((0.30 + 0.20 * lead) + 0.26 * heavy - 0.18 * g * (1.0 - 0.45 * visc));
+        float rr = R * ((0.20 + 0.15 * lead) + 0.16 * heavy - 0.12 * g * (1.0 - 0.45 * visc));
         // The reach clears the body by half again, up from a third. A drip that
         // barely clears its own body makes a bulge; one that clears it properly
         // hangs off a neck, and the neck is the thing that reads as weight.
-        float2 dp = p - dv * ((0.200 + 0.220 * absorb) * S * g
-                              * (0.38 + 0.62 * lead) * (1.0 + 0.95 * heavy));
+        float2 dp = p - dv * ((0.260 + 0.180 * absorb) * S * g
+                              * (0.34 + 0.66 * lead) * (1.0 + 0.95 * heavy));
         lobes += exp(-dot(dp, dp) / max(rr * rr, 1e-6));
     }
 
@@ -1749,7 +1725,10 @@ static inline float3 ml_join_law(float tau, float joinTime) {
 
     // The cut. Below it there is no iron; the crossing is soft over a wide
     // enough span that the skin never has an edge.
-    float skin = smoothstep(0.34, 0.62, field);
+    // A tighter crossing. Spread wide, the mass has no silhouette to speak of
+    // and the presence reads as a haze rather than as a body; this is still soft
+    // enough that nothing anywhere has an edge.
+    float skin = smoothstep(0.38, 0.60, field);
     // The interior reaches full depth well before the metaball's own peak. Cut at
     // 1.35 the body never got past two thirds of the range, so the mass sat in
     // the rail's shadow and read as a dull lump however hot its cracks were.
@@ -1758,7 +1737,15 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // The heat it gives off. The same lobes at two and a half times their
     // radius, so the aura belongs to the mass's actual shape instead of being a
     // soft circle painted behind it.
-    float aura = exp(-body2 / 6.25);
+    float aura = exp(-body2 / 3.20);
+
+    // The presence's own curvature, taken from the metaball's depth rather than
+    // from a separate sphere: the mass IS the body here, so its shading has to
+    // come from its own field or the light would sit on a shape that is not the
+    // one being drawn.
+    float3 mn = normalize(float3(pb / max(Rb, 1e-4), sqrt(max(1.0 - min(body2, 1.0), 0.0)) + 0.25));
+    float curve = mix(0.34, 1.0, pow(saturate(1.0 - min(body2, 1.0)), 0.30))
+                * (0.58 + 0.42 * saturate(dot(mn, normalize(float3(-0.34, -0.46, 0.82)))));
 
     // THE VEINS, read in the mass's own warped frame so they deform with it.
     float3 qi = float3(p * (3.6 / S), 80.0 + 0.16 * rate * T);
@@ -1791,8 +1778,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float key = smoothstep(0.26, 0.60, cracks) * smoothstep(0.30, 0.80, deep);
     float t = 0.045
             + aura * (0.070 + 0.055 * heat)
-            + skin * (0.150 + 0.290 * deep)
-            + cracks * 0.42;
+            + skin * (0.115 + 0.225 * deep) * curve
+            + cracks * 0.36;
     // Capped below the pale stop, the undertow's correction a third time. The
     // veins sit inside a mass that is already near the tone, so unchecked they
     // walk the rail into the specular and the iron comes out cream. Iron does
@@ -1873,11 +1860,15 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // which is what tipping something glazed actually looks like. A film
     // sloshing when its surface moves is the physics agreeing with the gesture.
     float2 tic = ml_tic(T + 1.3, 61.0, 2.4);
+    MLOrb orb = ml_orb(uv, 0.38);
     float th = mix(-1.00, -0.15, tilt) + 0.125 * tic.x;
     float2 dv = float2(cos(th), sin(th));
     float2 ev = float2(-dv.y, dv.x);
-    float along = dot(uv, dv);
-    float across = dot(uv, ev);
+    // The film's heading is measured across the BODY's surface, so the ribbon
+    // travels a great circle and foreshortens toward the limb of its own accord.
+    float2 sc = float2(orb.lam, orb.phi);
+    float along = dot(sc, dv);
+    float across = dot(sc, ev);
 
     // THE FORM IS A DOME, and it now has a silhouette. It used to be relief
     // spread across the whole disc, which gives a texture something to pool in
@@ -1886,13 +1877,15 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // perturbed off round so it reads as a form and not a ball, sitting in ink
     // with dark all around it, is the figure this species was always described
     // as having.
-    float3 qf = float3(uv * (2.3 / S), 60.0 + 0.020 * T);
+    float3 qf = orb.n * (2.1 / S) + float3(0.0, 0.0, 60.0 + 0.020 * T);
     float relief = saturate(0.5 + 1.0 * ml_fbm3(qf, 2, 2.03, 0.5));
-    float domeR = 0.375 + 0.055 * (relief - 0.5) * 2.0;
-    float dome = 1.0 - smoothstep(domeR - 0.085, domeR + 0.020, length(uv));
-    // Its own turn away from the light. The far side falls off, which is what
-    // makes a dome read as round rather than as a disc cut out of paper.
-    float turn = 0.62 + 0.38 * smoothstep(0.30, -0.34, uv.x * 0.72 + uv.y * 0.69);
+    // A FULL SPHERE, not a dome. The dome had a silhouette but no far side, so
+    // the ribbon ran across a shape that stopped existing at its own edge. On a
+    // sphere the film's path compresses as it rounds the limb and disappears
+    // behind it, which is the whole reason a moving highlight reads as sliding
+    // over something solid rather than across something flat.
+    float dome = orb.mask;
+    float turn = orb.shade;
 
     // THE FILM, squashed along the travel so its forms are wave fronts.
     // THE SLIDE IS SLOWER THAN IT LOOKS LIKE IT SHOULD BE, and measuring it is
@@ -1938,7 +1931,7 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // still here and still doing the organic work: it WARPS the coordinate, so
     // the ribbon bends and varies along its length instead of being a ruled
     // stripe, but it no longer decides whether the ribbon exists.
-    float3 qs = float3((along - travel) * (2.4 / S), across * (1.15 / S), 40.0 + 0.022 * T);
+    float3 qs = float3((along - travel) * (1.6 / S), across * (0.85 / S), 40.0 + 0.022 * T);
     float wob = ml_fbm3(qs, 2, 2.03, 0.5);
 
     // SUCCESS: the surge runs along the film's own heading, and the ribbon FLARES
@@ -1947,7 +1940,7 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // completely flat, which the state sheet caught and nothing else would have.
     float surge = ml_crest(clamp(along * 1.15 + 0.5, 0.0, 1.0), st, 0.30);
 
-    const float RIB_P = 0.62;                  // one ribbon every 0.62 of a frame
+    const float RIB_P = 0.95;                  // one ribbon at a time on the body
     float phase = (along + 0.085 * wob - travel) / RIB_P;
     float w = phase - floor(phase) - 0.5;
     float widthR = mix(0.155, 0.085, sheetK) * (1.0 - 0.10 * st.drive)
@@ -1997,8 +1990,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     float key = smoothstep(0.52, 0.94, rib) * dome * (0.55 + 0.60 * sheenK);
 
     float t = ml_tier(0.045
-            + onDome * (0.145 + 0.235 * smoothstep(0.18, 0.95, relief))  // the dome
-            + onDome * 0.065 * (1.0 - relief)                  // damp in its hollows
+            + onDome * (0.120 + 0.190 * smoothstep(0.18, 0.95, relief))  // the body
+            + onDome * 0.050 * (1.0 - relief)                  // damp in its hollows
             + filmD * (0.150 + 0.170 * sheenK) * (1.0 + 0.45 * st.drive)  // the ribbon
             + spec * dome * (0.055 + 0.145 * sheenK) * (1.0 + 0.70 * st.drive), key);
     float hot = filmD * (0.22 + 0.30 * sheenK) + spec * dome * 0.45 + 0.55 * key;

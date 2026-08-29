@@ -97,6 +97,22 @@
 // than as eight materials each doing their own thing, and it is the first thing
 // a shared lane would have cost.
 //
+// THE ORB LAW, which supersedes the figure wave's open-ended figures and is the
+// composition every one of these now has. Each species is ONE compact, centred,
+// roughly spherical presence that could plausibly be the assistant. The species
+// is what that presence is MADE OF, never a scene it sits in: the pool floor,
+// the hearth, the horizon and the road are all gone, and what survived from
+// each of them is its physics, which transferred without argument. A caustic
+// wraps a ball as readily as it lands on a floor; an aurora is a latitude band
+// whether the planet is in the frame or not; a mirage bends whatever image is
+// put in front of it, and it turns out the assistant's own body is a better
+// subject than a distant car was.
+//
+// mg_orb gives all eight the same body: a normal, a path length, and a surface
+// metric. The material is then read in the sphere's arc length so it compresses
+// at the limb, and dimmed by the path so the presence reads round. Both of those
+// are the sphere doing the work rather than shading laid over a flat field.
+//
 // THE CONTAINMENT. The view clips to a circle. A clip that lands on lit pixels
 // draws a hard rim, and a hard rim on an organic form is the one edge this
 // house never ships, so every style brings its light down to pure ink well
@@ -418,11 +434,89 @@ static float mg_fbm1(float x, int octaves, float lane) {
 /// at 300 pt it leaves nine. `reach` is clamped rather than trusted, because a
 /// style that wanted a wider field would otherwise be able to hand the clip
 /// something to cut, and no style is allowed to make that mistake.
+///
+/// SINCE THE ORB LAW THIS IS A SAFETY NET AND NOT THE CONTAINMENT. The body's
+/// own mask ends at 0.345 uv, comfortably inside the clip, so every style now
+/// passes the widest reach the clamp allows and this function does nothing at
+/// all in practice. It is kept because it costs one smoothstep and it is the
+/// thing that would catch a future style whose field reached past its body. At
+/// the old narrower reaches it had started actively vignetting the orb, dimming
+/// the outer third of a shape whose whole job is to read as round.
 static inline float mg_hold(float2 uv, float reach) {
     float r = length(uv) * 2.0;
     float a = clamp(reach, 0.30, 0.64);
     return 1.0 - smoothstep(a, a + 0.30, r);
 }
+
+// MARK: - The orb
+//
+// One compact, centred, roughly spherical presence per species. This is the
+// stage and the whole composition: no scenes, no floors, no horizons.
+
+/// The body every style in this pack now lives on.
+struct MGOrb {
+    float  r;      // distance from the centre, 1 at the silhouette
+    float  mask;   // the body: 1 inside, soft to 0 just past the limb
+    float3 n;      // the surface normal of the front hemisphere
+    float  thru;   // the view ray's path through the body, 1 at the crown, 0 at the limb
+    float2 wrap;   // surface coordinates, in arc length along the sphere
+};
+
+/// THE SPHERE, and the three things it hands a species.
+///
+/// THE NORMAL. An orthographic sphere's normal is free: inside the unit disc the
+/// projected position IS the normal's xy, and z is what is left of a unit
+/// vector, sqrt(1 - r^2). No trigonometry, no raycast, one square root.
+///
+/// THE PATH. `thru` is that same z, and it is the honest model for every style
+/// in this family, because every one of them is a body of glowing MEDIUM rather
+/// than a lit solid. What the eye receives from a ball of luminous medium is the
+/// integral along the view ray, and for a sphere that path is 2 sqrt(1 - r^2):
+/// longest through the middle, going to nothing at the limb. So the depth
+/// dimming that sells the curvature is not a shading trick laid on afterwards,
+/// it is the same quantity the material is already made of. A Lambert term was
+/// the other option and it was wrong: these are not plastic balls with a light
+/// on them, and a specular highlight would say exactly that.
+///
+/// THE WRAP. A field read at constant frequency in screen space slides across a
+/// sphere like a decal and destroys the curvature the other two just bought. So
+/// `wrap` carries the sphere's own metric: the arc length from the crown to a
+/// point at projected radius r is asin(r), which runs to pi/2 at the limb while
+/// r only runs to 1. A field of constant frequency in `wrap` therefore COMPRESSES
+/// toward the limb, exactly as a pattern painted on a real sphere does, and the
+/// compression is what makes the material look wrapped rather than stuck on.
+///
+/// The species is what the orb is MADE OF. The orb is the composition.
+static MGOrb mg_orb(float2 uv, float radius) {
+    MGOrb o;
+    float R = max(radius, 1e-4);
+    float2 q = uv / R;
+    o.r = length(q);
+    // The silhouette. Soft across about six per cent of the radius, which at
+    // 46 pt is under a point: never a cut edge, still a definite body.
+    o.mask = 1.0 - smoothstep(0.94, 1.03, o.r);
+    float2 qc = (o.r > 1.0) ? (q / o.r) : q;
+    o.thru = sqrt(max(1.0 - dot(qc, qc), 0.0));
+    o.n = float3(qc, o.thru);
+    float2 dir = (o.r > 1e-5) ? (q / o.r) : float2(1.0, 0.0);
+    o.wrap = dir * asin(clamp(o.r, 0.0, 1.0));
+    return o;
+}
+
+/// The body's own falloff toward the limb, shaped. Raw path length goes to zero
+/// hard enough to eat the outer third of the presence, so every style lifts it
+/// off the floor: the limb stays dim and present rather than dropping out, and
+/// the sphere still reads round.
+static inline float mg_round(MGOrb o, float floorLift) {
+    return (floorLift + (1.0 - floorLift) * pow(clamp(o.thru, 0.0, 1.0), 0.70)) * o.mask;
+}
+
+/// Every species in this pack sits on a body of this radius, so eight of them in
+/// a gallery are eight presences of one size rather than eight compositions.
+/// 0.335 puts the silhouette at 0.67 of the badge's diameter, which leaves a
+/// clear ring of ground around it: a presence IN a space, which is what an
+/// assistant reads as, rather than a texture filling a circle.
+constant float MG_ORB_R = 0.335;
 
 // MARK: - The value hierarchy
 //
@@ -734,6 +828,15 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float swim = clamp(c2, 0.0, 1.0);
     float focus = clamp(c3, 0.0, 1.0);
 
+    // THE BODY. An underwater ball: the caustic web plays ON it, read in the
+    // sphere's own arc length so the fold lines compress toward the limb the way
+    // a pattern on a real sphere does. The whole Hessian below then works in
+    // surface coordinates rather than screen ones, which means the fold curves
+    // themselves are curved by the body instead of being a flat web with a
+    // sphere drawn behind it.
+    MGOrb orb = mg_orb(uv, MG_ORB_R * S);
+    float2 sw = orb.wrap;
+
     // The surface domain. f = 4.8 at the default; two octaves puts the finest
     // cell at 1/(4.8 * 2.03) = 0.10 uv, which is five points at 46 pt: broad
     // enough to drift, coarse enough never to sparkle.
@@ -773,12 +876,13 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float g2 = fract(g.seed * 7.31);
     float2 gp = float2(cos(ga), sin(ga)) * (0.09 + 0.16 * g2) * S;
     float gsig = 0.20 * S;
-    float2 gd = uv - gp;
+    float2 gd = sw - gp;
     float swell = g.env * exp(-dot(gd, gd) / (gsig * gsig));
 
     // The swell also acts as a weak lens on the domain, drawing the surface it
-    // reads very slightly toward its own centre. At rest this is uv exactly.
-    float2 uvw = uv - gd * (0.20 * swell);
+    // reads very slightly toward its own centre. At rest this is the wrap
+    // exactly.
+    float2 uvw = sw - gd * (0.20 * swell);
     float3 p = float3((uvw + drift) * f, churn);
 
     // The Hessian, by differencing the analytic gradient. e = 0.10 of a cell is
@@ -813,24 +917,16 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // The floor is not black between the threads. It is lit by the same light,
     // just unfocused, and the surface's own thickness modulates how much gets
     // through. Costs nothing: s0.x is already in hand.
-    // THE POOL, which is this style's figure and the figure wave's largest
-    // change to it. The web used to run edge to edge, and allover texture in a
-    // circle is not an object: there was nothing to name and nothing to parse at
-    // 20 pt. A caustic in the world is not allover either. It is a PATCH OF SUN
-    // on a floor, with a lit disc, a web inside it, and dark floor around it, so
-    // the object here is "a lit pool floor" and the web is what lives on it.
-    //
-    // The pool's edge is bent by the surface's own height field, which is free
-    // because s0.x is already in hand, and which is the right field to use: the
-    // boundary of a patch of sunlight on a pool floor IS drawn by the water
-    // above it, so the rim wanders and breathes with the same swell that moves
-    // the web.
-    float poolR = 0.300 * S;
-    float rp = length(uv) / max(poolR, 1e-4);
-    float pool = 1.0 - smoothstep(0.70, 1.06, rp * (1.0 + 0.16 * s0.x));
+    // THE BODY'S FALLOFF, which replaces the pool the figure wave gave this
+    // style. The pool was a patch of lit floor, and a floor is a scene: the orb
+    // law wants a presence, not a place. The silhouette now comes from the
+    // sphere itself, and its own path length does what the pool's rim was doing,
+    // only truthfully. The surface's height still bends the limb a little,
+    // because the boundary of a lit ball seen through moving water does swim.
+    float pool = mg_round(orb, 0.10) * (1.0 + 0.10 * s0.x);
 
-    // THE THREE TIERS. The sunlit floor inside the pool is the amber body, the
-    // web's own folds are the cream peaks, and outside the pool there is ink.
+    // THE THREE TIERS. The lit body of the ball is the amber body, the web's own
+    // folds are the cream peaks, and past the limb there is ink.
     float floorLit = 0.42 + 0.10 * (0.5 + 0.5 * s0.x);
     float v = pool * (floorLit + (0.60 + 0.10 * deepK) * pow(fold, 1.15));
     // The flare's extra light lands mostly ON THE WEB rather than on the whole
@@ -850,7 +946,7 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float3 em = mg_shade(pal, MG_PEAK)
               * (0.30 * pool * pow(fold, 3.0) * (1.0 + 1.8 * flare)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -942,19 +1038,38 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
 
     MGState st = mg_state(stateIndex, stateTau);
 
-    // The sky's frame. uv.y runs down the screen, so up is negative; `up` is
-    // measured the way the curtain is built, which is from its foot.
-    // RESPONDING: the whole curtain streams along its own length, which for a
-    // sheet of light is what purpose looks like.
-    float x = uv.x / S - 0.32 * mg_driveDist(st);
-    float up = -uv.y / S;
+    // THE PLANET. The curtain now wraps a small world's pole, which is what an
+    // aurora actually is: a ring of light around the magnetic pole, seen from
+    // off to one side so it curves over the crown and runs away down both limbs.
+    // That gives the species its orb and costs it nothing, because a polar oval
+    // is a LATITUDE BAND and a latitude band is what the ribbon already was.
+    //
+    // Longitude runs along the band and latitude across it, both taken from the
+    // sphere's normal. The pole is tipped toward the viewer and up, so the oval
+    // opens as an ellipse near the crown rather than collapsing to a line, and
+    // the fold structure that used to travel along a straight ribbon now travels
+    // around the ring.
+    MGOrb orb = mg_orb(uv, MG_ORB_R * S);
+    const float3 pole = float3(0.16, -0.80, 0.58);
+    float lat = asin(clamp(dot(orb.n, pole), -1.0, 1.0));   // 1.57 at the pole
+    // The longitude is measured about the pole, and atan2 of two components of
+    // the normal against it is the cheapest way to get it that stays continuous
+    // across the visible face.
+    float3 e1 = normalize(cross(pole, float3(0.0, 0.0, 1.0)));
+    float3 e2 = cross(pole, e1);
+    float lon = atan2(dot(orb.n, e2), dot(orb.n, e1));
 
-    // THE ARCH. A parabola that lifts the ribbon in the middle of the frame and
-    // settles it at both sides, which is the whole reason this reads as a ribbon
-    // rather than as a bar lying across a circle. Clamped so the curve flattens
-    // off past the sides instead of diving out of the badge.
-    float ax = clamp(x * 1.90, -1.0, 1.0);
-    float arch = 0.132 * (1.0 - ax * ax);
+    // RESPONDING: the whole curtain streams around the ring, which for a sheet
+    // of light is what purpose looks like.
+    float x = lon * 0.42 - 0.32 * mg_driveDist(st);
+    float up = lat;
+
+    // THE OVAL'S LATITUDE. The arch is gone and the sphere is doing its work
+    // now: a band at a fixed latitude on a tipped globe already arcs over the
+    // crown and turns down at both ends, which is the shape the parabola was
+    // faking. 0.93 rad sits it about thirty degrees off the pole, far enough
+    // down the body that the ring reads as a ring rather than as a cap.
+    float arch = 0.93;
 
     // The ribbon's own cross section. `height` is now its THICKNESS rather than
     // the scale of a fade upward, and both edges are real: the bottom is the
@@ -1058,17 +1173,21 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float flare = mg_flare(st, length(uv));
     sheet *= 1.0 + 1.55 * flare + 0.30 * st.settle;
 
-    // THE THREE TIERS. The ribbon's body is amber and the pleat cores, where two
-    // laminae also happen to overlap, are the cream. sheet runs to about 2.2
-    // where everything lines up, so the divisor puts the body near 0.55 and
-    // leaves the top of the range for the folds.
-    float v = 0.035 + sheet * 0.46;
+    // THE THREE TIERS, on the body. The ribbon's body is amber and the pleat
+    // cores, where two laminae also happen to overlap, are the cream. The whole
+    // ring is dimmed toward the limb by the sphere's own path length, so the
+    // parts of the oval running away round the sides fall off exactly as they
+    // should. The small floor keeps the unlit part of the planet present rather
+    // than letting the ring float in nothing.
+    float round = mg_round(orb, 0.16);
+    float v = (0.030 + sheet * 0.46) * round + 0.045 * round;
     float3 body = mg_shade(pal, mg_tier(v));
     // Only the overlaps emit. sheet passes 1.0 where two laminae cross, and the
     // square makes that crossing the only thing on screen that glows.
-    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(sheet - 0.55, 0.0, 1.0), 2.0)) * max(glow, 0.0);
+    float3 em = mg_shade(pal, MG_PEAK)
+              * (0.30 * round * pow(clamp(sheet - 0.55, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -1145,11 +1264,24 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // floor has a smaller y and a positive height.
     MGState st = mg_state(stateIndex, stateTau);
 
-    float floorY = 0.16 + 0.12 * floorK;
-    // RESPONDING: a draught crosses the fire and the whole column leans into it
-    // and stays leaning. Distinct from the gust, which leans and lets go.
-    float x = uv.x / S - 0.30 * mg_driveDist(st);
-    float h = (floorY - uv.y) / S;
+    // THE ORB IS THE COAL. There is no floor and no column any more: the body
+    // itself is the burning thing, and everything the species used to do to a
+    // fire above a hearth it now does to the surface of a single ember.
+    //
+    // What survives intact is the physics, because it transfers exactly. The
+    // bed of coals becomes the CRUST, a field over the sphere whose thin places
+    // are where the fire shows through, which is why a real ember is brightest
+    // where its ash is thinnest. The plume's rise becomes heat travelling UP
+    // AND OVER the body, so the crust pattern climbs the front of the coal and
+    // goes over the crown, and the shimmer becomes the air right above the
+    // surface bending what is under it.
+    MGOrb orb = mg_orb(uv, MG_ORB_R * S);
+    // RESPONDING: a draught crosses the coal and the heat leans into it and
+    // stays leaning. Distinct from the gust, which leans and lets go.
+    float x = orb.wrap.x - 0.30 * mg_driveDist(st);
+    // `h` is now height ON THE BODY rather than above a hearth: the arc from the
+    // bottom of the coal to the top, so "rising" means travelling over it.
+    float h = 0.55 - orb.wrap.y * (0.85 + 0.45 * floorK);
 
     // THE SHIMMER. Two octaves at f = 2.1 is a broad, slow warp: fine warp
     // detail here would tear the coals into speckle instead of making them swim.
@@ -1178,10 +1310,11 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // that reorganise as fast as the gas above them stop reading as fuel.
     float3 bp = float3(xs * 2.8, h * 1.2, t * 0.115);
     float bed = 0.5 + 0.5 * mg_fbm3(bp, 3, 2.03, 0.5);
-    // Tightened from 0.050 + 0.060 so the bed reads as a LINE of fire rather
-    // than a low haze. The figure is the line; it needs an edge to be one.
-    float bedThick = 0.040 + 0.050 * floorK;
-    float bedMask = smoothstep(-0.085, -0.004, h) * exp(-max(h, 0.0) / bedThick);
+    // THE CRUST. Where the ash is thin the fire shows, so the mask is now a
+    // threshold on the crust field itself rather than a band above a hearth
+    // line: the hot places are wherever the coal happens to be thinnest, spread
+    // over the whole body, and `floor` sets how much of it has broken open.
+    float bedMask = smoothstep(0.62 - 0.34 * floorK, 0.94 - 0.24 * floorK, bed);
 
     // THE PLUME. Domain scrolls down so structure travels up; horizontal
     // frequency opens with height so the column widens as it climbs.
@@ -1192,33 +1325,37 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
                        h * (2.30 - 0.80 * updraft) - t * (0.94 + 1.55 * updraft),
                        t * 0.195);
     float plume = 0.5 + 0.5 * mg_fbm3(pp, 3, 2.03, 0.5);
-    float column = exp(-max(h, 0.0) / (0.16 + 0.40 * heat));
-    // Only the hot part of the plume carries light. The smoothstep is what turns
-    // a uniform column of noise into separate tongues of warm gas.
+    // The heat carries UP the body rather than off a hearth, so the falloff is
+    // over the arc of the coal instead of over a height above it: strongest low
+    // on the front of the ember and thinning as it goes over the crown, which is
+    // what convection does to a burning thing from every side at once.
+    float column = exp(-max(h - 0.10, 0.0) / (0.34 + 0.55 * heat));
+    // Only the hot part carries light. The smoothstep is what turns a uniform
+    // field of noise into separate tongues of heat.
     float rise = column * smoothstep(0.32, 0.86, plume);
 
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    // SUCCESS: the bed itself catches, and the heat of it climbs the column. The
-    // front is measured from the COALS rather than from the frame's middle,
-    // because that is where this species' light actually lives, so the flare is
-    // seen to leave the fire and travel up through its own smoke.
-    float2 fireAt = float2(0.0, floorY);
-    float flare = mg_flare(st, length(uv - fireAt));
+    // SUCCESS: the coal itself catches. The front now leaves the heart of the
+    // ember and travels out over its surface, which is where this species' light
+    // lives once the body is the fire.
+    float flare = mg_flare(st, length(uv));
     float coals = bedMask * (0.30 + 0.62 * bed) * (1.0 + 1.45 * flare + 0.28 * st.settle);
-    // THE THREE TIERS. The figure is the glowing floor line and its core is the
-    // cream: coals reaches about 0.92 at the hottest fuel, so the coefficient
-    // lands that on 1.0 and the plume above stays in the amber body where it
-    // belongs. Gas that glows as hard as the fuel is what makes a fire shader
-    // read as a cartoon, and it is also what would flatten the value hierarchy.
-    float v = 0.040 + 1.04 * coals + (0.20 + 0.28 * heat) * rise * (1.0 + 1.15 * flare);
+    // THE THREE TIERS, on the body. The broken crust is the cream, the heat
+    // moving over the surface is the amber, and the sphere's own path length
+    // takes both down toward the limb so the ember reads round. The floor is
+    // higher than the other styles' because an ember is a SOLID that glows: its
+    // edge is still a warm body, not empty air.
+    float round = mg_round(orb, 0.22);
+    float v = (0.055 + 1.02 * coals
+             + (0.20 + 0.28 * heat) * rise * (1.0 + 1.15 * flare)) * round;
     float3 body = mg_shade(pal, mg_tier(v));
     // Only the coals themselves emit. Gas glowing as hard as the fuel is what
     // makes a fire shader read as a cartoon.
-    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(coals, 2.6)) * max(glow, 0.0);
+    float3 em = mg_shade(pal, MG_PEAK) * (0.30 * round * pow(coals, 2.6)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -1342,7 +1479,17 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // The lamp. Up and to the left, because a light source placed on the
     // diagonal reads as a place in a room and a centred one reads as a target.
     // Its position does not scale with formScale: it is a location, not a form.
-    float2 lamp = float2(-0.155, -0.115) * offset;
+    // THE SOURCE HAS A BODY. The lamp was a point with an inverse square around
+    // it, which is a glow and not a presence: it had no size, so it could not
+    // read spherical. It is now a BALL of light inside the fog, and its falloff
+    // comes from the sphere's own path length rather than from a distance
+    // formula, so the heart of it is a round thing you are looking at through
+    // weather rather than a bright spot in a haze. The fog is unchanged and is
+    // still the only thing that moves.
+    // The lamp sits off centre INSIDE its own body, which is what puts the
+    // brightest part of the ball off the axis and keeps it from reading as a
+    // target. It stays well inside so the body never leaves the frame.
+    float2 lamp = float2(-0.085, -0.062) * offset * S;
 
     MGState st = mg_state(stateIndex, stateTau);
 
@@ -1397,7 +1544,15 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float sig = (0.075 + 0.150 * reach) * S;
     float2 dLamp = uv - lamp;
     float dist2 = dot(dLamp, dLamp);
-    float lampL = (sig * sig) / (dist2 + sig * sig);
+    // THE BODY'S OWN LIGHT. The path through the luminous ball is what the eye
+    // collects, so the source is brightest through its middle and falls to
+    // nothing at its limb, which is a round thing rather than a bright point.
+    // The old inverse square is kept underneath at a low weight, because a lamp
+    // does throw light past its own surface and without that term the ball would
+    // sit in the fog with no reach at all.
+    MGOrb lampOrb = mg_orb(uv - lamp, (0.235 + 0.075 * reach) * S);
+    float lampL = mg_round(lampOrb, 0.0) * 0.86
+                + 0.34 * (sig * sig) / (dist2 + sig * sig);
     // SUCCESS, and this is the one moment the lamp's power is allowed to move.
     // The rest of this style exists to prove that a light behind fog does not
     // need to change to be alive; arrival is the exception, and it is stated as
@@ -1437,7 +1592,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float3 body = mg_shade(pal, mg_tier(0.055 + 0.92 * lit));
     float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(lit, 0.0, 1.0), 2.2)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -1534,9 +1689,19 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // in the circle; only the field's scale answers to formScale.
     MGState st = mg_state(stateIndex, stateTau);
 
-    const float hor = -0.055;
+    // THE ORB REFRACTED. The horizon is gone, and with it the road, the
+    // inversion line and the mirrored copy sitting under it: all of that was a
+    // scene, and a scene is what the orb law removes. What survives is the
+    // OPTICS, which was always the species: layered air bending an image.
+    //
+    // The image being bent is now the presence's own. The bands displace the
+    // coordinate the BODY is read at, so the sphere's silhouette swims, its
+    // surface tears into slices, and where the displacement folds, a piece of it
+    // appears twice. A shimmering presence whose edges swim, which is exactly
+    // what the desert road was doing to a distant car, done to the assistant
+    // instead of to a landscape.
     float x = uv.x / S;
-    float d = (uv.y - hor) / S;          // positive below the horizon, on the road
+    float d = uv.y / S;
 
     // THE LAYERS. Stretched wide and squeezed tall, travelling sideways with
     // time. The vertical frequency is what decides how many strata cross the
@@ -1564,10 +1729,15 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
                        t * 0.255);
     float band = mg_fbm3(bp, 2, 2.03, 0.5);
 
-    // THE FOLD, and then THE BEND, which together are the whole mapping.
+    // THE FOLD, which is what makes this refraction and not a wobble. The
+    // mapping compresses the lower part of the image toward the middle, so a
+    // stratum passing through can carry a slice of the body's own surface back
+    // across itself and it appears twice: the doubling the desert road gives a
+    // distant car, happening now on the presence. `distance` still sets how hard
+    // the fold squashes, so the knob keeps its meaning.
     float m = 1.20 + 0.90 * dist;
-    float mirror = smoothstep(-0.025, 0.040, d);
-    float yy = mix(d, -d * m, mirror);
+    float mirror = smoothstep(0.010, 0.135, d);
+    float yy = mix(d, d * (2.0 - m) + 0.045, mirror);
     // THE SURGE. A stronger stratum rolls down the road, and where it passes the
     // image tears into more slices than it otherwise would, because the fold
     // threshold is a threshold on the DISPLACEMENT AMPLITUDE and this raises it.
@@ -1579,21 +1749,22 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float sd = x - stravel;
     float surge = g.env * exp(-(sd * sd) / (0.26 * 0.26));
 
-    float grip = smoothstep(-0.055, 0.115, d);
-    float ys = yy + band * (0.075 + 0.160 * bend) * (1.0 + 1.20 * surge) * grip;
+    // The bending grips harder low on the body than high on it, which is what
+    // keeps the crown legible while the lower half swims: an image whose whole
+    // area tears equally is noise, and one that tears from the bottom up is
+    // being refracted.
+    float grip = smoothstep(-0.16, 0.10, d);
+    float ys = yy + band * (0.055 + 0.120 * bend) * (1.0 + 1.20 * surge) * grip;
 
-    // THE LIGHT. Small, compact and off to the left, because a source on the
-    // axis reads as a target and this wants to read as something a long way down
-    // a road. Its position is in the circle's own frame and does not scale, the
-    // way the lantern's lamp does not: it is a place, not a form.
-    const float sx = -0.115;
-    const float sy = -0.062;
-    float wx = 0.090 + 0.050 * (1.0 - dist);
-    float wy = 0.070 + 0.050 * (1.0 - dist);
-    float gx = (x - sx) / wx;
-    float gy = (ys - sy) / wy;
-    float core = exp(-(gx * gx + gy * gy));
-    float halo = exp(-0.30 * (gx * gx + gy * gy));
+    // THE BODY, read at the displaced coordinate. This one line is the whole
+    // translation: the sphere is built from (x, ys) rather than (x, d), so every
+    // stratum that moves ys moves the silhouette, and the presence's edge swims.
+    MGOrb orb = mg_orb(float2(x, ys) * S, MG_ORB_R * S);
+    float core = mg_round(orb, 0.06);
+    // The air immediately around the body carries some of its light, and it is
+    // refracted by the same strata, so the glow around the presence swims with
+    // it rather than sitting still behind it.
+    float halo = exp(-0.85 * max(orb.r - 1.0, 0.0) / 0.30) * (1.0 - 0.55 * orb.mask);
 
     // The light is not a smooth blob. Two octaves of slow field give it internal
     // structure, so at 300 pt there is something to look at inside it and the
@@ -1607,13 +1778,10 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     MGPalette pal = mg_palette(inkColor, toneColor, hueShift, depth);
     float3 inkLin = mg_srgb_to_linear(float3(inkColor.rgb));
 
-    // SUCCESS: the distant light flares and the flare washes down the road
-    // toward the viewer. The front is measured from where the light's own direct
-    // image sits on screen, so it starts there and spreads, and the strata carry
-    // it: what brightens is the image and its glare, torn exactly as they
-    // already are.
-    float2 lightAt = float2(sx * S, hor + sy * S);
-    float flare = mg_flare(st, length(uv - lightAt));
+    // SUCCESS: the presence flares from its heart and the flare washes out
+    // through the shimmering air around it. What brightens is the body and its
+    // halo, torn exactly as they already are.
+    float flare = mg_flare(st, length(uv));
     float img = core * (0.42 + 0.78 * grain) * (1.0 + 1.60 * flare + 0.30 * st.settle);
     // The hot layer's veiling glare: the one place the strata are visible in
     // their own right rather than through what they do to the light, which is
@@ -1621,7 +1789,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // horizontal gate is the important one: glare belongs around its source, and
     // an ungated version of this is a faint bar across the whole frame, which is
     // the exact shape this style was rebuilt to stop being.
-    float veil = exp(-(ys * ys) / (0.145 * 0.145)) * exp(-0.18 * gx * gx)
+    float veil = exp(-0.55 * max(orb.r - 0.55, 0.0) / 0.42)
                * haze * 0.24 * (0.45 + 0.55 * (0.5 + 0.5 * band));
     // THE THREE TIERS. Both images' cores are cream, the halo around them is the
     // amber body, and the veil in the hot layer between them is lifted enough to
@@ -1637,7 +1805,7 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // Pulled in tighter than the rest of the pack. The old bar ran the full
     // width and its ends were still lit where the clip landed; a compact source
     // does not need the room, so it does not get it.
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.52));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -1760,6 +1928,13 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float3 law = mg_open_law(tau, 2.6);
     MGState st = mg_state(stateIndex, stateTau);
 
+    // The aperture was already a presence and the orb law leaves it standing.
+    // What it gains is a BODY: the medium the opening is cut into is now a
+    // sphere rather than a flat surround, so the beam outside the aperture
+    // falls off over the curve of it and the whole thing reads as an opening in
+    // something round instead of a hole in a card.
+    MGOrb orb = mg_orb(uv, MG_ORB_R * S);
+
     float r = length(uv);
     float ang = atan2(uv.y, uv.x);
 
@@ -1857,14 +2032,18 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float spill = beam * (0.35 + 0.65 * lean) * surge;
     // THE THREE TIERS. The medium outside is the ground, the admitted light is
     // the amber body, and the inner rim is the cream.
-    float v = 0.035 + 0.66 * through + 0.26 * spill + 0.30 * lip * surge
+    // The medium outside the opening is the body, so the spill and the lip fall
+    // off over its curve; what comes straight through the aperture does not,
+    // because that light is not travelling through the sphere at all.
+    float round = mg_round(orb, 0.10);
+    float v = 0.030 + 0.66 * through + (0.26 * spill + 0.30 * lip * surge) * round
             + 0.62 * innerRim * surge;
     float3 body = mg_shade(pal, mg_tier(v));
     float3 em = mg_shade(pal, MG_PEAK)
               * (0.16 * pow(clamp(through, 0.0, 1.0), 2.0) + 0.30 * innerRim * surge)
               * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -1957,8 +2136,15 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float blur = 1.0 - 0.28 * fall;
 
     MGState st = mg_state(stateIndex, stateTau);
+
+    // THE BODY. Canopy light plays ON the sphere: the patches are read in the
+    // sphere's own arc length so they curve across the globe and crowd toward
+    // the limb, which is what dappled light does to anything round it falls on.
+    // The floor is gone; the presence is what the leaves are shading.
+    MGOrb orb = mg_orb(uv, MG_ORB_R * S);
+
     // SUCCESS: the sun above the canopy breaks out, and the break travels across
-    // the floor. It enters as a lowering of the GAP THRESHOLD, so more of the
+    // the body. It enters as a lowering of the GAP THRESHOLD, so more of the
     // canopy lets light through where the front is passing: the patches that are
     // already there widen and brighten and new ones open beside them. A brighter
     // sun opening the shade, rather than a light laid over a picture of shade.
@@ -2005,7 +2191,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
         float2 gust = float2(sin(t * (0.83 - 0.21 * fi) + fi * 2.3),
                              cos(t * (0.61 + 0.17 * fi) + fi * 1.1))
                     * (0.012 + 0.045 * breeze);
-        float3 q = float3((uv + dr + gust + chase * (1.0 - 0.55 * fi)) * freq,
+        float3 q = float3((orb.wrap + dr + gust + chase * (1.0 - 0.55 * fi)) * freq,
                           t * (0.17 - 0.05 * fi));
         float n = mg_fbm3(q, 2, 2.03, 0.5);
         // The gap: light passes where the leaf field is thin. `patch` moves the
@@ -2020,7 +2206,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // The crown travels with the same wind, only slower, being the furthest
     // thing away. A crown that drifted the other way would put the whole picture
     // back into the disagreement the layers were just taken out of.
-    float3 cq = float3((uv + float2(0.052, 0.016) * t * (0.40 + 1.40 * breeze)
+    float3 cq = float3((orb.wrap + float2(0.052, 0.016) * t * (0.40 + 1.40 * breeze)
                            + float2(0.110, 0.032) * mg_driveDist(st)) * (1.35 / S),
                        t * 0.075);
     float crown = 0.5 + 0.5 * mg_fbm3(cq, 2, 2.03, 0.5);
@@ -2040,24 +2226,27 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // and it is built by weighting the transmission with a soft off-centre pool.
     // Satellites keep a fifth of the weight, which is enough to read as patches
     // of the same light and not enough to compete with the pool.
-    float2 poolAt = float2(-0.045, 0.030) * S;
-    float2 pd = uv - poolAt;
-    float rp = length(pd) / (0.270 * S);
+    float2 poolAt = float2(-0.055, 0.038);
+    float2 pd = orb.wrap - poolAt;
+    float rp = length(pd) / 0.520;
     float pool = 1.0 - smoothstep(0.52, 1.34, rp);
     float lift = 0.20 + 0.92 * pool;
+    // The sphere's own path length, which curves the whole play of light over
+    // the body and takes the patches down as they turn away at the limb.
+    float round = mg_round(orb, 0.13);
 
     // THE THREE TIERS. The shaded ground is the dark end, the lit floor under
     // the pool is the amber body, and the fully aligned gaps are the cream.
-    float v = (0.045 + 0.100 * crown) * (0.35 + 0.65 * pool)
-            + trans * lift * (0.78 + 0.46 * crown);
+    float v = ((0.045 + 0.100 * crown) * (0.35 + 0.65 * pool)
+            + trans * lift * (0.78 + 0.46 * crown)) * round;
     float3 body = mg_shade(pal, mg_tier(v));
     // Only the fully aligned gaps carry the sun itself. The cube is what keeps
     // the emission on the few brightest patches rather than on all of them, and
     // the pool weight keeps it inside the figure.
     float3 em = mg_shade(pal, MG_PEAK)
-              * (0.30 * pool * pow(clamp(trans, 0.0, 1.0), 3.0)) * max(glow, 0.0);
+              * (0.30 * pool * round * pow(clamp(trans, 0.0, 1.0), 3.0)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.60));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }
@@ -2159,12 +2348,17 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // gets the centre: it wanders inside a radius well under its own, the light
     // sits off to the upper right, and their separation still swings enough to
     // move coverage because the wander carries the mass toward and away from it.
-    float2 lp = float2(0.119, -0.073) * S;
-    float sigL = 0.210 * S;
-    float2 dl = uv - lp;
+    // THE LIGHT IS A BODY. The crescent is this species' figure and the orb law
+    // leaves it exactly as it is; what changes is that the thing being eclipsed
+    // is now a SPHERE rather than a Gaussian smudge. Its falloff comes from the
+    // path through it, so it has a limb of its own, and the corona bleeding
+    // around the mass is therefore bleeding around a round body: the reading the
+    // crescent always implied and never quite had.
+    float2 lp = float2(0.085, -0.052) * S;
+    MGOrb lightOrb = mg_orb(uv - lp, MG_ORB_R * S);
     float3 lq = float3(uv * (5.5 / S) + float2(0.0, -t * 0.060), t * 0.12);
     float lgrain = 0.5 + 0.5 * mg_fbm3(lq, 2, 2.03, 0.5);
-    float lightRaw = exp(-dot(dl, dl) / (sigL * sigL)) * (0.52 + 0.62 * lgrain);
+    float lightRaw = mg_round(lightOrb, 0.04) * (0.52 + 0.62 * lgrain);
 
     // THE WANDER. A closed path with incommensurate rates on the two axes, so
     // the mass never retraces the same loop and never comes to rest, and its
@@ -2268,7 +2462,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float3 body = mg_shade(pal, mg_tier(v));
     float3 em = mg_shade(pal, MG_PEAK) * (0.30 * pow(clamp(corona, 0.0, 1.0), 2.0)) * max(glow, 0.0);
 
-    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.58));
+    float3 rgb = mix(inkLin, body + em, mg_hold(uv, 0.64));
     rgb = float3(mg_knee(rgb.r, 0.88), mg_knee(rgb.g, 0.88), mg_knee(rgb.b, 0.88));
     return mg_out(rgb, position * pixelScale);
 }

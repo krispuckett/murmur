@@ -92,25 +92,29 @@ import Testing
         MurmurFamily.orb.styles
             == [.breathe, .orbit, .glimmer, .vortex, .gather, .stir, .daybreak, .skein]
     )
+    // vortex is the only orb species whose first knob is not 0.5.
     #expect(MurmurStyle.vortex.characterDefaults == [0.6, 0.5, 0.5, 0.3])
-    #expect(MurmurStyle.glimmer.characterDefaults == [0.5, 0.5, 0.5, 0.4])
+    #expect(MurmurStyle.glimmer.characterDefaults == [0.5, 0.5, 0.5, 0.3])
     #expect(MurmurStyle.gather.hasArc)
 }
 
 @Test func everyOrbShapesTheSameLattice() {
     // The figure is always the sphere, so the family shares its last two
-    // knobs. A pack author reading c2 as anything but dot size would break
-    // the one thing every orb species has in common.
+    // knobs. A pack author reading c2 or c3 as anything else would break the
+    // one thing every orb species has in common.
     for style in MurmurFamily.orb.styles {
-        let labels = style.characterKnobs.map(\.label)
-        #expect(labels[2] == "dotSize", "\(style.rawValue) c2")
-        #expect(labels[3] == "accentShare", "\(style.rawValue) c3")
+        let knobs = style.characterKnobs
+        #expect(knobs[2].label == "dotSize", "\(style.rawValue) c2")
+        #expect(knobs[3].label == "material", "\(style.rawValue) c3")
+        // The material dial defaults the same everywhere: molten overshot,
+        // so the family sits near the pale end out of the box.
+        #expect(knobs[3].defaultValue == 0.3, "\(style.rawValue) material default")
     }
     // And no other family borrows those names.
     for style in MurmurStyle.allCases where style.family != .orb {
         let labels = style.characterKnobs.map(\.label)
         #expect(!labels.contains("dotSize"), "\(style.rawValue)")
-        #expect(!labels.contains("accentShare"), "\(style.rawValue)")
+        #expect(!labels.contains("material"), "\(style.rawValue)")
     }
 }
 

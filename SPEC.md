@@ -54,12 +54,16 @@ per-pixel generative fields. Never a clone of the pour and never a stranger.
   brightness multiplier.
 - Must read at 20 pt and at 300 pt. Test both. Small must stay legible
   (one clear gesture), large must stay interesting (structure, not blur).
-- THE FIGURE LAW (added Aug 28 from Kris's device review): every species is a
-  FIGURE against ground, never a texture filling a circle. Each style has a
-  nameable shape (a spiral, a vessel, a Y, a crescent, a stroke) whose
-  silhouette is readable at 20 pt; the material's field lives ON that figure.
-  The reference indicator parses instantly because it is an object; Murmur
-  species must pass the same test.
+- THE ORB LAW (Aug 29, supersedes the figure law's open-ended figures; Kris:
+  "avoid the categories that don't look like orb-like shapes for thinking AI
+  assistants"): every species is an ORB-LIKE PRESENCE: one compact, centered,
+  roughly spherical entity that could plausibly BE the assistant. The species
+  is the MATERIAL and PHYSICS of that presence: liquid sloshing inside it,
+  ink blooming within it, light playing on it, signal traveling through it,
+  dots composing it. No scenes, no vessels, no landscapes, no pages, no
+  horizon lines: the orb is the stage and the whole composition. Species
+  differ by what the orb is made of and how it behaves, never by scene
+  layout. The presence's spherical silhouette reads at 20 pt.
 - THE VALUE HIERARCHY (same review: "colors are too hard to read"): three
   tiers in every default render: the ink ground, an amber body, and CREAM
   PEAKS: the figure's key structure must reach the rail's pale specular (s3),
@@ -221,18 +225,22 @@ stop for depth. Per-pixel rendering: use an inverse spherical-fibonacci
 lookup (constant-time nearest-lattice-point, the Keinert et al. mapping, or
 an equivalent closed-form index estimate with a small neighbor search),
 never a per-pixel loop over all dots. Dots are soft discs, crisp at 300 pt,
-legible at 20 pt. Every species keeps c2 = dotSize and c3 = accentShare.
+legible at 20 pt. Every species keeps c2 = dotSize and c3 = material: the
+family's material dial, 0 = pale and restrained (soft cream/paper dots, a
+sparse stable scatter of tone-colored accents, quiet depth shading: the
+reference register) through 1 = molten (the warm amber lantern look with
+cream peaks). Default 0.3. Accent density and warmth both ride this dial.
 
 | case | fn | species | c0 | c1 | c2 | c3 |
 |---|---|---|---|---|---|---|
-| breathe | mo_breathe | the resting orb: the whole lattice inhaling and exhaling slowly, depth carrying the breath | breath 0.5 | depthFade 0.5 | dotSize 0.5 | accentShare 0.3 |
-| orbit | mo_orbit | latitude bands of dots streaming around the sphere at neighboring speeds | bands 0.5 | flow 0.5 | dotSize 0.5 | accentShare 0.3 |
-| glimmer | mo_glimmer | scattered dots catching light in sequence, a constellation being counted | sparkle 0.5 | spread 0.5 | dotSize 0.5 | accentShare 0.4 |
-| vortex | mo_vortex | the lattice swirling toward a pole, drawn and released | swirl 0.6 | pole 0.5 | dotSize 0.5 | accentShare 0.3 |
-| gather (arc) | mo_gather | dots converging from dispersion into one bright ring; ringed is the rest state | pull 0.5 | ring 0.5 | dotSize 0.5 | accentShare 0.3 |
-| stir | mo_stir | dots jostled from their lattice seats and settling back, the sphere thinking with its hands | jitter 0.5 | settle 0.5 | dotSize 0.5 | accentShare 0.3 |
-| daybreak | mo_daybreak | a terminator of light sweeping the sphere, dawn crossing a small planet | sweep 0.5 | softness 0.5 | dotSize 0.5 | accentShare 0.3 |
-| skein | mo_skein | dots strung along a winding thread wrapping the sphere, wound and unwound | winding 0.5 | trail 0.5 | dotSize 0.5 | accentShare 0.3 |
+| breathe | mo_breathe | the resting orb: the whole lattice inhaling and exhaling slowly, depth carrying the breath | breath 0.5 | depthFade 0.5 | dotSize 0.5 | material 0.3 |
+| orbit | mo_orbit | latitude bands of dots streaming around the sphere at neighboring speeds | bands 0.5 | flow 0.5 | dotSize 0.5 | material 0.3 |
+| glimmer | mo_glimmer | scattered dots catching light in sequence, a constellation being counted | sparkle 0.5 | spread 0.5 | dotSize 0.5 | material 0.3 |
+| vortex | mo_vortex | the lattice swirling toward a pole, drawn and released | swirl 0.6 | pole 0.5 | dotSize 0.5 | material 0.3 |
+| gather (arc) | mo_gather | dots converging from dispersion into one bright ring; ringed is the rest state | pull 0.5 | ring 0.5 | dotSize 0.5 | material 0.3 |
+| stir | mo_stir | dots jostled from their lattice seats and settling back, the sphere thinking with its hands | jitter 0.5 | settle 0.5 | dotSize 0.5 | material 0.3 |
+| daybreak | mo_daybreak | a terminator of light sweeping the sphere, dawn crossing a small planet | sweep 0.5 | softness 0.5 | dotSize 0.5 | material 0.3 |
+| skein | mo_skein | dots strung along a winding thread wrapping the sphere, wound and unwound | winding 0.5 | trail 0.5 | dotSize 0.5 | material 0.3 |
 
 ## Swift API (owner: core)
 

@@ -257,24 +257,27 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
         case .glyph:
             [k("marks", 0.5), k("formation", 0.5), k("dissolve", 0.5), k("ink", 0.5)]
         // Orb. The family shares its last two knobs: c2 is always dotSize and
-        // c3 always accentShare, because the figure is always the same
-        // lattice and only its behavior changes.
+        // c3 always material, because the figure is always the same lattice
+        // and only its behavior changes. The material dial runs 0 pale and
+        // restrained, the reference register, through 1 molten; accent
+        // density and warmth both ride it. Default 0.3 everywhere: molten
+        // overshot on device.
         case .breathe:
-            [k("breath", 0.5), k("depthFade", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("breath", 0.5), k("depthFade", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .orbit:
-            [k("bands", 0.5), k("flow", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("bands", 0.5), k("flow", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .glimmer:
-            [k("sparkle", 0.5), k("spread", 0.5), k("dotSize", 0.5), k("accentShare", 0.4)]
+            [k("sparkle", 0.5), k("spread", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .vortex:
-            [k("swirl", 0.6), k("pole", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("swirl", 0.6), k("pole", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .gather:
-            [k("pull", 0.5), k("ring", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("pull", 0.5), k("ring", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .stir:
-            [k("jitter", 0.5), k("settle", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("jitter", 0.5), k("settle", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .daybreak:
-            [k("sweep", 0.5), k("softness", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("sweep", 0.5), k("softness", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .skein:
-            [k("winding", 0.5), k("trail", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+            [k("winding", 0.5), k("trail", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         }
     }
 
