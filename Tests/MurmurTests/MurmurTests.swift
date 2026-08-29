@@ -16,7 +16,7 @@ import Testing
 // MARK: - Roster
 
 @Test func rosterIsComplete() {
-    #expect(MurmurStyle.allCases.count == 48)
+    #expect(MurmurStyle.allCases.count == 60)
     for style in MurmurStyle.allCases {
         #expect(style.characterKnobs.count == 4, "\(style.rawValue) knob count")
         #expect(!style.shaderName.isEmpty, "\(style.rawValue) shader name")
@@ -39,14 +39,18 @@ import Testing
     #expect(MurmurStyle.murmuration.shaderName == "ms_murmuration")
     #expect(MurmurStyle.breathe.shaderName == "mo_breathe")
     #expect(MurmurStyle.halo.shaderName == "mq_halo")
+    #expect(MurmurStyle.aura.shaderName == "mh_aura")
 }
 
-@Test func sixFamiliesOfEight() {
-    #expect(MurmurFamily.allCases.count == 6)
+@Test func sevenFamiliesAndTheirSizes() {
+    #expect(MurmurFamily.allCases.count == 7)
     for family in MurmurFamily.allCases {
-        #expect(family.styles.count == 8, "\(family.rawValue) style count")
+        // The hero collection is twelve; the six archive families are eight.
+        let expected = family == .glass ? 12 : 8
+        #expect(family.styles.count == expected, "\(family.rawValue) style count")
     }
-    // Every style lands in exactly one family, so the six sets partition
+    #expect(MurmurStyle.allCases.count == 60)
+    // Every style lands in exactly one family, so the seven sets partition
     // the roster rather than merely covering it.
     let grouped = MurmurFamily.allCases.flatMap(\.styles)
     #expect(Set(grouped) == Set(MurmurStyle.allCases))
@@ -54,12 +58,14 @@ import Testing
 }
 
 @Test func familiesHaveDistinctPrefixesAndPackFiles() {
-    #expect(Set(MurmurFamily.allCases.map(\.shaderPrefix)).count == 6)
-    #expect(Set(MurmurFamily.allCases.map(\.packFileName)).count == 6)
+    #expect(Set(MurmurFamily.allCases.map(\.shaderPrefix)).count == 7)
+    #expect(Set(MurmurFamily.allCases.map(\.packFileName)).count == 7)
     #expect(MurmurFamily.orb.shaderPrefix == "mo_")
     #expect(MurmurFamily.orb.packFileName == "MurmurOrb")
     #expect(MurmurFamily.presence.shaderPrefix == "mq_")
     #expect(MurmurFamily.presence.packFileName == "MurmurPresence")
+    #expect(MurmurFamily.glass.shaderPrefix == "mh_")
+    #expect(MurmurFamily.glass.packFileName == "MurmurGlass")
 }
 
 @Test func arcStylesAreFlagged() {
@@ -137,6 +143,55 @@ import Testing
     #expect(MurmurStyle.mote.characterKnobs.map(\.label) == ["wander", "lean", "size", "tail"])
     #expect(MurmurStyle.mote.characterDefaults == [0.4, 0.5, 0.4, 0.3])
     #expect(MurmurStyle.flare.characterDefaults == [0.5, 0.5, 0.5, 0.3])
+}
+
+@Test func glassHeroesCarryTheirRosterRow() {
+    #expect(
+        MurmurFamily.glass.styles == [
+            .aura, .droplet, .nebula, .prism, .limn, .duet,
+            .fathom, .arc, .opal, .comet, .still, .flux,
+        ]
+    )
+    for style in MurmurFamily.glass.styles {
+        #expect(style.family == .glass, "\(style.rawValue)")
+        #expect(style.shaderName == "mh_" + style.rawValue, "\(style.rawValue)")
+        // The heroes share one body, so none of them has an arrival of its
+        // own: the arc would be the body's, and the body is not theirs.
+        #expect(!style.hasArc, "\(style.rawValue) should not be an arc style")
+    }
+    #expect(MurmurStyle.aura.characterDefaults == [0.5, 0.5, 0.5, 0.5])
+    #expect(MurmurStyle.still.characterKnobs.map(\.label) == ["glintRate", "clarity", "presence", "spread"])
+    #expect(MurmurStyle.still.characterDefaults == [0.3, 0.6, 0.5, 0.2])
+    #expect(MurmurStyle.opal.characterDefaults == [0.5, 0.4, 0.6, 0.7])
+    #expect(MurmurStyle.prism.characterDefaults == [0.4, 0.5, 0.5, 0.6])
+}
+
+@Test func everyHeroSharesTheSpreadKnob() {
+    // One body means identity lives inside it, and chroma spread is how much
+    // of the rail's neighboring hues get to play in that volume. Every hero
+    // has the dial; only the default moves.
+    func spread(_ style: MurmurStyle) -> MurmurKnob? {
+        style.characterKnobs.first { $0.label == "spread" }
+    }
+    for style in MurmurFamily.glass.styles {
+        #expect(spread(style) != nil, "\(style.rawValue) has no spread knob")
+    }
+    // It is the last knob everywhere except aura, which spends c3 on depth3d.
+    // That asymmetry is the roster's, not a transcription slip, so it is
+    // written down here rather than smoothed over.
+    for style in MurmurFamily.glass.styles where style != .aura {
+        #expect(style.characterKnobs[3].label == "spread", "\(style.rawValue) c3")
+    }
+    #expect(MurmurStyle.aura.characterKnobs[2].label == "spread")
+    #expect(MurmurStyle.aura.characterKnobs[3].label == "depth3d")
+
+    let values = MurmurFamily.glass.styles.compactMap { spread($0)?.defaultValue }
+    #expect(values.count == 12)
+    #expect(Set(values).count > 1, "the heroes should not all sit at the same spread")
+    // still is the minimal hero and opal is the play-of-color one, so they
+    // bracket the family.
+    #expect(spread(.still)?.defaultValue == values.min())
+    #expect(spread(.opal)?.defaultValue == values.max())
 }
 
 // MARK: - Live signals

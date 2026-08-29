@@ -10,7 +10,7 @@ import Foundation
 /// liquid has weight, ink has capillary time, light passes through media,
 /// signal finds order in noise.
 public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
-    case liquid, ink, light, signal, orb, presence
+    case liquid, ink, light, signal, orb, presence, glass
 
     public var displayName: String { rawValue.capitalized }
 
@@ -25,6 +25,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .signal: "ms_"
         case .orb: "mo_"
         case .presence: "mq_"
+        case .glass: "mh_"
         }
     }
 
@@ -38,6 +39,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .signal: "MurmurSignal"
         case .orb: "MurmurOrb"
         case .presence: "MurmurPresence"
+        case .glass: "MurmurGlass"
         }
     }
 
@@ -68,6 +70,9 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case murmuration, loom, cipher, tuning, current, veil, echo, glyph
     case breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein
     case halo, nucleus, iris, filament, flare, braid, mote, ripple
+    // The hero collection. One iconic glass body; all identity lives inside it.
+    case aura, droplet, nebula, prism, limn, duet
+    case fathom, arc, opal, comet, still, flux
 
     public var id: String { rawValue }
 
@@ -87,6 +92,9 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             .orb
         case .halo, .nucleus, .iris, .filament, .flare, .braid, .mote, .ripple:
             .presence
+        case .aura, .droplet, .nebula, .prism, .limn, .duet,
+            .fathom, .arc, .opal, .comet, .still, .flux:
+            .glass
         }
     }
 
@@ -203,6 +211,30 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "the minimal presence: one soft light wandering a small path, leaning toward typing, stretching slightly with voice; designed at 18 pt first"
         case .ripple:
             "a still face-on liquid disc where input lands: each impulse of activity drops one soft propagating ring"
+        case .aura:
+            "ribbons of colored light swirling slowly inside the glass"
+        case .droplet:
+            "the body itself deforms: a zero-g liquid sphere wobbling organically, breathing with voice"
+        case .nebula:
+            "volumetric mist folding inside, stirred by thinking"
+        case .prism:
+            "light entering and softly splitting inside the sphere"
+        case .limn:
+            "near-dark glass whose edge is alive: a traveling rim of light thickening with voice"
+        case .duet:
+            "two lights orbiting each other inside: the conversation"
+        case .fathom:
+            "layered translucent depths, parallax inside the glass"
+        case .arc:
+            "one soft bright filament arcing gently within"
+        case .opal:
+            "internal play-of-color: soft opalescent flashes drifting through"
+        case .comet:
+            "a bright point orbiting inside, leaving a fading trail; parseable at 18 pt"
+        case .still:
+            "the minimal hero: a quiet glass sphere, one slow internal glint"
+        case .flux:
+            "an aurora streaming inside the glass"
         }
     }
 
@@ -318,6 +350,36 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("wander", 0.4), k("lean", 0.5), k("size", 0.4), k("tail", 0.3)]
         case .ripple:
             [k("stillness", 0.5), k("ringSpeed", 0.5), k("decay", 0.5), k("sheen", 0.5)]
+        // Glass. One shared body, so the species are all interior: what lives
+        // inside the sphere and how it moves. Every hero carries a spread
+        // knob, the chroma-spread dial that lets the rail's neighboring hues
+        // interplay inside the volume, and its default is where that species
+        // sits on the scale. It is c3 everywhere except aura, which spends
+        // its last knob on depth3d instead: per the roster table.
+        case .aura:
+            [k("ribbons", 0.5), k("swirl", 0.5), k("spread", 0.5), k("depth3d", 0.5)]
+        case .droplet:
+            [k("wobble", 0.5), k("tension", 0.5), k("sheen", 0.5), k("spread", 0.3)]
+        case .nebula:
+            [k("density", 0.5), k("fold", 0.5), k("glintRate", 0.4), k("spread", 0.4)]
+        case .prism:
+            [k("beams", 0.4), k("split", 0.5), k("drift", 0.5), k("spread", 0.6)]
+        case .limn:
+            [k("rimWidth", 0.4), k("travel", 0.5), k("innerHint", 0.3), k("spread", 0.4)]
+        case .duet:
+            [k("separation", 0.5), k("orbit", 0.5), k("sizeRatio", 0.5), k("spread", 0.6)]
+        case .fathom:
+            [k("layers", 0.5), k("parallax", 0.5), k("murk", 0.4), k("spread", 0.4)]
+        case .arc:
+            [k("arcLength", 0.5), k("sway", 0.5), k("corePin", 0.5), k("spread", 0.3)]
+        case .opal:
+            [k("flashes", 0.5), k("drift", 0.4), k("softness", 0.6), k("spread", 0.7)]
+        case .comet:
+            [k("orbitTilt", 0.5), k("trail", 0.5), k("pointSize", 0.4), k("spread", 0.3)]
+        case .still:
+            [k("glintRate", 0.3), k("clarity", 0.6), k("presence", 0.5), k("spread", 0.2)]
+        case .flux:
+            [k("stream", 0.5), k("bend", 0.5), k("height", 0.5), k("spread", 0.6)]
         }
     }
 

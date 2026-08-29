@@ -356,6 +356,53 @@ reads the .metal source from the module bundle at runtime. If bundling the
 source proves fragile, emit the package-dependency form and note it; do not
 ship a broken exporter.
 
+## THE GLASS BODY — the hero collection (owner: hero; Aug 29 quality reset)
+
+Kris's verdict on the first 48: "they just don't feel high quality yet...
+all new concepts... a library to share out." Calibration answers: the bar is
+the Siri / ChatGPT voice-orb class; nothing built so far is the base; the gap
+is the shapes. The lesson of that class: it does not differentiate by
+silhouette. The shape is ONE iconic body, a soft volumetric glass blob, and
+all identity lives inside it.
+
+The hero collection (family `glass`, file MurmurGlass.metal, prefix mh_) is
+built on ONE shared body kit, written once and carefully, used by every
+hero: an SDF sphere with organic low-order deformation, a fresnel rim,
+an internal VOLUME faked with a small fixed number of depth samples along
+the view ray (interior content is sampled in 3D, not painted on the
+surface), soft specular, refraction-style offset of interior content, and a
+soft contact glow. Premium motion: slow, liquid, interruptible easing;
+nothing linear, nothing metronomic. The body must look expensive in ANY hue
+the two-anchor rail produces: the material is hue-agnostic; several heroes
+use a chroma-spread knob to let neighboring hues interplay inside the glass
+the way the reference orbs do. The 48 prior species become the archive:
+kept, compiled, out of the default gallery.
+
+Hero roster (12 species, family `glass`; c-knobs per row; all respond to
+level/activity deeply and per-species; all implement the six states with
+the family flash = the interior igniting and settling):
+
+| case | fn | species | c0 | c1 | c2 | c3 |
+|---|---|---|---|---|---|---|
+| aura | mh_aura | ribbons of colored light swirling slowly inside the glass | ribbons 0.5 | swirl 0.5 | spread 0.5 | depth3d 0.5 |
+| droplet | mh_droplet | the body itself deforms: a zero-g liquid sphere wobbling organically, breathing with voice | wobble 0.5 | tension 0.5 | sheen 0.5 | spread 0.3 |
+| nebula | mh_nebula | volumetric mist folding inside, stirred by thinking | density 0.5 | fold 0.5 | glintRate 0.4 | spread 0.4 |
+| prism | mh_prism | light entering and softly splitting inside the sphere | beams 0.4 | split 0.5 | drift 0.5 | spread 0.6 |
+| limn | mh_limn | near-dark glass whose edge is alive: a traveling rim of light thickening with voice | rimWidth 0.4 | travel 0.5 | innerHint 0.3 | spread 0.4 |
+| duet | mh_duet | two lights orbiting each other inside: the conversation | separation 0.5 | orbit 0.5 | sizeRatio 0.5 | spread 0.6 |
+| fathom | mh_fathom | layered translucent depths, parallax inside the glass | layers 0.5 | parallax 0.5 | murk 0.4 | spread 0.4 |
+| arc | mh_arc | one soft bright filament arcing gently within | arcLength 0.5 | sway 0.5 | corePin 0.5 | spread 0.3 |
+| opal | mh_opal | internal play-of-color: soft opalescent flashes drifting through | flashes 0.5 | drift 0.4 | softness 0.6 | spread 0.7 |
+| comet | mh_comet | a bright point orbiting inside, leaving a fading trail; parseable at 18 pt | orbitTilt 0.5 | trail 0.5 | pointSize 0.4 | spread 0.3 |
+| still | mh_still | the minimal hero: a quiet glass sphere, one slow internal glint | glintRate 0.3 | clarity 0.6 | presence 0.5 | spread 0.2 |
+| flux | mh_flux | an aurora streaming inside the glass | stream 0.5 | bend 0.5 | height 0.5 | spread 0.6 |
+
+Build process for this family is DIFFERENT, per the exemplar doctrine: one
+builder, small batches (kit plus four heroes at a time), and the reviewing
+session iterates each batch against captures over multiple rounds before
+Kris sees anything. Quality gate per hero: it must be imaginable on a
+keynote slide next to the reference orbs without apology.
+
 ## Live signals (owner: core, packs; added from Kris's responsive-presence reset)
 
 The presence LISTENS. `MurmurSignals` carries two live scalars the host feeds:
