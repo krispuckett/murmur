@@ -10,7 +10,7 @@ import Foundation
 /// liquid has weight, ink has capillary time, light passes through media,
 /// signal finds order in noise.
 public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
-    case liquid, ink, light, signal
+    case liquid, ink, light, signal, orb
 
     public var displayName: String { rawValue.capitalized }
 
@@ -23,6 +23,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .ink: "mi_"
         case .light: "mg_"
         case .signal: "ms_"
+        case .orb: "mo_"
         }
     }
 
@@ -34,6 +35,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .ink: "MurmurInk"
         case .light: "MurmurLight"
         case .signal: "MurmurSignal"
+        case .orb: "MurmurOrb"
         }
     }
 
@@ -62,6 +64,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case bloom, marbling, wick, strata, halation, pool, feather, palimpsest
     case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
     case murmuration, loom, cipher, tuning, current, veil, echo, glyph
+    case breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein
 
     public var id: String { rawValue }
 
@@ -77,6 +80,8 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             .light
         case .murmuration, .loom, .cipher, .tuning, .current, .veil, .echo, .glyph:
             .signal
+        case .breathe, .orbit, .glimmer, .vortex, .gather, .stir, .daybreak, .skein:
+            .orb
         }
     }
 
@@ -87,7 +92,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     /// The rest ignore it. Settled is never frozen: a whisper of drift stays.
     public var hasArc: Bool {
         switch self {
-        case .confluence, .bloom, .strata, .oculus, .tuning, .feather: true
+        case .confluence, .bloom, .strata, .oculus, .tuning, .feather, .gather: true
         default: false
         }
     }
@@ -161,6 +166,22 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "a soft form answered by its own fading repetitions, each displaced and softer than the last, never rings"
         case .glyph:
             "almost-writing: marks forming out of ink and dissolving before they resolve into letters"
+        case .breathe:
+            "the resting orb: the whole lattice inhaling and exhaling slowly, depth carrying the breath"
+        case .orbit:
+            "latitude bands of dots streaming around the sphere at neighboring speeds"
+        case .glimmer:
+            "scattered dots catching light in sequence, a constellation being counted"
+        case .vortex:
+            "the lattice swirling toward a pole, drawn and released"
+        case .gather:
+            "dots converging from dispersion into one bright ring; ringed is the rest state"
+        case .stir:
+            "dots jostled from their lattice seats and settling back, the sphere thinking with its hands"
+        case .daybreak:
+            "a terminator of light sweeping the sphere, dawn crossing a small planet"
+        case .skein:
+            "dots strung along a winding thread wrapping the sphere, wound and unwound"
         }
     }
 
@@ -235,6 +256,25 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("repeats", 0.5), k("decay", 0.5), k("offset", 0.5), k("blur", 0.4)]
         case .glyph:
             [k("marks", 0.5), k("formation", 0.5), k("dissolve", 0.5), k("ink", 0.5)]
+        // Orb. The family shares its last two knobs: c2 is always dotSize and
+        // c3 always accentShare, because the figure is always the same
+        // lattice and only its behavior changes.
+        case .breathe:
+            [k("breath", 0.5), k("depthFade", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .orbit:
+            [k("bands", 0.5), k("flow", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .glimmer:
+            [k("sparkle", 0.5), k("spread", 0.5), k("dotSize", 0.5), k("accentShare", 0.4)]
+        case .vortex:
+            [k("swirl", 0.6), k("pole", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .gather:
+            [k("pull", 0.5), k("ring", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .stir:
+            [k("jitter", 0.5), k("settle", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .daybreak:
+            [k("sweep", 0.5), k("softness", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
+        case .skein:
+            [k("winding", 0.5), k("trail", 0.5), k("dotSize", 0.5), k("accentShare", 0.3)]
         }
     }
 

@@ -16,7 +16,7 @@ import Testing
 // MARK: - Roster
 
 @Test func rosterIsComplete() {
-    #expect(MurmurStyle.allCases.count == 32)
+    #expect(MurmurStyle.allCases.count == 40)
     for style in MurmurStyle.allCases {
         #expect(style.characterKnobs.count == 4, "\(style.rawValue) knob count")
         #expect(!style.shaderName.isEmpty, "\(style.rawValue) shader name")
@@ -37,21 +37,32 @@ import Testing
     #expect(MurmurStyle.bloom.shaderName == "mi_bloom")
     #expect(MurmurStyle.caustic.shaderName == "mg_caustic")
     #expect(MurmurStyle.murmuration.shaderName == "ms_murmuration")
+    #expect(MurmurStyle.breathe.shaderName == "mo_breathe")
 }
 
-@Test func eachFamilyHoldsEightStyles() {
+@Test func fiveFamiliesOfEight() {
+    #expect(MurmurFamily.allCases.count == 5)
     for family in MurmurFamily.allCases {
         #expect(family.styles.count == 8, "\(family.rawValue) style count")
     }
-    // Every style lands in exactly one family, so the four sets partition
+    // Every style lands in exactly one family, so the five sets partition
     // the roster rather than merely covering it.
     let grouped = MurmurFamily.allCases.flatMap(\.styles)
     #expect(Set(grouped) == Set(MurmurStyle.allCases))
     #expect(grouped.count == MurmurStyle.allCases.count)
 }
 
+@Test func familiesHaveDistinctPrefixesAndPackFiles() {
+    #expect(Set(MurmurFamily.allCases.map(\.shaderPrefix)).count == 5)
+    #expect(Set(MurmurFamily.allCases.map(\.packFileName)).count == 5)
+    #expect(MurmurFamily.orb.shaderPrefix == "mo_")
+    #expect(MurmurFamily.orb.packFileName == "MurmurOrb")
+}
+
 @Test func arcStylesAreFlagged() {
-    let expected: Set<MurmurStyle> = [.confluence, .bloom, .strata, .oculus, .tuning, .feather]
+    let expected: Set<MurmurStyle> = [
+        .confluence, .bloom, .strata, .oculus, .tuning, .feather, .gather,
+    ]
     let flagged = Set(MurmurStyle.allCases.filter(\.hasArc))
     #expect(flagged == expected)
 }
@@ -70,6 +81,37 @@ import Testing
     #expect(MurmurStyle.melt.characterKnobs.map(\.label) == ["mass", "viscosity", "dripAbsorb", "heat"])
     #expect(MurmurStyle.melt.characterDefaults == [0.5, 0.6, 0.5, 0.4])
     #expect(MurmurStyle.glyph.characterKnobs.map(\.label) == ["marks", "formation", "dissolve", "ink"])
+}
+
+@Test func orbStylesCarryTheirRosterRow() {
+    for style in MurmurFamily.orb.styles {
+        #expect(style.family == .orb, "\(style.rawValue)")
+        #expect(style.shaderName == "mo_" + style.rawValue, "\(style.rawValue)")
+    }
+    #expect(
+        MurmurFamily.orb.styles
+            == [.breathe, .orbit, .glimmer, .vortex, .gather, .stir, .daybreak, .skein]
+    )
+    #expect(MurmurStyle.vortex.characterDefaults == [0.6, 0.5, 0.5, 0.3])
+    #expect(MurmurStyle.glimmer.characterDefaults == [0.5, 0.5, 0.5, 0.4])
+    #expect(MurmurStyle.gather.hasArc)
+}
+
+@Test func everyOrbShapesTheSameLattice() {
+    // The figure is always the sphere, so the family shares its last two
+    // knobs. A pack author reading c2 as anything but dot size would break
+    // the one thing every orb species has in common.
+    for style in MurmurFamily.orb.styles {
+        let labels = style.characterKnobs.map(\.label)
+        #expect(labels[2] == "dotSize", "\(style.rawValue) c2")
+        #expect(labels[3] == "accentShare", "\(style.rawValue) c3")
+    }
+    // And no other family borrows those names.
+    for style in MurmurStyle.allCases where style.family != .orb {
+        let labels = style.characterKnobs.map(\.label)
+        #expect(!labels.contains("dotSize"), "\(style.rawValue)")
+        #expect(!labels.contains("accentShare"), "\(style.rawValue)")
+    }
 }
 
 // MARK: - States and treatments

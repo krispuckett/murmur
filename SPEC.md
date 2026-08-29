@@ -1,7 +1,7 @@
 # Murmur — build contract
 
 Murmur is a Swift package of parametric thinking indicators for AI products:
-32 Metal shader "species", one uniform API, five AI states (idle, thinking,
+40 Metal shader "species" in five families, one uniform API, five AI states (idle, thinking,
 responding, success, error) with per-state animation treatments, a lab app for
 designing a configuration by hand, and a one-tap export that hands the exact
 configuration to a coding agent for implementation. This document is the contract every
@@ -34,10 +34,14 @@ per-pixel generative fields. Never a clone of the pour and never a stranger.
 ## Hard taste rules (violations get killed on review)
 
 - Per-pixel generative fields only. Never displace or tint a gradient.
-- No dots, orbs, particles, or 3D dot spheres. The inspiration piece
-  (a fibonacci dot sphere) is exactly what Murmur must NOT resemble.
+- No dots, orbs, particles, or 3D dot spheres in the FIELD families.
   A DENSITY field of a mass (e.g. a flock as soft masses) is fine; discrete
-  circles are not.
+  circles are not. CARVE-OUT (Kris, Aug 28): the `orb` family is the one
+  sanctioned home of the dot-sphere genre, added deliberately because it is
+  the canonical AI orb: there, the sphere of dots IS the figure, and it must
+  wear the full Murmur material (the rail, cream peaks, calm+playful motion,
+  states), never the flat white-dot look of the reference grid. Everywhere
+  else the ban stands.
 - The family verbs are FLOW and SETTLE. Breathing/pulsing luminance is not a
   default motif; a pulse is allowed only where the concept literally is a
   rhythm, and never as the whole idea.
@@ -78,6 +82,7 @@ murmur/
       MurmurInk.metal               owner: pack-ink      prefix mi_
       MurmurLight.metal             owner: pack-light    prefix mg_
       MurmurSignal.metal            owner: pack-signal   prefix ms_
+      MurmurOrb.metal               owner: pack-orb      prefix mo_
   Tests/MurmurTests/
     MurmurTests.swift               owner: core
   Lab/
@@ -207,11 +212,33 @@ not.
 | echo | ms_echo | a soft form answered by its own fading repetitions, each displaced and softer than the last, never rings | repeats 0.5 | decay 0.5 | offset 0.5 | blur 0.4 |
 | glyph | ms_glyph | almost-writing: marks forming out of ink and dissolving before they resolve into letters | marks 0.5 | formation 0.5 | dissolve 0.5 | ink 0.5 |
 
+### MurmurOrb.metal (mo_) — the canonical dot-sphere, reborn in the Murmur material
+
+The figure is always the sphere of dots: a fibonacci lattice on a rotating
+3D sphere, front hemisphere bright (amber bodies, cream peaks, a few dots at
+the tone's saturated stop as accents), back hemisphere dim toward the shadow
+stop for depth. Per-pixel rendering: use an inverse spherical-fibonacci
+lookup (constant-time nearest-lattice-point, the Keinert et al. mapping, or
+an equivalent closed-form index estimate with a small neighbor search),
+never a per-pixel loop over all dots. Dots are soft discs, crisp at 300 pt,
+legible at 20 pt. Every species keeps c2 = dotSize and c3 = accentShare.
+
+| case | fn | species | c0 | c1 | c2 | c3 |
+|---|---|---|---|---|---|---|
+| breathe | mo_breathe | the resting orb: the whole lattice inhaling and exhaling slowly, depth carrying the breath | breath 0.5 | depthFade 0.5 | dotSize 0.5 | accentShare 0.3 |
+| orbit | mo_orbit | latitude bands of dots streaming around the sphere at neighboring speeds | bands 0.5 | flow 0.5 | dotSize 0.5 | accentShare 0.3 |
+| glimmer | mo_glimmer | scattered dots catching light in sequence, a constellation being counted | sparkle 0.5 | spread 0.5 | dotSize 0.5 | accentShare 0.4 |
+| vortex | mo_vortex | the lattice swirling toward a pole, drawn and released | swirl 0.6 | pole 0.5 | dotSize 0.5 | accentShare 0.3 |
+| gather (arc) | mo_gather | dots converging from dispersion into one bright ring; ringed is the rest state | pull 0.5 | ring 0.5 | dotSize 0.5 | accentShare 0.3 |
+| stir | mo_stir | dots jostled from their lattice seats and settling back, the sphere thinking with its hands | jitter 0.5 | settle 0.5 | dotSize 0.5 | accentShare 0.3 |
+| daybreak | mo_daybreak | a terminator of light sweeping the sphere, dawn crossing a small planet | sweep 0.5 | softness 0.5 | dotSize 0.5 | accentShare 0.3 |
+| skein | mo_skein | dots strung along a winding thread wrapping the sphere, wound and unwound | winding 0.5 | trail 0.5 | dotSize 0.5 | accentShare 0.3 |
+
 ## Swift API (owner: core)
 
 ```swift
 public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
-    case liquid, ink, light, signal
+    case liquid, ink, light, signal, orb
 }
 
 public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
@@ -219,6 +246,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case bloom, marbling, wick, strata, halation, pool, feather, palimpsest
     case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
     case murmuration, loom, cipher, tuning, current, veil, echo, glyph
+    case breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein  // orb
     // id, family, displayName, shaderName ("ml_eddy" etc.),
     // characterKnobs: [MurmurKnob] (label + default from the roster tables),
     // hasArc: Bool (the (arc) styles)
