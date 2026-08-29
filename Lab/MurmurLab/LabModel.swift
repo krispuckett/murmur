@@ -25,6 +25,72 @@ final class LabModel {
         config.ink = LabTheme.stageInk
     }
 
+    // MARK: - Live signals
+
+    /// Voice energy and typing cadence, as the host would feed them. These are
+    /// not part of the saved design, so they live here rather than in the
+    /// configuration.
+    var level: Double = 0
+    var activity: Double = 0
+
+    /// Non-nil while the canned phrase is playing, and it wins over the dial.
+    private(set) var demoLevel: Double?
+    private var demoTask: Task<Void, Never>?
+
+    /// What every preview renders from.
+    var signals: MurmurSignals {
+        MurmurSignals(level: demoLevel ?? level, activity: activity)
+    }
+
+    var isPlayingVoiceDemo: Bool { demoLevel != nil }
+
+    /// Roughly one spoken sentence.
+    static let voiceDemoDuration: Double = 6
+
+    /// Auditioning a species as a voice presence without a microphone. The
+    /// envelope is driven from a ticker rather than a TimelineView because the
+    /// signals have to reach views that are already running their own
+    /// timelines; only the value changing pulls them forward.
+    func playVoiceDemo() {
+        demoTask?.cancel()
+        demoTask = Task { @MainActor [weak self] in
+            let start = Date.now
+            while !Task.isCancelled {
+                let elapsed = Date.now.timeIntervalSince(start)
+                guard elapsed < Self.voiceDemoDuration else { break }
+                self?.demoLevel = Self.voiceEnvelope(at: elapsed)
+                try? await Task.sleep(for: .milliseconds(33))
+            }
+            // Back to whatever the dial says.
+            self?.demoLevel = nil
+        }
+    }
+
+    /// A spoken phrase: fast attack, a sustained body that undulates at
+    /// roughly syllable rate, two breath gaps where a speaker would pause, and
+    /// a soft release. Shaped rather than random so it reads as speech instead
+    /// of noise.
+    static func voiceEnvelope(at t: Double) -> Double {
+        let duration = voiceDemoDuration
+        guard t > 0, t < duration else { return 0 }
+
+        let attack = min(t / 0.22, 1)
+        let release = min(max((duration - t) / 0.9, 0), 1)
+        let syllables = 0.5 + 0.5 * sin(2 * .pi * 3.6 * t - .pi / 2)
+        let inflection = 0.72 + 0.28 * sin(2 * .pi * 0.42 * t)
+        let breath = (1 - 0.75 * bump(t, center: 2.05, width: 0.30))
+            * (1 - 0.85 * bump(t, center: 4.25, width: 0.38))
+
+        let value = attack * release * inflection * breath
+            * (0.45 + 0.55 * pow(syllables, 1.6))
+        return min(max(value, 0), 1)
+    }
+
+    private static func bump(_ t: Double, center: Double, width: Double) -> Double {
+        let u = (t - center) / width
+        return exp(-u * u)
+    }
+
     /// Bumped to replay an entry envelope on the pinned preview. MurmurView
     /// runs an entry when the state changes or when it appears, so editing the
     /// entry on its own would show nothing until the next state change. Used

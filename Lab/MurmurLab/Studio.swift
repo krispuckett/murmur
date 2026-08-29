@@ -71,7 +71,7 @@ private struct StudioPreview: View {
             // the preview appear again, and appearing is an arrival, so the
             // new envelope runs immediately instead of waiting for the next
             // state change.
-            MurmurView(model.previewConfig, state: model.state)
+            MurmurView(model.previewConfig, state: model.state, signals: model.signals)
                 .id(model.demoTick)
                 .frame(width: 160, height: 160)
                 .frame(maxWidth: .infinity)
@@ -100,7 +100,7 @@ private struct StudioPreview: View {
 
     private func sizeChip(_ size: CGFloat) -> some View {
         VStack(spacing: 7) {
-            MurmurView(model.previewConfig, state: model.state)
+            MurmurView(model.previewConfig, state: model.state, signals: model.signals)
                 .id(model.demoTick)
                 .frame(width: size, height: size)
             Text("\(Int(size))")
@@ -123,7 +123,7 @@ private struct StudioPreview: View {
 
 // MARK: - State
 
-/// Five live indicators, each running its own state. A word for a state is a
+/// One live indicator per state, each running its own. A word for a state is a
 /// label; the state actually running is the thing itself, so idle reads slow
 /// and dim beside responding without anyone having to read either one.
 /// Selecting sets the state plainly: MurmurView runs its own glide, and
@@ -132,10 +132,11 @@ private struct StateSelector: View {
     @Environment(LabModel.self) private var model
 
     var body: some View {
-        // Small spacing: these should read as five separate pieces of glass,
-        // not flow into one bar the way a segmented control does.
+        // Small container spacing: these should read as separate pieces of
+        // glass, not flow into one bar the way a segmented control does. The
+        // row spacing is tight because six of these share one screen width.
         GlassEffectContainer(spacing: 2) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(MurmurState.allCases, id: \.self) { state in
                     StateMini(state: state, isSelected: model.state == state) {
                         model.state = state
@@ -156,23 +157,23 @@ private struct StateMini: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                // Only the selected one wears glass. Giving all five a glass
-                // ring and marking the selection with a brighter stroke on top
-                // was unreadable at a glance: the ring was already bright, so
-                // the stroke had nothing to stand out against.
+                // Only the selected one wears glass. Giving every mini a
+                // glass ring and marking the selection with a brighter stroke
+                // on top was unreadable at a glance: the ring was already
+                // bright, so the stroke had nothing to stand out against.
                 Group {
                     if isSelected {
-                        MurmurView(model.config, state: state, fps: 24)
+                        MurmurView(model.config, state: state, signals: model.signals, fps: 24)
                             .frame(width: 44, height: 44)
-                            .padding(5)
+                            .padding(4)
                             .glassEffect(.regular.interactive(), in: .circle)
                             .overlay {
                                 Circle().strokeBorder(LabTheme.selectedEdge, lineWidth: 2)
                             }
                     } else {
-                        MurmurView(model.config, state: state, fps: 24)
+                        MurmurView(model.config, state: state, signals: model.signals, fps: 24)
                             .frame(width: 44, height: 44)
-                            .padding(5)
+                            .padding(4)
                             .overlay {
                                 Circle().strokeBorder(.white.opacity(0.10), lineWidth: 1)
                             }
@@ -189,6 +190,41 @@ private struct StateMini: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Auditions the species as a voice presence: one canned spoken phrase pushed
+/// through `level`, then back to whatever the dial says. The readout shows the
+/// live value while it plays, so the number and the material move together.
+private struct VoiceDemoRow: View {
+    @Environment(LabModel.self) private var model
+
+    var body: some View {
+        Button {
+            model.playVoiceDemo()
+        } label: {
+            HStack(spacing: 12) {
+                Text("voice demo")
+                    .font(LabTheme.mono(13))
+                    .foregroundStyle(LabTheme.label)
+
+                Spacer(minLength: 8)
+
+                Text(model.isPlayingVoiceDemo
+                     ? String(format: "%.2f", model.signals.level)
+                     : "Play")
+                    .font(LabTheme.mono(13, .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(model.isPlayingVoiceDemo
+                                     ? LabTheme.valueLive
+                                     : LabTheme.valueIdle)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .contentShape(.rect(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
     }
 }
 
@@ -234,6 +270,18 @@ private struct StudioPanel: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
+                // First in the panel so it sits directly under the state row
+                // and stays on screen with the pinned preview. Signals are not
+                // part of the saved design, which is why this section carries
+                // no state name the way Motion and Character do.
+                section("Signals") {
+                    DialRow(label: "level", value: $model.level,
+                            range: 0...1, defaultValue: 0)
+                    DialRow(label: "activity", value: $model.activity,
+                            range: 0...1, defaultValue: 0)
+                    VoiceDemoRow()
+                }
+
                 // The state's name rides its section headings. Colors and the
                 // pill below say nothing, which is how you can tell they are
                 // shared rather than per state.
@@ -287,6 +335,11 @@ private struct StudioPanel: View {
                     pillStage(scheme: .dark, ground: LabTheme.inkStage)
                     pillStage(scheme: .light, ground: LabTheme.paperStage)
                 }
+
+                section("Field, 18 pt") {
+                    fieldMount(scheme: .dark, ground: LabTheme.inkStage)
+                    fieldMount(scheme: .light, ground: LabTheme.paperStage)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -331,7 +384,7 @@ private struct StudioPanel: View {
 
     private func pillStage(scheme: ColorScheme, ground: Color) -> some View {
         HStack {
-            MurmurPill(model.config, state: model.state, label: displayLabel)
+            MurmurPill(model.config, state: model.state, signals: model.signals, label: displayLabel)
             Spacer(minLength: 0)
         }
         .environment(\.colorScheme, scheme)
@@ -346,6 +399,40 @@ private struct StudioPanel: View {
     /// and the dial rows carry a 2pt value track that does not survive that.
     /// The containers in this app are on the chip clusters, which have no
     /// fine detail to lose.
+    /// The third context, after the bare indicator and the chat pill: a
+    /// species living in the trailing edge of a text input at 18 pt. This is
+    /// the smallest place one of these ever has to work, so the mount exists
+    /// to answer one question at a glance: does it still read there.
+    private func fieldMount(scheme: ColorScheme, ground: Color) -> some View {
+        HStack(spacing: 12) {
+            Text("Ask anything")
+                .font(LabTheme.mono(13))
+                .foregroundStyle(scheme == .light ? .black.opacity(0.4) : .white.opacity(0.4))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            MurmurView(groundedConfig(for: scheme), state: model.state, signals: model.signals)
+                .frame(width: 18, height: 18)
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .glassEffect(.regular, in: .capsule)
+        .environment(\.colorScheme, scheme)
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(ground)
+        .clipShape(.rect(cornerRadius: 20, style: .continuous))
+    }
+
+    /// The same swap MurmurPill makes: in a light context the field dissolves
+    /// into paper rather than sitting on it as a dark disc.
+    private func groundedConfig(for scheme: ColorScheme) -> MurmurConfiguration {
+        var copy = model.config
+        if scheme == .light { copy.ink = .paper }
+        return copy
+    }
+
     private func section<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
