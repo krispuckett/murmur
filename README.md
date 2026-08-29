@@ -1,10 +1,12 @@
 # Murmur
 
-Responsive AI presences, built as living material. Murmur is a Swift package
-with 48 Metal shader species in six families behind one SwiftUI view, six AI
-states with designed transitions, live signals so the presence responds to
-voice and typing, a lab app for tuning a configuration by hand, and an
-export that writes the implementation prompt for a coding agent.
+Responsive AI presences, built as living glass. Murmur's face is the Glass
+Twelve: one volumetric glass body, twelve interior lives, in the register of
+the great voice orbs. Behind them sits an archive of 48 field species. One
+SwiftUI view runs all of it, with six AI states, live signals so the
+presence responds to voice and typing, a designed light mode, a lab app for
+tuning a configuration by hand, and an export that writes the
+implementation prompt for a coding agent.
 
 Every style is generated per pixel in a fragment shader. There are no videos,
 no particle systems, no sprite sheets, and nothing that pulses for attention.
@@ -92,22 +94,20 @@ jumps straight to any studio, which is how agents drive it for screenshots.
 
 ## The roster
 
-Six families, eight species each. Names are `MurmurStyle` cases.
+The collection is the `glass` family: aura, droplet, nebula, prism, limn,
+duet, fathom, arc, opal, comet, still, flux. One shared body (a deforming
+glass sphere with a ray-sampled interior volume, fresnel rim, and light
+that scatters into the glass) and twelve interiors: ribbons, a breathing
+liquid body, folding mist, split light, a living rim, two orbiting lights,
+nested depths, a single filament, opalescent flashes, an orbiting point,
+one slow glint, and an aurora. Designed for the three mounts: an 18 pt
+companion at the edge of a text field, a 46 pt chat chip, and a 120 pt+
+voice stage. On light grounds the body renders as bright glass with a
+contact shadow, automatically.
 
-| Family | Species |
-|---|---|
-| liquid | eddy, well, tide, undertow, meander, confluence, melt, glaze |
-| ink | bloom, marbling, wick, strata, halation, pool, feather, palimpsest |
-| light | caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse |
-| signal | murmuration, loom, cipher, tuning, current, veil, echo, glyph |
-| orb | breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein |
-| presence | halo, nucleus, iris, filament, flare, braid, mote, ripple |
-
-The presence family is the reactive-first cast, designed for the three
-mounts: an 18 pt companion at the edge of a text field, a 46 pt chat chip,
-and a 120 pt+ voice stage. Halo's ring carries your voice around its
-circumference; iris opens as you speak; mote leans into your typing; ripple
-lets every keystroke land as a ring.
+The archive holds the six earlier families (liquid, ink, light, signal,
+orb, presence: 48 field species) behind `MurmurFamily` as before; nothing
+is removed, and every archive species runs the same states and signals.
 
 Every species is an orb: one compact presence that could be the assistant
 itself, and the species is what that orb is made of and how it behaves.

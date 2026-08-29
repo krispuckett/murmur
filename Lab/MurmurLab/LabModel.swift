@@ -168,9 +168,13 @@ final class LabModel {
 }
 
 enum LabTheme {
-    /// The room. Warm rather than the cool near-black the package ships as a
-    /// neutral default, so the dark ground reads as the amber material's own
-    /// room instead of a void behind it.
+    /// The room. Warmer than the cool near-black the package ships as a
+    /// neutral default, so the dark ground reads as the material's own room
+    /// instead of a void behind it.
+    ///
+    /// These numbers were tuned by eye against the amber material, back when
+    /// amber was the default. The default is violet now and this has not been
+    /// re-tuned; that is a call for Kris's eye, not mine.
     static let stageInk = MurmurRGBA(r: 0.070, g: 0.058, b: 0.048)
     static let stage = stageInk.color
 
@@ -200,12 +204,15 @@ enum LabTheme {
     static let selectedEdge = Color.white.opacity(0.85)
 
     /// One hue family per configuration, so the curated row is six anchors,
-    /// not a palette. Amber first: it is the default the package ships.
+    /// not a palette. The package default leads and amber follows it, both
+    /// taken from the package presets so this row cannot drift from them.
+    /// The hand-rolled violet that used to sit fourth is gone: it was within a
+    /// few percent of the new default and read as the same swatch twice.
     static let tones: [MurmurRGBA] = [
-        MurmurRGBA(r: 0.878, g: 0.545, b: 0.235),  // amber  #E08B3C
+        .tone,                                     // violet #6C63E8, the default
+        .amber,                                    // amber  #E08B3C
         MurmurRGBA(r: 0.561, g: 0.435, b: 0.239),  // honey  #8F6F3D
         MurmurRGBA(r: 0.180, g: 0.490, b: 0.455),  // teal   #2E7D74
-        MurmurRGBA(r: 0.435, g: 0.357, b: 0.816),  // violet #6F5BD0
         MurmurRGBA(r: 0.831, g: 0.396, b: 0.478),  // rose   #D4657A
         MurmurRGBA(r: 0.725, g: 0.753, b: 0.800),  // silver #B9C0CC
     ]

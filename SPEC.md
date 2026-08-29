@@ -1,7 +1,7 @@
 # Murmur — build contract
 
 Murmur is a Swift package of parametric thinking indicators for AI products:
-48 Metal shader "species" in six families, one uniform API, six AI states (idle, listening, thinking,
+a hero collection of 12 glass presences over an archive of 48 field species (seven families, 60 styles), one uniform API, six AI states (idle, listening, thinking,
 responding, success, error) with per-state animation treatments, a lab app for
 designing a configuration by hand, and a one-tap export that hands the exact
 configuration to a coding agent for implementation. This document is the contract every

@@ -26,6 +26,14 @@
 //               anchor and one cool, passing in front of and behind each other.
 //   mh_still    the discipline piece: a nearly clear sphere whose rim and
 //               catchlight are the figure, crossed by one slow glint.
+//   mh_fathom   nested translucent shells, solved rather than marched, each
+//               folded and turning at its own rate: depth you can count.
+//   mh_arc      one soft bright filament arcing through the volume, anchored
+//               near the core and never touching the shell.
+//   mh_opal     play-of-colour: four soft flashes born and absorbed slowly, at
+//               four points across the widest spread in the collection.
+//   mh_flux     an aurora streaming inside the glass: curtains standing on a
+//               bright foot, bending as they go.
 //
 // WHAT THE BODY KIT IS, and why each part of it is there. Seven things separate a
 // glass presence from a painted disc, and a species that skips any one of them
@@ -142,6 +150,21 @@
 // is deterministic, because a gesture that depends on when the app happened to
 // start is a gesture the screenshot rig cannot reproduce.
 //
+// TWO GROUNDS, ONE FAMILY. The shader is handed the ground it will sit on, and
+// on a light one nearly every rule above turns over. There is nowhere brighter
+// than paper for energy to go, so the rail descends instead of climbing: content
+// becomes CHROMA AND SHADOW rather than light, which is what a tinted
+// transparent object actually does to what is behind it. The body goes pale
+// -- clear glass on a page is almost nothing plus an edge -- the rim becomes the
+// fine dark refracted edge rather than a glow, the contact bloom becomes a
+// contact shadow pooled beneath, and the specular leaves the energy sum
+// altogether to be composited as the one thing in the frame brighter than the
+// page. mh_paper reads the ground's OKLAB lightness and everything downstream
+// MIXES on it rather than branching, so a mid grey lands somewhere both rails
+// agree on and a designer dragging the ink from ink to paper never sees a jump.
+// At paper = 0 every one of those terms is algebraically the identity, which is
+// how the twelve heroes reviewed on ink are unchanged to the bit.
+//
 // EPOCH IS IGNORED. None of the twelve is an arc species: a glass presence is
 // always on, it does not arrive and settle. Every hero is complete, alive and
 // worth a screenshot at level = 0, activity = 0 and state = idle, because that
@@ -255,9 +278,28 @@ static inline float3 mh_lch(float L, float C, float h) {
     return float3(L, C * cos(h), C * sin(h));
 }
 
+/// HOW LIGHT THE GROUND IS, in OKLAB lightness rather than an RGB average,
+/// because a saturated mid-blue paper and a light grey with the same channel
+/// mean are nowhere near the same brightness to the eye and this decision is
+/// entirely about what the eye does.
+///
+/// Returns 0 for the house ink (L about 0.16), 1 for paper (L about 0.97), and
+/// a continuous blend between. The band is placed so a true mid grey -- sRGB
+/// 0.5, whose OKLAB L is 0.60, not 0.5 -- lands at about four tenths of the way
+/// across, which is the honest answer for a ground that is genuinely ambiguous.
+/// Nothing in this file ever branches on it; every use is a mix, so a designer
+/// dragging the ink colour from ink to paper sees the body change continuously
+/// with no frame where it jumps.
+static inline float mh_paper(half4 inkColor) {
+    float L = mh_linear_to_oklab(mh_srgb_to_linear(float3(inkColor.rgb))).x;
+    return smoothstep(0.50, 0.72, L);
+}
+
 /// Four OKLAB stops built from one anchor: the tone the indicator wears.
-/// Ordered dark to bright, and never more than one hue family wide.
-struct MHPalette { float3 s0, s1, s2, s3; };
+/// Ordered dark to bright on an ink ground, PALE TO DEEP on a paper one, and
+/// mixed between the two by how light the ground is. Never more than one hue
+/// family wide either way.
+struct MHPalette { float3 s0, s1, s2, s3; float paper; };
 
 /// s0 is the ink the whole app sits on, so a field at zero dissolves into the
 /// screen with no seam. s1 is a deep shadow that KEEPS the tone's hue at half
@@ -280,10 +322,57 @@ static MHPalette mh_palette(half4 inkColor, half4 toneColor, float hueShift, flo
     // desaturating fall from gold to ink passes through olive, and olive is what
     // the first cut of every one of these fields looked like.
     MHPalette p;
-    p.s0 = ink;
-    p.s1 = mh_lch(mix(ink.x, L, 0.30 / d), C * (0.52 + 0.10 * d), h - 0.35);
-    p.s2 = mh_lch(L, C, h);
-    p.s3 = mh_lch(min(L * (1.20 + 0.12 * d), 0.93), C * 0.55, h + 0.10);
+    p.paper = mh_paper(inkColor);
+
+    // THE INK RAIL. Dark to bright: energy becomes light.
+    float3 d0 = ink;
+    float3 d1 = mh_lch(mix(ink.x, L, 0.30 / d), C * (0.52 + 0.10 * d), h - 0.35);
+    float3 d2 = mh_lch(L, C, h);
+    float3 d3 = mh_lch(min(L * (1.20 + 0.12 * d), 0.93), C * 0.55, h + 0.10);
+
+    // THE PAPER RAIL, and it runs the other way, because on a light ground
+    // energy cannot become light -- there is nowhere brighter than the paper to
+    // go. Kris's note was that the defaults are hard on light mode, and this is
+    // the whole of why: the ink rail's top stop is a pale cream at L 0.93, which
+    // against paper at L 0.97 is invisible. A cream rim on white is not a dim
+    // rim, it is no rim.
+    //
+    // So on paper the rail descends and DEEPENS. Energy becomes chroma and
+    // shadow, which is what a tinted transparent object actually does to the
+    // light behind it: more material, more colour, less transmitted light.
+    //
+    //   l0  the paper itself, so a field at zero dissolves into the page with no
+    //       seam -- the same law s0 obeys, said on the other side.
+    //   l1  THE GLASS. Barely off the paper and barely tinted, because that is
+    //       what a clear sphere on white looks like: almost nothing, plus an
+    //       edge. This stop is most of the body and it is meant to be.
+    //   l2  the tone, dropped in lightness and pushed a fifth up in chroma. This
+    //       is where interior CONTENT lands, and the chroma is what carries the
+    //       read now that lightness cannot.
+    //   l3  the deepest, for the rim's refracted edge and the hottest spines:
+    //       darker still and shifted a little toward ember, because looking
+    //       through more of a warm glass is what makes it go red rather than
+    //       what makes it go pale.
+    //
+    // Chroma above the sRGB gamut clips in mh_out. The multipliers are kept near
+    // 1.2 for that reason: the house amber sits around 0.11 OKLAB chroma, so a
+    // fifth over is still inside the gamut and no hue twists on the way out.
+    float Lp = ink.x;
+    float3 l0 = ink;
+    float3 l1 = mh_lch(mix(Lp, L, 0.42 / d), C * (0.34 + 0.10 * d), h + 0.05);
+    float3 l2 = mh_lch(L * (0.82 - 0.06 * d), C * (1.20 + 0.14 * d), h);
+    float3 l3 = mh_lch(max(L * (0.52 - 0.05 * d), 0.18), C * (1.05 + 0.10 * d), h - 0.08);
+
+    // MIXING THE STOPS RATHER THAN THE COLOURS, and it is exact rather than an
+    // approximation: mh_shade's walk is linear in the stops for any fixed t, so
+    // blending the stops first and walking once gives the identical answer to
+    // walking both rails and blending the results -- at half the cost, and with
+    // the guarantee that a mid-grey ground can never land somewhere neither rail
+    // would have gone.
+    p.s0 = mix(d0, l0, p.paper);
+    p.s1 = mix(d1, l1, p.paper);
+    p.s2 = mix(d2, l2, p.paper);
+    p.s3 = mix(d3, l3, p.paper);
     return p;
 }
 
@@ -389,7 +478,12 @@ static inline float3 mh_lit(MHPalette pal, float e, float glow,
     // Emission is gated to the specular, not to the tone: the rail reaches the
     // top routinely, and emission from the whole amber body would put the ground
     // back up and flatten the very hierarchy mh_tier just built.
-    return col * (1.0 + emis * G * smoothstep(0.72, 1.0, tRail));
+    //
+    // And it is switched off as the ground goes light, because on paper the top
+    // of the rail is the DEEPEST colour rather than the brightest: multiplying
+    // it up would walk the darkest part of the picture back toward the page and
+    // undo the one mechanism the light rail has.
+    return col * (1.0 + emis * G * (1.0 - pal.paper) * smoothstep(0.72, 1.0, tRail));
 }
 
 /// THE ANTI-ALIAS GATE. Where a species puts full amplitude on a CHOSEN
@@ -1002,8 +1096,15 @@ static inline float3 mh_key(float t) {
 /// THE CONTACT GLOW pools beneath. It is capped low -- a tenth of the body's
 /// energy -- because the brief for it is "barely there": its job is to stop the
 /// silhouette meeting the ink as a cut line, not to be a halo anybody notices.
-static MHSurface mh_surface(MHBody b, float t, float small, float rimK, float specK, float glowK) {
+static MHSurface mh_surface(MHBody b, float t, float small, half4 inkColor,
+                            float rimK, float specK, float glowK) {
     MHSurface o;
+    float paper = mh_paper(inkColor);
+    // The edge does more work on paper than it ever does on ink: it is the whole
+    // silhouette of an object that is otherwise nearly the colour of the page,
+    // and at small mounts it is very close to the only thing there is. A third
+    // more of it, and no other term changes.
+    rimK *= mix(1.0, 1.32, paper);
 
     float3 H = normalize(mh_key(t) + float3(0.0, 0.0, 1.0));
     float nh = clamp(dot(b.N, H), 0.0, 1.0);
@@ -1024,14 +1125,26 @@ static MHSurface mh_surface(MHBody b, float t, float small, float rimK, float sp
     float tight = mix(96.0, 16.0, small);
     o.spec = (pow(nh, tight) + 0.09 * pow(nh, 4.0)) * b.m * specK;
 
+    // The wrap is a LIGHTING cue -- brighter on the side away from the key --
+    // and on paper the rim is not lighting at all: it is the refracted edge of a
+    // clear sphere, which is a property of the geometry and goes all the way
+    // round. So the asymmetry flattens as the ground goes light. Left in, the
+    // dark edge faded out along its top and the sphere read as a crescent with a
+    // shadow rather than as a closed object on a page.
     float wrap = 0.55 + 0.45 * clamp(dot(normalize(b.N.xy + float2(1e-4)),
                                          normalize(float2(0.42, 0.50))), 0.0, 1.0);
-    // Exponent 4.6, and it was fitted against a capture rather than chosen: at 3
+    wrap = mix(wrap, 0.88, paper);
+    // Exponent 3.9, and it was fitted against a capture rather than chosen: at 3
     // the rim is a broad wash that reads as the body being lit from behind, and
-    // the shell's boundary disappears into it. At 4.6 the light lives in the
+    // the shell's boundary disappears into it. At 3.9 the light lives in the
     // outer eighth and the eye gets a CRISP EDGE with soft content behind it,
     // which is the single strongest cue that there is a shell at all.
-    o.rim = pow(b.fres, 3.9) * b.m * wrap * rimK;
+    //
+    // It tightens to 5.4 on paper, where the rim is no longer a glow but the
+    // dark refracted edge of a clear sphere -- and a dark edge has to be FINE to
+    // read as an edge rather than as a dirty ring. Same term, opposite polarity,
+    // because the rail underneath it has turned over.
+    o.rim = pow(b.fres, mix(3.9, 5.4, paper)) * b.m * wrap * rimK;
 
     // Outside only: (1 - m) is zero under the silhouette and rises through it.
     // 0.13 body units of width, down from 0.20: at 0.20 the bloom was wide
@@ -1044,22 +1157,85 @@ static MHSurface mh_surface(MHBody b, float t, float small, float rimK, float sp
     return o;
 }
 
-/// THE FINISH. Ink underneath, the body composited into it by the containment,
-/// the same knee the route curtain puts on its surface colour, and the dither
-/// last. Every hero ends on this line, which is most of why they read as one
-/// material with four things happening inside it.
+/// THE FINISH, and the one place the two grounds are told apart.
+///
+/// Ink underneath, the body composited into it by the containment, a knee, and
+/// the dither last. Every hero ends on this line, which is most of why they read
+/// as one material with twelve things happening inside it.
+///
+/// THE ARGUMENTS SPLIT because the light ground needs them to. On ink, the
+/// interior, the rim, the specular and the contact bloom are all light and all
+/// belong in one energy: sum them, walk the rail, done -- which is exactly what
+/// happens below when `paper` is zero, bit for bit as the first eight heroes
+/// were reviewed. On paper two of the four stop being light:
+///
+///   THE SPECULAR IS THE ONLY THING BRIGHTER THAN THE PAGE. Everything else in
+///   the picture is the page minus something. So it leaves the energy sum -- if
+///   it stayed, the descending rail would render the brightest thing in the
+///   frame as the darkest -- and comes back as a small mix toward a warm white
+///   pushed a little past 1, so it clips crisply against the pale body it sits
+///   on. That body being pale is what makes it visible; a catchlight needs a
+///   surround, not a brightness.
+///
+///   THE CONTACT BLOOM BECOMES A CONTACT SHADOW. Light spilling into ink is a
+///   glow; the same term on paper is what an object occludes, so it turns into a
+///   soft neutral darkening of the page and is weighted further downward, the
+///   way a shadow pools under a thing rather than around it. `below` is read
+///   from uv rather than from the body, because a shadow belongs to the ground
+///   and not to the sphere.
+///
+/// THE KNEE MOVES with the ground too. At 0.90 it exists to stop a bright field
+/// becoming flat white paper -- but when the ground already IS paper, sitting at
+/// about 0.91 in linear light, that same knee spends all its headroom on the
+/// page and leaves the catchlight nowhere to go. At 0.96 the page passes through
+/// almost untouched and the highlight still compresses rather than clipping
+/// hard.
 ///
 /// `hue` is the spread offset the hero accumulated, already weighted by which
 /// part of the picture is carrying colour: a pixel that is mostly specular gets
 /// almost none of it, because a highlight is the colour of the light rather than
 /// the colour of the thing it landed on.
-static inline half4 mh_present(float energy, float hue, float2 uv,
-                               MHPalette pal, float glow,
+static inline half4 mh_present(float body, float spec, float contact, float hue,
+                               float2 uv, MHPalette pal, float glow,
                                half4 inkColor, float2 position, float pixelScale) {
-    float3 field = mh_lit(pal, energy, glow, 0.0, 1.0, 0.34, hue);
+    float paper = pal.paper;
+    float dark = 1.0 - paper;
+
+    // What walks the rail. On ink that is everything; on paper the specular and
+    // the contact term have both left to be composited instead.
+    float railE = body + (spec + contact) * dark;
+    float3 field = mh_lit(pal, railE, glow, 0.0, 1.0, 0.34, hue);
+
     float3 inkLin = mh_srgb_to_linear(float3(inkColor.rgb));
     float3 rgb = mix(inkLin, field, mh_containment(uv, 0.72));
-    rgb = float3(mh_knee(rgb.r, 0.90), mh_knee(rgb.g, 0.90), mh_knee(rgb.b, 0.90));
+
+    if (paper > 0.002) {
+        // THE CATCHLIGHT. A warm white a whisper past the page, so the knee
+        // below turns it into a crisp small highlight rather than a soft one.
+        float3 lit = mh_oklab_to_linear(mh_lch(min(pal.s0.x * 1.06 + 0.05, 1.02), 0.012, 0.9));
+        // A SMOOTHSTEP RATHER THAN A CLAMP, so only the tight lobe's core takes
+        // the white. On ink the specular's broad sheen is welcome light; on
+        // paper the same sheen mixed toward white spread the catchlight into a
+        // grey smudge half the width of the body, because a soft white on a
+        // white page has no edge to be soft against. The threshold sits above
+        // the broad lobe's ceiling, so what reaches the page is the glint alone.
+        rgb = mix(rgb, lit, smoothstep(0.34, 0.92, spec) * paper);
+
+        // THE CONTACT SHADOW, pooled beneath and neutral: an occlusion belongs
+        // to the page, so it takes the page's own colour darkened rather than
+        // the tone's.
+        // A shadow POOLS, it does not ring. The first cut kept three tenths of
+        // the term all the way round the body and the sphere came out sitting in
+        // a soft grey halo, which is the one thing a contact shadow must never
+        // look like. At 0.06 above the centre line and full below it, the page
+        // is clean over the top of the object and darkens under it.
+        float below = smoothstep(-0.10, 0.66, uv.y / MH_R);
+        float3 shade = inkLin * 0.55;
+        rgb = mix(rgb, shade, clamp(contact * 2.60, 0.0, 1.0) * (0.06 + 1.05 * below) * paper);
+    }
+
+    float knee = mix(0.90, 0.96, paper);
+    rgb = float3(mh_knee(rgb.r, knee), mh_knee(rgb.g, knee), mh_knee(rgb.b, knee));
     return mh_out(rgb, position * pixelScale);
 }
 
@@ -1409,14 +1585,15 @@ constant float MH_SPREAD = 0.50;
 
     // The rim's amplitude went UP when its exponent tightened: the same light in
     // an eighth of the width has to be brighter to be the same edge.
-    MHSurface sf = mh_surface(b, t, small, 0.88 + 0.40 * live.voice, 0.52, 0.16);
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.88 + 0.40 * live.voice, 0.52, 0.16);
     // The rim borrows the interior's colour, because it IS the interior seen
     // edge-on through more glass. The specular does not: it is the key light.
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 2. Droplet
@@ -1616,7 +1793,7 @@ constant float MH_SPREAD = 0.50;
     // The sheen knob is this hero's: a wobbling surface is only visibly wobbling
     // if there is a highlight riding it, so droplet spends more of its energy on
     // the specular than any other hero does.
-    MHSurface sf = mh_surface(b, t, small,
+    MHSurface sf = mh_surface(b, t, small, inkColor,
                               1.05 + 0.55 * sheenK + 0.35 * live.voice,
                               0.42 + 0.30 * sheenK,
                               0.16);
@@ -1625,7 +1802,8 @@ constant float MH_SPREAD = 0.50;
     float hueMix = hue * (interior + sf.rim * 0.6) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 3. Limn
@@ -1843,13 +2021,14 @@ constant float MH_SPREAD = 0.50;
     // 0.30 is the fitted middle: enough that the silhouette closes all the way
     // round and the eye reads a sphere, far too little to compete with the arc,
     // which runs four times brighter than it does.
-    MHSurface sf = mh_surface(b, t, small, 0.30, 0.78 + 0.35 * live.voice, 0.09);
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.30, 0.78 + 0.35 * live.voice, 0.09);
 
     float e = interior + rimE + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (rimE + interior) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 4. Comet
@@ -2094,13 +2273,14 @@ constant float MH_SPREAD = 0.50;
     // way in from the rim and reading as a stray artifact next to a species
     // whose entire brief is one point. At 0.22 it is a catchlight: the glass
     // still says it is glass, and there is only one thing in it.
-    MHSurface sf = mh_surface(b, t, small, 0.80 + 0.35 * live.voice, 0.22, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.22, 0.15);
 
     float e = interior + headE + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 5. Nebula
@@ -2264,13 +2444,14 @@ constant float MH_SPREAD = 0.50;
     // The catchlight has to punch through weather. At 0.60 the cloud's own body
     // sat close enough to it that the frame had no cream in it anywhere and the
     // value hierarchy failed: a nebula is still an object with a lit surface.
-    MHSurface sf = mh_surface(b, t, small, 0.78 + 0.35 * live.voice, 0.98, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.78 + 0.35 * live.voice, 0.98, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 6. Prism
@@ -2489,14 +2670,15 @@ constant float MH_SPREAD = 0.50;
     // specular on top of it made one blob with legs, and the legs are the
     // species. At 0.62 the entry still reads unmistakably as the source and the
     // fan below it is what the eye follows.
-    MHSurface sf = mh_surface(b, t, small, 0.80 + 0.35 * live.voice,
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice,
                               0.62 + 0.25 * live.voice, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.6) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 7. Duet
@@ -2677,13 +2859,14 @@ constant float MH_SPREAD = 0.50;
     float hueW = (eA * 0.85 - eB * 1.0);
     float hue = (interior > 1e-4 ? hueW / max(eA + eB, 1e-4) : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, 0.80 + 0.35 * live.voice, 0.42, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.42, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (eA + eB) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
 }
 
 // MARK: - 8. Still
@@ -2836,7 +3019,7 @@ constant float MH_SPREAD = 0.50;
     // header: with no interior to protect, the edge and the highlight are free to
     // be the figure. This is the one hero whose brightest pixel is always its
     // catchlight, at every state and every size.
-    MHSurface sf = mh_surface(b, t, small,
+    MHSurface sf = mh_surface(b, t, small, inkColor,
                               1.15 + 0.45 * live.voice,
                               1.30 + 0.35 * live.voice,
                               0.13);
@@ -2845,5 +3028,968 @@ constant float MH_SPREAD = 0.50;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
-    return mh_present(e, hueMix, uv, pal, glow, inkColor, position, pixelScale);
+    return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
+                       uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 9. Fathom
+
+// FATHOM. Layered translucent depths: nested shells, seen through each other.
+//
+// NOT MIST, AND THAT IS THE WHOLE DISTINCTION FROM NEBULA. Nebula's answer to
+// depth is a cloud whose near folds silhouette against its own glow -- volume
+// without any surface in it. This species goes the other way: three legible
+// SURFACES at three radii, each one a thin translucent skin you can see the next
+// one through. What the eye gets from a cloud is atmosphere; what it gets from
+// nested shells is measurement, a sense of how far in the far one is, which is
+// the species' name.
+//
+// THE SHELLS ARE SOLVED, NOT MARCHED, and that is what makes them legible. A
+// shell is a thin surface, and five samples down a ray would catch it or miss it
+// depending on where the tap planes happened to fall -- the same failure that
+// cost comet its head and droplet its heart, except six times over. So each
+// shell's crossings are found by intersecting the interior ray with a sphere,
+// which is one quadratic: a ray that enters the body crosses every shell it
+// reaches exactly twice, once going in and once coming out.
+//
+// AND THEY SORT THEMSELVES. Six crossings would normally have to be depth-sorted
+// before they could be composited, which is not something a fragment shader
+// wants to do. But the order is known in advance and cannot vary: a ray entering
+// from outside meets the biggest shell first, then the middle, then the
+// smallest, then the smallest again on the way out, then the middle, then the
+// biggest. Outer-in, inner-out. So the accumulation is simply written in that
+// sequence and the transmittance is correct with no sorting at all.
+//
+// GRAZING CROSSINGS GLOW, and this is the effect that sells translucency. The
+// amount of material a ray meets crossing a thin shell is its thickness divided
+// by the cosine of the angle between the ray and the surface, so a crossing near
+// a shell's own limb passes through several times as much skin as one through
+// its face. Each shell therefore wears a bright rim of its own, nested inside
+// the last -- and it is free, because the cosine is a dot product the crossing
+// already computed. The floor at 0.26 caps the amplification, because the exact
+// grazing case divides by zero.
+//
+// THE FOLDS CATCH LIGHT. Each shell carries two low-order modes on its surface,
+// rotating at its own rate, and they do two things at once: they displace the
+// crossing along the ray by a first-order correction, so the shell is genuinely
+// out of round and the near and far crossings disagree about where it is, and
+// they modulate how much the skin catches the key. THE PARALLAX IS REAL because
+// each shell turns at a different rate: watch any point of the front shell's
+// fold and the pattern behind it slides the other way.
+//
+// LEVEL PUSHES THEM APART. Voice separates the radii, which opens up the space
+// between the layers and makes the depth cue stronger, and deepens the folds.
+// Not brighter -- deeper. ACTIVITY QUICKENS THE INDEPENDENT ROTATIONS, so the
+// parallax between the layers animates faster: a thinking assistant's depths
+// slide past each other.
+//
+// RESPONDING ALIGNS THE ROTATIONS and drives them one way, so three layers
+// sliding independently become three layers travelling together.
+//
+// THE GESTURE, every nine seconds or so: the shells breathe apart and back.
+//
+// SUCCESS IGNITES THEM FROM THE INSIDE OUT, one layer at a time along the
+// state's sweep -- the innermost first, then the middle, then the outer. An
+// arrival that arrives THROUGH something is what this species has that the
+// others do not.
+//
+// SIZE: at 18 pt the third shell crossfades away and the two that remain are
+// nearly twice as thick and half as folded, because a fold four pixels across is
+// a wobble rather than a fold. What survives is two nested translucent rings,
+// which is the species stated in the fewest surfaces it can have and still be
+// about depth.
+[[ stitchable ]] half4 mh_fathom(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float layersK   = clamp(c0, 0.0, 1.0);   // how far apart the shells sit
+    float parallaxK = clamp(c1, 0.0, 1.0);   // how fast they slide past each other
+    float murkK     = clamp(c2, 0.0, 1.0);   // how absorbing the space between is
+    float spreadK   = clamp(c3, 0.0, 1.0);   // hue across depth
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.021 + 0.007 * mh_breath(t, 5.3), 0.0, 1.20);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 9.0, 9.4);
+    float3 key = mh_key(t);
+
+    // THE RADII. Voice and the gesture push them apart; the knob sets the span.
+    float spanK = (1.0 + 0.22 * live.voice + 0.16 * fl.x);
+    float R0 = (0.70 + 0.06 * layersK) * spanK * S;
+    float R1 = (0.50 - 0.02 * layersK) * spanK * S;
+    float R2 = (0.30 - 0.06 * layersK) * spanK * S;
+    R0 = min(R0, 0.74);                          // never into mh_inside's fade
+
+    float third = 1.0 - smoothstep(0.28, 0.68, small);
+    float thick = (0.062 + 0.035 * layersK) * S * mix(1.0, 1.90, small);
+    float foldAmp = (0.055 + 0.055 * parallaxK) * (1.0 + 0.55 * live.voice)
+                  * mix(1.0, 0.50, small) * S;
+
+    // Independent rotations, aligned by drive. Each shell's own rate is what the
+    // parallax is made of; identical rates would be one shell drawn three times.
+    float sp = (1.0 + 0.85 * live.pace + 1.10 * st.drive);
+    float a0 = mh_drift(t, 0.085 * sp, 0.45, 1.0);
+    float a1 = mix(mh_drift(t, -0.062 * sp, 0.50, 2.0), a0, st.drive * 0.7);
+    float a2 = mix(mh_drift(t,  0.108 * sp, 0.40, 3.0), a0, st.drive * 0.7);
+
+    float bq = dot(b.P, rd);
+    float PP = dot(b.P, b.P);
+
+    // Per-shell crossing data, filled below and then composited in the fixed
+    // outer-in, inner-out order.
+    float sN[3], sF[3], eN[3], eF[3];
+    float3 dN[3], dF[3];
+    for (int k = 0; k < 3; k++) { sN[k] = -1.0; sF[k] = -1.0; eN[k] = 0.0; eF[k] = 0.0;
+                                  dN[k] = float3(0.0, 0.0, 1.0); dF[k] = float3(0.0, 0.0, 1.0); }
+
+    // THE FOLD HAS TO MOVE THE OUTLINE. The first cut displaced each crossing
+    // along the ray, which is geometrically honest and visually almost nothing:
+    // a shell's apparent radius on screen is set by where its limb falls, and
+    // the limb is decided by the radius used in the quadratic, not by anything
+    // done to the crossing afterwards. Three shells came out as three perfect
+    // concentric circles -- a target, not a set of folded surfaces.
+    //
+    // So the radius is folded per pixel, evaluated in the pixel's own IN-PLANE
+    // direction, which is exactly the direction of the shell's limb there. Each
+    // ring's outline now undulates organically, and every crossing behind it
+    // moves with it. It is an approximation away from the limb and exact at it,
+    // which is the right place for the error to be: the limb is where the
+    // grazing glow puts the shell's brightest light and where its shape is read.
+    float3 limbDir = normalize(float3(b.P.xy, 0.02) + 1e-5);
+    float RK[3];
+    {
+        float3 axA = normalize(float3(cos(a0), 0.42, sin(a0)));
+        float3 axB = normalize(float3(cos(a1), 0.42, sin(a1)));
+        float3 axC = normalize(float3(cos(a2), 0.42, sin(a2)));
+        // THE FOLD IS A FRACTION OF ITS OWN SHELL, not an absolute displacement.
+        // At a fixed amplitude the same 0.08 that gently creases the outer shell
+        // is a quarter of the inner one's radius, and the innermost came out as
+        // a lopsided egg rather than as a small sphere with a crease in it.
+        // Scaled by R over R0 they all fold by the same proportion, which is
+        // what nested skins of one material would actually do.
+        RK[0] = R0 + foldAmp * (R0 / max(R0, 1e-3))
+                   * (0.62 * sin(2.30 * dot(limbDir, axA) + a0 * 1.7)
+                    + 0.38 * sin(3.70 * dot(limbDir, axA.zxy) - a0 * 1.1 + 2.1));
+        RK[1] = R1 + foldAmp * (R1 / max(R0, 1e-3))
+                   * (0.62 * sin(2.30 * dot(limbDir, axB) + a1 * 1.7)
+                    + 0.38 * sin(3.70 * dot(limbDir, axB.zxy) - a1 * 1.1 + 2.1));
+        RK[2] = R2 + foldAmp * (R2 / max(R0, 1e-3))
+                   * (0.62 * sin(2.30 * dot(limbDir, axC) + a2 * 1.7)
+                    + 0.38 * sin(3.70 * dot(limbDir, axC.zxy) - a2 * 1.1 + 2.1));
+    }
+        float AK[3]; AK[0] = a0; AK[1] = a1; AK[2] = a2;
+    // The outer shell is the one the light reaches first and the one whose fold
+    // the brief asks to see catching it, so the three are not equally bright
+    // intrinsically -- they fall away inward, and the transmittance then dims
+    // them again on top of that. Equal weights made the innermost read as a
+    // solid ball sitting inside two rings rather than as the deepest of three
+    // skins.
+    float WK[3]; WK[0] = 1.0; WK[1] = 0.74; WK[2] = 0.52 * third;
+
+    for (int k = 0; k < 3; k++) {
+        if (WK[k] < 0.002) continue;
+        float R = RK[k];
+        float disc = bq * bq - PP + R * R;
+        if (disc <= 0.0) continue;
+        float sq = sqrt(disc);
+        float ss[2]; ss[0] = -bq - sq; ss[1] = -bq + sq;
+
+        for (int h = 0; h < 2; h++) {
+            float s = ss[h];
+            if (s <= 0.0 || s >= L) continue;
+            float3 pt = b.P + rd * s;
+            float3 dir = normalize(pt + 1e-5);
+
+            // The fold: two low-order modes on the shell's own turning axis.
+            float3 ax = float3(cos(AK[k]), 0.42, sin(AK[k]));
+            ax = normalize(ax);
+            float f = 0.62 * sin(2.30 * dot(dir, ax) + AK[k] * 1.7)
+                    + 0.38 * sin(3.70 * dot(dir, ax.zxy) - AK[k] * 1.1 + 2.1);
+
+            float g = dot(dir, rd);
+
+            // GRAZING GLOW. Thickness over the cosine: a crossing near this
+            // shell's own limb passes through several times as much skin.
+            float graze = thick / max(abs(g), 0.26);
+            float lit = 0.40 + 0.60 * clamp(dot(dir, key), 0.0, 1.0);
+            float e = graze * (0.42 + 0.58 * (0.5 + 0.5 * f)) * lit * WK[k];
+
+            // SUCCESS travels outward one layer at a time: shell 2 lights first,
+            // then 1, then 0, as the sweep passes each one's turn.
+            if (st.complete > 0.001) {
+                float turn = float(2 - k) * 0.33;
+                float w = 1.0 - smoothstep(0.0, 0.42, abs(st.sweep - turn - 0.16));
+                e *= 1.0 + st.complete * (0.5 + 2.4 * w);
+            }
+
+            if (h == 0) { sN[k] = s; eN[k] = e; dN[k] = dir; }
+            else        { sF[k] = s; eF[k] = e; dF[k] = dir; }
+        }
+    }
+
+    // The murk between the shells, marched: it is a medium, not a surface.
+    float medAmt = (0.030 + 0.075 * murkK) * mix(1.0, 0.70, small);
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 2.0 / S) * medAmt * fade;
+        acc.x += e * trans * ds;
+        trans *= exp(-(1.80 * e + MH_EXT) * ds);
+    }
+    float murkE = acc.x * 3.20;
+
+    // THE SHELLS, front to back, in the order geometry guarantees.
+    float shellE = 0.0, shellH = 0.0;
+    float tr = 1.0;
+    float absorb = 1.05 + 1.55 * murkK;
+    int order[6]; order[0] = 0; order[1] = 1; order[2] = 2; order[3] = 2; order[4] = 1; order[5] = 0;
+    for (int i = 0; i < 6; i++) {
+        int k = order[i];
+        bool nearHit = (i < 3);
+        float s = nearHit ? sN[k] : sF[k];
+        if (s < 0.0) continue;
+        float e = (nearHit ? eN[k] : eF[k]) * exp(-MH_EXT * s);
+        float3 dir = nearHit ? dN[k] : dF[k];
+        shellE += e * tr;
+        // Depth carries the hue: the near faces one way, the far the other, so
+        // the layers are told apart by colour as well as by brightness.
+        shellH += e * tr * clamp(dir.z, -1.0, 1.0);
+        tr *= exp(-absorb * e);
+    }
+
+    float interior = (shellE * 4.30 + murkE) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.20 * st.settled);
+    float hue = (shellE > 1e-4 ? shellH / shellE : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.78 + 0.35 * live.voice, 0.46, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 10. Arc
+
+// ARC. One soft bright filament arcing gently through the volume.
+//
+// THE SPECIES IS A LINE, and a line is the hardest thing this kit has been asked
+// to draw. Everything else in the collection is either compact enough to solve
+// at the ray's closest approach -- a point, a heart, a pair of bodies, a flash
+// -- or broad enough that five samples average it honestly: ribbons, mist,
+// curtains, shells. A filament is neither. It is thin enough that a march steps
+// straight over it, and extended enough that there is no closed form for a
+// ray's nearest approach to it.
+//
+// THE FIRST BUILD MARCHED IT AT TEN STEPS and the verdict on it was a fat slug
+// of light, which was correct and which the march had made unavoidable. A
+// sampled filament cannot be thinner than its sampling: at ten steps down a
+// two-unit chord the interval is 0.2, so a tube narrower than that is caught by
+// whichever tap happens to fall inside it and missed otherwise, and what draws
+// is a line that is dim, uneven, and flickering as it moves. The only way to
+// make ten taps honest was to widen the thread to 0.125 of the sphere's radius,
+// which is a bolster. Sixteen taps would have bought 0.08 -- still not a thread
+// -- at three times the cost.
+//
+// SO THE FILAMENT IS NOT MARCHED AT ALL. It is integrated in closed form, and
+// the argument has three steps.
+//
+//   THE PROBLEM MOVES INTO THE ARC'S FRAME FOR FREE, because rotations are
+//   linear: the ray's origin and direction go through the same roll and spin the
+//   curve is defined in, and the direction stays unit because a rotation cannot
+//   stretch it. In that frame the arc is a plain circle in a plane.
+//   THE SEARCH RUNS ALONG THE CURVE, NOT THE RAY. For any point on the arc the
+//   ray's closest approach to it is two dot products, so twenty samples along
+//   the curve plus a parabolic refinement find where the ray passes nearest the
+//   filament. Searching a smooth one-dimensional function is what makes this
+//   stable: the samples slide continuously as the geometry moves, so nothing
+//   pops, where sampling the ray made the answer depend on where the taps fell.
+//   THE INTEGRAL IS THEN EXACT. Locally the curve is a straight line, and a
+//   gaussian tube crossed by a ray at angle alpha integrates to w * sqrt(pi) /
+//   sin(alpha) times the gaussian of the perpendicular distance.
+//
+// Once the sampling constraint is gone the width is a free design decision
+// again, which is the whole point of the rewrite: at 0.052 the thread is five
+// per cent of the sphere's radius, about five pixels at 120 pt and two at 18,
+// and it is that because that is what reads as calligraphic -- not because
+// anything downstream needs it to be.
+//
+// THE SPINDLE. Width and brightness fall away from the middle together, on one
+// profile, so the thread is thickest and brightest at its centre and vanishes to
+// a point at each tip. Brightness falls faster than width does, which reads as a
+// stroke laid down with pressure in the middle and lifted at both ends. A
+// filament of even width with a fade painted on its ends is a rod that got
+// dimmer; one that NARROWS as it dims is a stroke.
+//
+// TWO CROSSINGS, because a shallow U seen from most angles is crossed twice --
+// once through each limb -- and a global minimum would find only one and break
+// the thread where it passes over itself. The arc is searched in halves and both
+// winners contribute, with the second faded out by how far apart the two answers
+// are, so the apex does not render at double brightness when both halves
+// converge on it.
+//
+// CORE PIN (c2) IS THE ARC'S CLOSEST APPROACH TO THE CENTRE, and it is the knob
+// the species is really about. At 1 the filament passes right through the core
+// and the presence reads as one bright line struck through its own middle; at 0
+// it bows well clear and reads as a thread hung across the volume. Everything
+// between is the interesting part. THE ARC NEVER TOUCHES THE SHELL: its geometry
+// is chosen so both ends land inside 0.70 at every setting of the knobs, which
+// is comfortably inside mh_inside's fade, so it is a filament in glass rather
+// than a wire soldered to the inside of it.
+//
+// LEVEL PUTS ENERGY IN THE LINE: voice brightens the filament and BOWS IT
+// FURTHER, the way a plucked string carries more amplitude when it carries more
+// energy. ACTIVITY RUNS CURRENT ALONG IT: a travelling brightness down the arc's
+// length, gated by mh_aa so it retires itself at the sizes where a cycle would
+// be under two pixels.
+//
+// RESPONDING PULLS IT TAUT. The bow flattens toward a straight chord and the
+// travelling pulse becomes strong and regular: a slack thread going tight is
+// about as legible a picture of "answering now" as a single line can make.
+//
+// THE GESTURE, every eight seconds or so: the arc bows deeper and a glimmer runs
+// its whole length.
+//
+// SUCCESS: one bright pulse travels the filament end to end on the state's
+// sweep, the whole line lifts under it, and it settles brighter.
+//
+// SIZE: at 18 pt the thread thickens by 90 per cent to hold the same pixel
+// count, the span shortens by a fifth so what is left is a clean short curve
+// rather than a long thin one, and the travelling current switches off. The
+// closed-form integral scales with WIDTH, so the gain is cut by roughly the
+// reciprocal of that widening -- without it the small mounts came out three
+// times brighter than the large one. What survives is one soft bright stroke
+// bowing inside a bead.
+[[ stitchable ]] half4 mh_arc(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float lengthK  = clamp(c0, 0.0, 1.0);   // how far round the arc goes
+    float swayK    = clamp(c1, 0.0, 1.0);   // how much its plane wanders
+    float pinK     = clamp(c2, 0.0, 1.0);   // how near the core it passes
+    float spreadK  = clamp(c3, 0.0, 1.0);   // hue along its length
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.021 + 0.007 * mh_breath(t, 6.1), 0.0, 1.20);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 11.0, 8.1);
+
+    // THE ARC'S FRAME. Rolled and tilted so the curve is seen from a changing
+    // angle, swaying at a rate the sway knob sets. Responding stills the wander
+    // and takes the bow out.
+    float sway = (0.30 + 0.60 * swayK) * (1.0 - 0.55 * st.drive);
+    float ro = 0.55 + sway * 0.9 * sin(mh_drift(t, 0.052, 0.5, 1.0));
+    float ay = mh_drift(t, 0.041, 0.55, 2.0);
+    float ax = 0.30 + sway * 0.5 * sin(t * 0.037 + 2.2);
+
+    // THE GEOMETRY. The arc's midpoint sits `pin` from the centre on the bow
+    // axis, the circle has radius Rc, so its centre is at (pin - Rc) along that
+    // axis. Rc came DOWN and span went UP -- 0.65 by 1.33 rather than 0.83 by
+    // 0.87 -- which is the same trade a draughtsman makes to get a longer line
+    // out of a fixed sheet: a tighter circle carries more arc before its ends
+    // run out to the edge. Length goes from 1.44 body units to about 1.72, and
+    // the shape it draws is a shallow catenary U rather than a comma.
+    float pin = mix(0.30, 0.05, pinK) * (1.0 + 0.30 * live.voice + 0.35 * fl.x)
+              * (1.0 - 0.40 * st.drive);
+    float Rc = (0.58 + 0.14 * lengthK) * S;
+    float span = (1.15 + 0.35 * lengthK) * mix(1.0, 0.78, small);
+
+    // In the arc's own frame the bow axis is +y and the arc opens along x.
+    float cz = pin * S - Rc;
+
+    // A THREAD, AND THE ONLY WAY TO GET ONE. 0.052 body units is five per cent
+    // of the sphere's radius: about five pixels at 120 pt and two at 18 pt.
+    //
+    // The previous cut ran at 0.125 and the verdict was exactly right -- a fat
+    // slug of light. It was that wide for a reason, though, and the reason is
+    // worth recording because it is the constraint this rewrite had to break.
+    // A marched filament cannot be thinner than the march: at ten steps down a
+    // two-unit chord the interval is 0.2, so a tube narrower than that is caught
+    // by whichever tap happens to land in it and missed otherwise, and the line
+    // renders dim, uneven, and flickering as it moves. Widening it to 0.125 was
+    // the only way to make ten taps honest. Sixteen taps would have bought 0.08,
+    // which is still not a thread, at three times the cost.
+    //
+    // So the filament is no longer marched at all. See below: it is integrated
+    // in closed form, and once the sampling constraint is gone the width is a
+    // free design decision again. It is now set purely by what reads as
+    // calligraphic, which is what it should have been set by all along.
+    float w = (0.042 + 0.022 * lengthK) * S * mix(1.0, 1.90, small);
+    float bright = (0.90 + 0.85 * live.voice) * (1.0 + 0.45 * fl.x);
+
+    float shimGate = mh_aa(6.2831853 * 4.2 / (MH_R * S), size, pixelScale) * (1.0 - small);
+    float shimAmt = shimGate * (0.55 * live.pace + 0.75 * st.drive);
+
+    float medAmt = mix(0.055, 0.030, small);
+
+    // THE FILAMENT, INTEGRATED RATHER THAN SAMPLED.
+    //
+    // Rotations are linear, so the whole problem moves into the arc's own frame
+    // for free: the ray's origin and direction go through the same roll and spin
+    // the curve is defined in, and the direction stays unit because a rotation
+    // cannot stretch it. In that frame the arc is a plain circle in the xy plane
+    // and everything below is two dimensions plus a z offset.
+    //
+    // For any point C on the curve, the ray's closest approach to it is two dot
+    // products -- how far along the ray (sc) and how far off it (perp). Sampling
+    // that at twelve points ALONG THE CURVE and taking the smallest finds where
+    // the ray passes nearest the filament, and that is a search over a smooth
+    // one-dimensional function rather than over the ray, which is what makes it
+    // stable: the samples move continuously as the geometry moves, so nothing
+    // pops. A parabola through the winner and its two neighbours then refines
+    // the position to well inside a sample interval, which is what removes the
+    // beading twelve discrete points would otherwise leave along the thread.
+    //
+    // With the nearest point known, the integral is closed form. Locally the
+    // curve is a straight line, and the integral of a gaussian tube along a ray
+    // crossing a line at angle alpha is w * sqrt(pi) / sin(alpha), times the
+    // gaussian of the perpendicular distance. The 1 / sin(alpha) is the same
+    // grazing amplification fathom's shells use and it is just as real here: a
+    // ray running nearly along the filament passes through much more of it. The
+    // floor at 0.30 caps that at a bit over three, because the exactly parallel
+    // case is a division by zero.
+    //
+    // TWO CROSSINGS, because a U seen from many angles is crossed twice -- once
+    // through each limb -- and a global minimum would find only one and break
+    // the thread where it passes over itself. So the arc is searched in halves
+    // and both winners contribute. When both halves converge on the same place,
+    // which is what happens near the apex, the second is faded out by how far
+    // apart the two answers are; otherwise the apex would render at double
+    // brightness.
+    float3 Pa = mh_spin(mh_roll(b.P, ro), ay, ax);
+    float3 Ra = mh_spin(mh_roll(rd, ro), ay, ax);
+
+    const int NS = 20;
+    float gv[NS], tv[NS], sv[NS];
+    for (int i = 0; i < NS; i++) {
+        float th = -span + (2.0 * span) * (float(i) / float(NS - 1));
+        float3 C = float3(Rc * sin(th), cz + Rc * cos(th), 0.0);
+        float3 D = C - Pa;
+        float sc = dot(D, Ra);
+        gv[i] = dot(D, D) - sc * sc;
+        tv[i] = th;
+        sv[i] = sc;
+    }
+
+    float dth = (2.0 * span) / float(NS - 1);
+    float filE = 0.0, filH = 0.0, thPick[2];
+    thPick[0] = 0.0; thPick[1] = 0.0;
+    float partE[2]; partE[0] = 0.0; partE[1] = 0.0;
+
+    for (int hf = 0; hf < 2; hf++) {
+        int lo = hf * 10, hi = lo + 9;
+        int bi = lo;
+        for (int i = lo + 1; i <= hi; i++) { if (gv[i] < gv[bi]) bi = i; }
+
+        // Parabolic refinement, with the sample index pulled inside the array so
+        // the three-point fit always has its neighbours.
+        int ci = clamp(bi, 1, NS - 2);
+        float y0 = gv[ci - 1], y1 = gv[ci], y2 = gv[ci + 1];
+        float den = y0 - 2.0 * y1 + y2;
+        float off = (abs(den) > 1e-7) ? clamp(0.5 * (y0 - y2) / den, -1.0, 1.0) : 0.0;
+        float th = clamp(tv[ci] + off * dth, -span, span);
+
+        float3 C = float3(Rc * sin(th), cz + Rc * cos(th), 0.0);
+        float3 D = C - Pa;
+        float sc = dot(D, Ra);
+        float perp2 = max(dot(D, D) - sc * sc, 0.0);
+        thPick[hf] = th;
+        if (sc <= 0.0 || sc >= L) continue;
+
+        // THE SPINDLE. Width and brightness both fall away from the middle on
+        // one profile, so the thread is thickest and brightest at its centre and
+        // vanishes to a point at each tip. A filament of even width with a fade
+        // painted on its ends is a rod that got dimmer; a filament that NARROWS
+        // as it dims is a stroke, and the difference is the whole verdict.
+        float u = clamp(abs(th) / max(span, 1e-3), 0.0, 1.0);
+        float prof = pow(max(1.0 - u * u, 0.0), 0.85);
+        float wl = w * (0.28 + 0.72 * prof);
+
+        // The angle between the ray and the curve's tangent, in the arc frame.
+        // The floor is 0.58 rather than the 0.30 the geometry would allow: the
+        // 1 / sin(alpha) amplification is real -- a ray running along the thread
+        // passes through more of it -- but at three and a third it put a bright
+        // BULGE wherever the filament happened to lean toward the viewer, and a
+        // thread with a swelling two thirds of the way along it is not brightest
+        // at its centre, which is the whole of the brief. Capped at 1.7 the cue
+        // survives as a gentle thickening and the spindle keeps its shape.
+        float3 T = float3(cos(th), -sin(th), 0.0);
+        float sinA = max(length(cross(Ra, T)), 0.58);
+
+        // Current along the length, and the pulses that ride it.
+        float run = 1.0;
+        if (shimAmt > 0.002) run += shimAmt * sin(th * 4.2 - t * 2.4);
+        float pulse = 0.0;
+        if (fl.x > 0.002) {
+            float pr = (th - mix(-span, span, fl.y)) / 0.34;
+            pulse += fl.x * 0.95 * exp(-pr * pr);
+        }
+        if (st.complete > 0.001) {
+            float pr = (th - mix(-span, span, st.sweep)) / 0.30;
+            pulse += st.complete * 1.80 * exp(-pr * pr);
+        }
+
+        float ws = wl / sqrt(MH_SCATTER_K);          // the scatter's own width
+        const float SQRTPI = 1.7724539;
+        float core = (wl * SQRTPI / sinA) * exp(-perp2 / (wl * wl));
+        // The halo's coefficient is 0.09, not the 0.24 the other heroes give
+        // their scatter, and the reason is that this one is INTEGRATED rather
+        // than sampled. The integral scales with width, so a halo 3.2 times
+        // wider than the core carries 3.2 times the light at the same
+        // coefficient -- it stopped being a glow around a thread and became a
+        // wide band with a thread inside it, which at the small mounts filled
+        // half the sphere. At 0.09 the core is what reaches the rail's top and
+        // the halo sits an octave below it, which is what a soft thread in glass
+        // actually looks like.
+        float halo = 0.09 * (ws * SQRTPI / sinA) * exp(-perp2 / (ws * ws));
+
+        float vis = mh_inside(Pa + Ra * sc) * exp(-MH_EXT * sc);
+        // Brightness falls off the centre faster than width does -- pow 1.35
+        // against the width's linear ride on the same profile -- so the thread
+        // reads as a stroke laid down with pressure in the middle and lifted at
+        // both ends, rather than as a rod of even ink that happens to narrow.
+        float e = (core + halo) * pow(prof, 1.35) * bright * run * (1.0 + pulse) * vis;
+
+        partE[hf] = e;
+        filH += e * clamp(th / max(span, 1e-3), -1.0, 1.0);
+    }
+
+    // When the two halves land in the same place the second is a duplicate of
+    // the first, not a second crossing.
+    float sep = smoothstep(0.16, 0.44, abs(thPick[0] - thPick[1]));
+    filE = partE[0] + partE[1] * sep;
+    filH = (partE[0] * clamp(thPick[0] / max(span, 1e-3), -1.0, 1.0)
+          + partE[1] * sep * clamp(thPick[1] / max(span, 1e-3), -1.0, 1.0));
+
+    // The medium, still marched, and at the family's five taps: it is broad, so
+    // five is honest for it, and it carries the only noise this hero reads.
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 2.0 / S) * medAmt;
+        acc.x += e * trans * ds;
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
+    }
+
+    float interior = // The closed-form integral scales with the thread's WIDTH, and the small mounts
+    // widen it by 2.6 to hold the same pixel count -- so without this the 18 pt
+    // tile came out three times brighter than the 300 pt one and blew straight
+    // through the top of the rail. The compensation is the reciprocal of the
+    // widening, which is what keeps one hero looking like one hero at every
+    // mount.
+    (acc.x * 3.40 + filE * 35.0 * mix(1.0, 0.52, small)) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.9 * st.complete) * (1.0 + 0.22 * st.settled);
+    float hue = (filE > 1e-5 ? filH / filE : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.30, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (filE * 35.0 * mix(1.0, 0.52, small)) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 11. Opal
+
+// OPAL. Internal play-of-colour: soft flashes drifting through the volume.
+//
+// NO STROBE, EVER, and that is the constraint the whole species is built around.
+// Play-of-colour in a real opal is not a flicker; it is a slow shifting of where
+// the light is coming from as the stone turns, and the eye reads it as depth
+// rather than as an event. So every flash here is BORN AND ABSORBED SLOWLY: each
+// one rides its own life envelope on a period between fourteen and twenty-two
+// seconds, out of phase with the others, so no two arrive together and none of
+// them ever appears or vanishes -- they come up out of the glass and go back
+// into it. The envelope also has a floor rather than a zero, so a flash at its
+// dimmest is still faintly present and there is no moment of switching on.
+//
+// FOUR FLASHES, SOLVED AT CLOSEST APPROACH. They are compact bodies, so five
+// marched samples would draw the shape of the sampling; two dot products each
+// draws the shape of the flash, perfectly round from any angle and stable as it
+// moves. Each carries the kit's scatter at a generous amplitude, because a
+// flash inside an opal is mostly the glow it throws into the stone around it
+// rather than the bright centre -- the scatter is the species here, not a
+// finish on it.
+//
+// SPREAD DOES ITS WIDEST WORK, which is why this hero carries the collection's
+// highest default and the one internal multiplier above the family cap. The four
+// flashes sit at four points across the spread -- two either side of the anchor
+// -- and at the default they are already four distinguishable neighbours. The
+// multiplier takes the extremes to about thirty-seven degrees of OKLAB hue at
+// spread 1, which is amber to gold on one side and amber to ember on the other:
+// still one hue family by the rail's own definition, still nothing that could be
+// called a second colour, and the widest this collection ever goes. Play-of-
+// colour is the species; anywhere else this would be too much.
+//
+// LEVEL BLOOMS THEM: voice grows each flash and brightens it, so a room with
+// somebody in it has a stone with more fire. ACTIVITY QUICKENS THE DRIFT, and
+// only the drift -- cadence moves the flashes around, it does not light them,
+// because the two signals doing different things is what lets a person read
+// which one is happening.
+//
+// RESPONDING TURNS THEM INTO A PROCESSION. The drift directions align and the
+// flashes brighten in sequence along that axis, so what was four lights waking
+// at random becomes a wave of colour crossing the volume one way.
+//
+// SUCCESS: all four ignite together and settle, which is the only moment in the
+// species where they are ever in phase -- and it reads as an event precisely
+// because nothing else here ever is.
+//
+// SIZE: at 18 pt two flashes crossfade away and the two that remain are 70 per
+// cent larger, because four soft blobs in a thirteen-point bead is a texture and
+// two is a composition. What survives is one warm light and one cool one moving
+// slowly past each other, which is play-of-colour said in two marks.
+[[ stitchable ]] half4 mh_opal(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float flashK   = clamp(c0, 0.0, 1.0);   // how strong the fire is
+    float driftK   = clamp(c1, 0.0, 1.0);   // how fast they wander
+    float softK    = clamp(c2, 0.0, 1.0);   // how diffuse each one is
+    float spreadK  = clamp(c3, 0.0, 1.0);   // the play of colour itself
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.022 + 0.008 * mh_breath(t, 7.4), 0.0, 1.22);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 13.0, 10.6);
+
+    float drift = (0.055 + 0.075 * driftK) * (1.0 + 0.75 * live.pace + 0.95 * st.drive);
+    float rad = (0.135 + 0.095 * softK) * S * mix(1.0, 1.70, small)
+              * (1.0 + 0.30 * live.voice);
+    float bright = (0.82 + 0.55 * flashK) * (1.0 + 0.85 * live.voice);
+
+    // Two flashes crossfade away at the small mounts.
+    float pairB = 1.0 - smoothstep(0.30, 0.72, small);
+
+    // THE WIDEST SPREAD IN THE COLLECTION. See the header for why this species
+    // gets a multiplier the others do not.
+    float spreadAmt = spreadK * MH_SPREAD * 1.30;
+
+    float flashE = 0.0, flashH = 0.0;
+
+    for (int k = 0; k < 4; k++) {
+        float w = (k < 2) ? 1.0 : pairB;
+        if (w < 0.002) continue;
+        float fk = float(k);
+
+        // THE LIFE. Periods 14.3, 17.1, 19.6 and 22.4 seconds, mutually
+        // incommensurate and phase-offset, so the four are never in step and no
+        // gap between arrivals repeats. sin^2 for flat ends -- nothing switches
+        // on -- and a floor of 0.16 so the dimmest is still in the stone.
+        float per = 14.3 + 2.7 * fk;
+        float ph = fk * 1.97;
+        float sn = sin(6.2831853 * t / per + ph);
+        float life = 0.16 + 0.84 * sn * sn;
+        // Responding brightens them in sequence along the procession axis.
+        life = mix(life, 0.30 + 0.70 * max(sin(6.2831853 * t / 5.2 - fk * 1.4), 0.0), st.drive);
+        life = mix(life, 1.0, st.complete * 0.85);
+
+        // THE WANDER. Three incommensurate rates per flash, so each traces its
+        // own slow closed-ish path and none of them repeats against another.
+        float3 c = float3(0.44 * sin(drift * t * (0.83 + 0.11 * fk) + fk * 2.1),
+                          0.40 * sin(drift * t * (0.67 + 0.13 * fk) + fk * 3.7 + 1.1),
+                          0.42 * sin(drift * t * (0.95 + 0.09 * fk) + fk * 1.3 + 2.6));
+        // Under drive they all lean the same way: a procession, not a swarm.
+        c = mix(c, c * 0.55 + float3(0.42, -0.10, 0.18) * sin(6.2831853 * t / 5.2 - fk * 1.4),
+                st.drive);
+
+        float rk = rad * (0.80 + 0.30 * fract(fk * 0.37 + 0.21)) * (1.0 + 0.35 * fl.x * step(fk, 0.5));
+
+        float3 to = c - b.P;
+        float s = dot(to, rd);
+        if (s <= 0.0 || s >= L) continue;
+        float arg = max(dot(to, to) - s * s, 0.0) / max(rk * rk, 1e-6);
+        float vis = mh_inside(b.P + rd * s) * exp(-MH_EXT * s);
+        // The scatter carries most of the light: a flash in an opal is the glow
+        // it throws into the stone more than it is its own centre.
+        float e = (exp(-arg) * 0.55 + mh_scatter(arg, 0.46)) * vis * life * bright * w;
+
+        flashE += e;
+        // The four hues, two either side of the anchor.
+        float hueK = (fk - 1.5) / 1.5;
+        flashH += e * hueK;
+    }
+
+    float medAmt = mix(0.060, 0.032, small);
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 2.1 / S) * medAmt;
+        if (st.complete > 0.001) {
+            float sr = (length(p) - mix(0.02, 1.0, st.sweep)) / 0.24;
+            e += st.complete * 0.30 * exp(-sr * sr);
+        }
+        acc.x += e * trans * ds;
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
+    }
+
+    float interior = (acc.x * 3.40 + flashE) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.22 * st.settled);
+    float hue = (flashE > 1e-4 ? flashH / flashE : 0.0) * spreadAmt;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.52, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * flashE / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 12. Flux
+
+// FLUX. An aurora streaming inside the glass.
+//
+// THE ONE HERO ALLOWED A BROAD FLOWING FIELD, and it needs the permission
+// because an aurora is not an object. Everything else in this collection is
+// something IN the glass -- a point, a heart, a pair, a filament, shells,
+// flashes -- or, in nebula's case, weather that fills it. This is the only one
+// whose interior is a field with a direction: curtains hanging vertically,
+// bending as they stream sideways, which is a shape the rest of the family has
+// no vocabulary for.
+//
+// A CURTAIN IS A VERTICAL SHEET WHOSE POSITION WANDERS WITH HEIGHT AND DEPTH,
+// which is one line: the sheet sits at x equal to a sum of two slow waves read
+// in y and z, and the density is a gaussian in the distance from it. Two
+// incommensurate waves rather than one, because a single wave is a corrugation
+// and reads as machined. Three curtains at three offsets with three phases give
+// the stacked, overlapping look that makes an aurora read as a curtain rather
+// than as a stripe.
+//
+// AURORAE ARE BRIGHT AT THE BOTTOM AND FADE UPWARD, and getting that one profile
+// right is most of what makes this read as an aurora rather than as a vertical
+// smear. The lower edge is where the atmosphere is dense enough to glow hard;
+// above it the light thins out over several times that height. So the vertical
+// term is a sharp rise at the foot and a long exponential decay above it, and it
+// is asymmetric on purpose -- a symmetric profile reads as a band of light and
+// not as a curtain hanging.
+//
+// THE STRIATION is the fine vertical structure real curtains have: a gentle
+// modulation across the sheet, gated by mh_aa so it retires itself the moment a
+// cycle would be under two pixels. It is the thing that makes the large mount
+// worth watching and the first thing the small mount gives up.
+//
+// LEVEL RAISES THE CURTAINS: voice extends their height and brightens them,
+// which is the most literal thing an aurora can do with energy and the right one
+// -- a louder room gets a taller display. ACTIVITY QUICKENS THE STREAMING, so
+// cadence moves the curtains sideways faster and bends them harder as they go.
+//
+// RESPONDING MAKES THEM LEAN AND RUN ONE WAY. The bend phases align, the drift
+// doubles, and the whole display streams in a single direction instead of
+// wandering -- an aurora with a wind in it.
+//
+// THE GESTURE, every eleven seconds or so: a brightening surge travels across
+// the curtains from one side to the other. Auroral substorm, in miniature.
+//
+// SUCCESS: the surge runs the full width on the state's sweep and every curtain
+// lifts under it, then settles brighter.
+//
+// SIZE: at 18 pt two curtains crossfade away, the one that remains is twice as
+// wide and its bend is halved, and the striation is gone. What survives is a
+// single broad band of light leaning through a warm bead -- which is the least
+// an aurora can be and still be streaming.
+[[ stitchable ]] half4 mh_flux(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float streamK = clamp(c0, 0.0, 1.0);   // how fast the curtains travel
+    float bendK   = clamp(c1, 0.0, 1.0);   // how hard they fold
+    float heightK = clamp(c2, 0.0, 1.0);   // how far up they reach
+    float spreadK = clamp(c3, 0.0, 1.0);   // the curtains' hues
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.022 + 0.008 * mh_breath(t, 8.6), 0.0, 1.22);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 15.0, 11.3);
+
+    // The display turns slowly so the curtains are never seen from the same
+    // angle twice; responding stills the turn and leans it.
+    float ay = mix(mh_drift(t, 0.047, 0.50, 2.0), 0.42, st.drive * 0.6);
+    float ax = 0.16 + 0.10 * sin(t * 0.033);
+
+    float flow = mh_drift(t, 0.26 + 0.34 * streamK, 0.45, 4.0)
+               * (1.0 + 0.70 * live.pace + 0.95 * st.drive);
+    float bend = (0.30 + 0.42 * bendK) * (1.0 + 0.45 * live.pace) * mix(1.0, 0.50, small);
+
+    // Sheet thickness, and the widths that keep the read the same at both ends.
+    float w = (0.105 + 0.030 * bendK) * S * mix(1.0, 2.00, small);
+    float hi = (0.42 + 0.46 * heightK) * (1.0 + 0.45 * live.voice);
+
+    float second = 1.0 - smoothstep(0.34, 0.76, small);
+    float third  = 1.0 - smoothstep(0.16, 0.54, small);
+    float bright = (0.80 + 0.80 * live.voice) * (1.0 + 0.35 * st.drive);
+
+    float striGate = mh_aa(6.2831853 * 6.5 / (MH_R * S), size, pixelScale) * (1.0 - small);
+
+    float medAmt = mix(0.055, 0.030, small);
+
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+
+        float3 q = mh_spin(p, ay, ax) / S;
+
+        // UP IS NEGATIVE Y. A colorEffect's y runs DOWN the screen, so the body
+        // frame's +y is the bottom of the picture -- and the first cut hung its
+        // curtains from that, which put the bright foot along the TOP and the
+        // fade going down. An upside-down aurora is not a subtle mistake; it
+        // reads as light pouring in from above rather than as curtains standing
+        // on something. One negation fixes it, and every use of height below
+        // reads this rather than q.y.
+        float yy = -q.y;
+
+        // THE VERTICAL PROFILE, shared by all three curtains: a sharp foot and a
+        // long fade upward. `hi` is how far the light reaches above the foot.
+        float foot = smoothstep(-0.92, -0.52, yy);
+        float rise = exp(-max(yy + 0.52, 0.0) / max(hi, 1e-3));
+        float vert = foot * rise;
+
+        // Three sheets. Each wanders at its own pair of frequencies, and their
+        // phases are offset so they overlap rather than nest.
+        // The wander is deliberately weighted toward DEPTH rather than height.
+        // A sheet whose position swings hard with height leans, and three leaning
+        // sheets read as diagonal streaks rather than as curtains hanging; the
+        // same swing read in z folds the curtain toward and away from the viewer,
+        // which is what an aurora does and what the eye reads as a fold rather
+        // than as a slant. So the height terms run at 1.1 and the depth terms
+        // carry the larger share.
+        float d0 = q.x - (-0.34 + bend * (0.55 * sin(1.10 * yy + flow) + 0.95 * sin(1.15 * q.z - flow * 0.7 + 2.1)));
+        float d1 = q.x - ( 0.04 + bend * (0.55 * sin(0.85 * yy + flow * 1.18 + 2.4) + 1.00 * sin(1.55 * q.z - flow * 0.6 + 4.3)));
+        float d2 = q.x - ( 0.40 + bend * (0.55 * sin(1.35 * yy + flow * 0.86 + 4.7) + 0.90 * sin(0.95 * q.z - flow * 0.9 + 1.4)));
+
+        float a0 = (d0 * d0) / (w * w);
+        float a1 = (d1 * d1) / (w * w * 1.25);
+        float a2 = (d2 * d2) / (w * w * 0.85);
+
+        float e0 = (exp(-a0) + mh_scatter(a0, 0.20));
+        float e1 = (exp(-a1) + mh_scatter(a1, 0.20)) * second;
+        float e2 = (exp(-a2) + mh_scatter(a2, 0.20)) * third;
+
+        // The striation: fine vertical structure across the sheets.
+        float stri = 1.0;
+        if (striGate > 0.002) {
+            stri += striGate * 0.32 * sin(q.z * 6.5 + yy * 1.7 - flow * 1.4);
+        }
+
+        // The surge, and success running it the whole width.
+        float surge = 0.0;
+        if (fl.x > 0.002) {
+            float sr = (q.x - mix(-0.9, 0.9, fl.y)) / 0.42;
+            surge += fl.x * 0.85 * exp(-sr * sr);
+        }
+        if (st.complete > 0.001) {
+            float sr = (q.x - mix(-1.0, 1.0, st.sweep)) / 0.38;
+            surge += st.complete * 1.70 * exp(-sr * sr);
+        }
+
+        float curtains = (e0 + e1 + e2) * vert * bright * stri * (1.0 + surge);
+        // The three curtains at three hues, weighted by which one is here.
+        float hueW = (e0 * -1.0 + e1 * 0.15 + e2 * 1.0) * vert * bright * stri;
+
+        float med = mh_medium(p, t, 2.1 / S) * medAmt;
+        float e = (curtains * 0.85 + med) * fade;
+
+        acc.x += e * trans * ds;
+        acc.y += hueW * 0.85 * fade * trans * ds;
+        trans *= exp(-(2.90 * e + MH_EXT) * ds);
+    }
+
+    float interior = acc.x * 2.40 * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.75 * st.complete) * (1.0 + 0.22 * st.settled);
+    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.55, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
 }

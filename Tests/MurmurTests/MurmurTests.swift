@@ -729,7 +729,10 @@ func entriesAreIdentityOutsideTheirWindow(entry: MurmurEntry) {
 
 @Test func hexStrings() {
     #expect(MurmurRGBA.ink.hexString == "#0A0A0B")
-    #expect(MurmurRGBA.tone.hexString == "#E08B3C")
+    #expect(MurmurRGBA.tone.hexString == "#6C63E8")
+    // The founding amber, kept as a preset so the archive's tuning is not lost.
+    #expect(MurmurRGBA.amber.hexString == "#E08B3C")
+    #expect(MurmurRGBA.tone != MurmurRGBA.amber)
     #expect(MurmurRGBA(r: 1, g: 1, b: 1, a: 0.5).hexString == "#FFFFFF80")
 }
 
@@ -746,7 +749,7 @@ func agentPromptCarriesTheConfiguration(surface: MurmurExportSurface) {
         #expect(prompt.contains(knob.label), "missing knob label \(knob.label)")
     }
     #expect(prompt.contains("#0A0A0B"))
-    #expect(prompt.contains("#E08B3C"))
+    #expect(prompt.contains("#6C63E8"))
     #expect(prompt.contains("```swift"))
     #expect(!prose(of: prompt).contains("\u{2014}"), "em dash in generated prose")
 

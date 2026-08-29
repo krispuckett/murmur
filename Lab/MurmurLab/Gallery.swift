@@ -16,7 +16,10 @@ import Murmur
 /// the shelf would advertise holes. This list is the gate: update it when a
 /// batch lands, and the cell appears.
 enum GlassRoster {
-    static let landed: Set<String> = ["aura", "droplet", "limn", "comet"]
+    static let landed: Set<String> = [
+        "aura", "droplet", "limn", "comet",
+        "nebula", "prism", "duet", "still",
+    ]
 
     static var collection: [MurmurStyle] {
         MurmurFamily.glass.styles.filter { landed.contains($0.rawValue) }

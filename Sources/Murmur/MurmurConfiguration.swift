@@ -54,8 +54,13 @@ public struct MurmurRGBA: Sendable, Codable, Equatable, Hashable {
 
     /// The house ink. Not black: black is a hole, this is a ground.
     public static let ink = MurmurRGBA(r: 0.039, g: 0.039, b: 0.043)
-    /// The default hue family anchor. Warm amber, the pour's blood.
-    public static let tone = MurmurRGBA(r: 0.878, g: 0.545, b: 0.235)
+    /// The default hue family anchor. Violet-indigo, in the reference class.
+    /// It replaced the amber on Kris's call: amber sat too close to the paper
+    /// chip in light appearance, and the whole rail went muddy with it.
+    public static let tone = MurmurRGBA(r: 0.424, g: 0.388, b: 0.910)
+    /// The founding tone. Kept because a good deal of the archive was tuned
+    /// against it, and because it is still the right anchor for a warm app.
+    public static let amber = MurmurRGBA(r: 0.878, g: 0.545, b: 0.235)
     /// The light-scheme chip. A paper neutral so the pill is not a slab of
     /// white, and the field has somewhere to dissolve into.
     public static let paper = MurmurRGBA(r: 0.925, g: 0.925, b: 0.937)

@@ -43,6 +43,10 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(1.2))
                 model.state = state
             }
+            // -openScheme light flips the preview stage, for the same rig.
+            if UserDefaults.standard.string(forKey: "openScheme") == "light" {
+                model.previewScheme = .light
+            }
         }
     }
 
