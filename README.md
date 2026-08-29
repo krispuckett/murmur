@@ -1,10 +1,10 @@
 # Murmur
 
-Thinking indicators for AI products, built as living material. Murmur is a
-Swift package with 40 Metal shader species in five families behind one
-SwiftUI view, five AI states with designed transitions, a lab app for tuning
-a configuration by hand, and an export that writes the implementation prompt
-for a coding agent.
+Responsive AI presences, built as living material. Murmur is a Swift package
+with 48 Metal shader species in six families behind one SwiftUI view, six AI
+states with designed transitions, live signals so the presence responds to
+voice and typing, a lab app for tuning a configuration by hand, and an
+export that writes the implementation prompt for a coding agent.
 
 Every style is generated per pixel in a fragment shader. There are no videos,
 no particle systems, no sprite sheets, and nothing that pulses for attention.
@@ -39,10 +39,25 @@ MurmurView(MurmurConfiguration(style: .eddy))
 Both views adapt to light and dark. A configuration is Codable, so a design
 can be saved, versioned, or sent across a wire.
 
+## Signals
+
+The presence listens. Feed it two live scalars from your app and it responds
+in its own physics:
+
+```swift
+MurmurView(config, state: .listening,
+           signals: MurmurSignals(level: micLevel, activity: tokenRate))
+```
+
+`level` is voice energy (an orb that swells, opens, or sprouts light as the
+person speaks); `activity` is typing or token cadence (the presence leans in
+while you type, quickens while the model streams). The presence family is
+designed around these; every other family responds tastefully too.
+
 ## States
 
-`MurmurState` gives the indicator an agent's inner life: `idle`, `thinking`,
-`responding`, `success`, `error`. Drive it from your host app:
+`MurmurState` gives the indicator an agent's inner life: `idle`, `listening`,
+`thinking`, `responding`, `success`, `error`. Drive it from your host app:
 
 ```swift
 MurmurPill(config, state: agentIsStreaming ? .responding : .thinking)
@@ -77,7 +92,7 @@ jumps straight to any studio, which is how agents drive it for screenshots.
 
 ## The roster
 
-Five families, eight species each. Names are `MurmurStyle` cases.
+Six families, eight species each. Names are `MurmurStyle` cases.
 
 | Family | Species |
 |---|---|
@@ -86,6 +101,13 @@ Five families, eight species each. Names are `MurmurStyle` cases.
 | light | caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse |
 | signal | murmuration, loom, cipher, tuning, current, veil, echo, glyph |
 | orb | breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein |
+| presence | halo, nucleus, iris, filament, flare, braid, mote, ripple |
+
+The presence family is the reactive-first cast, designed for the three
+mounts: an 18 pt companion at the edge of a text field, a 46 pt chat chip,
+and a 120 pt+ voice stage. Halo's ring carries your voice around its
+circumference; iris opens as you speak; mote leans into your typing; ripple
+lets every keystroke land as a ring.
 
 Every species is an orb: one compact presence that could be the assistant
 itself, and the species is what that orb is made of and how it behaves.
