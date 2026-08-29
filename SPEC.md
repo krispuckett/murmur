@@ -1,7 +1,7 @@
 # Murmur — build contract
 
 Murmur is a Swift package of parametric thinking indicators for AI products:
-40 Metal shader "species" in five families, one uniform API, five AI states (idle, thinking,
+48 Metal shader "species" in six families, one uniform API, six AI states (idle, listening, thinking,
 responding, success, error) with per-state animation treatments, a lab app for
 designing a configuration by hand, and a one-tap export that hands the exact
 configuration to a coding agent for implementation. This document is the contract every
@@ -87,6 +87,7 @@ murmur/
       MurmurLight.metal             owner: pack-light    prefix mg_
       MurmurSignal.metal            owner: pack-signal   prefix ms_
       MurmurOrb.metal               owner: pack-orb      prefix mo_
+      MurmurPresence.metal          owner: pack-presence prefix mq_
   Tests/MurmurTests/
     MurmurTests.swift               owner: core
   Lab/
@@ -122,8 +123,10 @@ Every style is one `[[ stitchable ]]` function with EXACTLY this signature
     float  c2,            // character knob 2
     float  c3,            // character knob 3
     float  epoch,         // restart hook for settle arcs; 0 otherwise
-    float  stateIndex,    // 0 idle, 1 thinking, 2 responding, 3 success, 4 error
-    float  stateTau       // seconds since the state was entered
+    float  stateIndex,    // 0 idle, 1 listening, 2 thinking, 3 responding, 4 success, 5 error
+    float  stateTau,      // seconds since the state was entered
+    float  level,         // live voice energy from the host, 0..1, smoothed
+    float  activity       // live typing/stream cadence from the host, 0..1
 )
 ```
 
@@ -242,11 +245,32 @@ cream peaks). Default 0.3. Accent density and warmth both ride this dial.
 | daybreak | mo_daybreak | a terminator of light sweeping the sphere, dawn crossing a small planet | sweep 0.5 | softness 0.5 | dotSize 0.5 | material 0.3 |
 | skein | mo_skein | dots strung along a winding thread wrapping the sphere, wound and unwound | winding 0.5 | trail 0.5 | dotSize 0.5 | material 0.3 |
 
+### MurmurPresence.metal (mq_) — the responsive cast, designed reactive-first
+
+These eight are built FOR the live signals and the three mounts (18 pt input
+field, 46 pt chip, 120 pt+ voice stage). Every species has a DESIGNED
+response to `level` and `activity`, not a generic lift, and every species is
+tested tiny-first: at 18 pt one bold clear gesture must survive. The orb law
+and value hierarchy apply. All are arc-free except noted; all implement the
+family state behaviors (success completes the presence's own pattern;
+responding is decisive drive; listening is where level does its deepest work).
+
+| case | fn | species | c0 | c1 | c2 | c3 |
+|---|---|---|---|---|---|---|
+| halo | mq_halo | a thin luminous ring tilting in 3D like a coin's edge; voice travels its circumference as a wave, never bars | tilt 0.5 | thickness 0.4 | waviness 0.5 | shimmer 0.4 |
+| nucleus | mq_nucleus | a steady bright core wearing a shell of circulating mist; voice swells the shell, success collapses it into the core | coreSize 0.5 | shell 0.5 | circulate 0.5 | swellRange 0.5 |
+| iris | mq_iris | an aperture of soft light petals; voice opens it, silence closes it to a slit glow | petals 0.5 | openness 0.5 | softness 0.5 | twist 0.4 |
+| filament | mq_filament | one continuous thread of light: knotting loosely while thinking, taut while responding, coiled at rest | length 0.5 | knot 0.5 | brightness 0.5 | sway 0.4 |
+| flare | mq_flare | a soft solar disc whose edge sprouts short organic licks with voice level; a sun, never an EQ | discSize 0.5 | licks 0.5 | reach 0.5 | flicker 0.3 |
+| braid | mq_braid | two strands orbiting a common center: loose at idle, braided tight while responding; the conversation itself | strands 0.5 | twist 0.5 | separation 0.5 | glowBalance 0.5 |
+| mote | mq_mote | the minimal presence: one soft light wandering a small path, leaning toward typing, stretching slightly with voice; designed at 18 pt first | wander 0.4 | lean 0.5 | size 0.4 | tail 0.3 |
+| ripple | mq_ripple | a still face-on liquid disc where input lands: each impulse of activity drops one soft propagating ring | stillness 0.5 | ringSpeed 0.5 | decay 0.5 | sheen 0.5 |
+
 ## Swift API (owner: core)
 
 ```swift
 public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
-    case liquid, ink, light, signal, orb
+    case liquid, ink, light, signal, orb, presence
 }
 
 public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
@@ -255,6 +279,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
     case murmuration, loom, cipher, tuning, current, veil, echo, glyph
     case breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein  // orb
+    case halo, nucleus, iris, filament, flare, braid, mote, ripple      // presence
     // id, family, displayName, shaderName ("ml_eddy" etc.),
     // characterKnobs: [MurmurKnob] (label + default from the roster tables),
     // hasArc: Bool (the (arc) styles)
@@ -331,9 +356,24 @@ reads the .metal source from the module bundle at runtime. If bundling the
 source proves fragile, emit the package-dependency form and note it; do not
 ship a broken exporter.
 
+## Live signals (owner: core, packs; added from Kris's responsive-presence reset)
+
+The presence LISTENS. `MurmurSignals` carries two live scalars the host feeds:
+`level` (voice energy, e.g. mic amplitude, smoothed) and `activity` (typing
+cadence or token-stream rate), both 0..1, passed as the last two shader
+uniforms every frame. The presence family responds to them deeply and
+per-species; the older families get a tasteful generic response applied
+Swift-side (activity quickens effective speed a little, level lifts effective
+glow a little) plus whatever per-species use they choose in-shader. A
+presence that ignores its person is decoration; these signals are why it
+is not.
+
 ## States and state designs (owner: core, packs)
 
-Five AI states: `MurmurState` = idle, thinking, responding, success, error.
+Six AI states: `MurmurState` = idle, listening, thinking, responding,
+success, error. `listening` is the voice state (seed: speed 0.9, glow 1.1,
+depth 1.1, entry none): attentive and open, the state where `level` does the
+most work.
 A state is a full DESIGN, not a tint on the base:
 
 - `MurmurParameters` holds one complete dial set: speed, formScale, depth,

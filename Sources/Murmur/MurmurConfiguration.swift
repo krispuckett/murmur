@@ -1,10 +1,10 @@
 // A configuration is the whole design decision: which species, the two
 // colors the palette rail is built from, and a complete dial set for each of
-// the five states.
+// the six states.
 //
 // Kris's shape, in his words: go to idle, make all the changes you want to
 // idle, and have it kind of have a save point. Then go to thinking, make any
-// changes there. Then copy those over. So the states are five independent
+// changes there. Then copy those over. So the states are six independent
 // designs that happen to share a style and a palette, not one design with a
 // state multiplier on top.
 
@@ -73,7 +73,7 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
     /// What each state's arrival looks like.
     public var entries: [MurmurState: MurmurEntry]
 
-    /// Passing only a style seeds all five states from that style's own
+    /// Passing only a style seeds all six states from that style's own
     /// tuning, which is the out-of-box design.
     public init(
         style: MurmurStyle,

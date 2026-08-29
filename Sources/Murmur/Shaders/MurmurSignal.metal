@@ -461,14 +461,18 @@ static MSState ms_state(float stateIndex, float stateTau) {
     MSState o;
     o.complete = 0.0; o.settled = 0.0; o.drive = 0.0;
     float tau = max(stateTau, 0.0);
-    if (stateIndex > 2.5 && stateIndex < 3.5) {
+    // The indices moved when `listening` was inserted at 1: success is 4 now and
+    // responding is 3. Both compares are windows rather than equality, because
+    // this arrives as a float and an exact compare on a float that has been
+    // through an interpolator is a bug waiting for a rounding error.
+    if (stateIndex > 3.5 && stateIndex < 4.5) {
         float a = clamp(tau / 1.20, 0.0, 1.0);
         // In over about 0.36 s, out over the remaining 0.8. The rise was 0.24 s
         // in the first cut and at 30 fps that is seven frames, which reads as a
         // strobe rather than as an arrival. An arrival wants to be seen arriving.
         o.complete = smoothstep(0.0, 0.30, a) * (1.0 - smoothstep(0.36, 1.0, a));
         o.settled  = smoothstep(0.30, 1.05, a);
-    } else if (stateIndex > 1.5 && stateIndex < 2.5) {
+    } else if (stateIndex > 2.5 && stateIndex < 3.5) {
         o.drive = smoothstep(0.0, 0.55, tau);
     }
     return o;
@@ -629,7 +633,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -643,7 +648,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // THE BANK.
     MSState st = ms_state(stateIndex, stateTau);
 
-    float bank = turn * (0.62 * sin(t * 0.214) + 0.31 * sin(t * 0.362 + 1.7));
+    // LEVEL: a flock under stimulus banks harder. Voice energy goes into the
+    // TURN, which is this species' own verb, rather than into brightness -- the
+    // presence reacts by moving the way a flock moves.
+    float bank = turn * (0.62 * sin(t * 0.214) + 0.31 * sin(t * 0.362 + 1.7))
+               * (1.0 + 0.60 * clamp(level, 0.0, 1.0));
 
     // THE FLOCK BALLS. Real murmurations do this under a hawk: the sheet closes
     // into a sphere and the folding goes on over its surface. So the fold field
@@ -747,7 +756,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -777,7 +787,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float taut = clamp(max(tension * (0.42 + 0.58 * beat), st.complete), 0.0, 1.0);
     float wander = mix(1.15, 0.20, taut) * (1.0 - 0.85 * st.complete);
 
-    float feed = 1.0 + 1.30 * st.drive;
+    // ACTIVITY: the bolt is fed at the rate the stream arrives. A loom whose
+    // cloth comes off it faster while text is being typed is the most literal
+    // reading of this signal any species in the pack has.
+    float feed = 1.0 + 1.30 * st.drive + 0.85 * clamp(activity, 0.0, 1.0);
     float3 P = ms_spin(orb.p, t * 0.17 * feed, 0.18);
 
     // The drape, on the ball. Cloth is not stretched tight over a form, it
@@ -916,7 +929,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -946,7 +960,9 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // the frame to fake that curvature. As the axis swings, the lit arc sweeps
     // across the face and off the limb, which is the reveal PASSING, on a
     // presence, with the far half of the ring hidden behind it.
-    float rate = mix(1.05, 0.38, dwell) * (1.0 + 0.70 * st.drive);
+    // ACTIVITY: attention crosses the face faster while something is arriving.
+    float rate = mix(1.05, 0.38, dwell)
+               * (1.0 + 0.70 * st.drive + 0.55 * clamp(activity, 0.0, 1.0));
     float4 fLook = ms_flourish(t, 21.0);
     float lookA = fLook.z * 6.2831853;
     float axA = t * rate * 0.55 + fLook.x * 0.55 * cos(lookA);
@@ -1048,7 +1064,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1148,7 +1165,11 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // modulates the line's brightness along its length so it is alive, but a
     // line that the noise is allowed to cut into pieces stops being one thing,
     // and one thing is what a 76 pt indicator has room to say.
-    float station = prof * (0.58 + 0.42 * v01) * orb.lit;
+    // LEVEL: signal strength, which is the one thing a receiver has always
+    // meant. The station brightens with the voice the way a meter reads it, and
+    // the hiss underneath does not, so a loud signal is a better signal.
+    float station = prof * (0.58 + 0.42 * v01) * orb.lit
+                  * (1.0 + 0.55 * clamp(level, 0.0, 1.0));
     // What is still spread over the whole frame. At birth this is the picture.
     float spread = mix(1.0, mix(0.30, 0.12, lock), arc) * 0.42 * v01;
     // The floor. Gated on the same resolution test so it stays a noise FLOOR at
@@ -1222,7 +1243,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1292,7 +1314,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     float3 e2 = cross(N0, e1);
     float phase = atan2(dot(P, e2), dot(P, e1)) * straight * 0.42 + bend * bendAmt;
 
-    float rate = mix(0.57, 2.35, pulseRate) * (1.0 + 0.80 * st.drive);
+    // LEVEL: impulses come faster as the voice rises. The signal in a medium
+    // carrying more traffic is the plainest thing this species can say.
+    float rate = mix(0.57, 2.35, pulseRate)
+               * (1.0 + 0.80 * st.drive + 0.90 * clamp(level, 0.0, 1.0));
     // THE SURGE: one stretch of the medium briefly carries the signal faster,
     // so an impulse runs ahead of the rest of the front and then falls back into
     // step. It is a phase advance inside a soft region -- a change in WHERE the
@@ -1378,7 +1403,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1393,7 +1419,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
 
     MSOrb orb = ms_orb(uv, float2(0.0), 0.335);
     float sep = 0.30 + 0.70 * layers;
-    float base = (0.210 + 0.420 * drift) * (1.0 + 1.00 * st.drive);
+    // ACTIVITY: the shells turn against one another faster while content is
+    // streaming, so the parallax -- the species' whole depth cue -- responds.
+    float base = (0.210 + 0.420 * drift)
+               * (1.0 + 1.00 * st.drive + 0.70 * clamp(activity, 0.0, 1.0));
     float4 fPart = ms_flourish(t, 57.0);
 
     float r = length(uv);
@@ -1507,7 +1536,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1550,7 +1580,10 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // inside its own source. A trail needs its members separable.
     float step = (0.125 + 0.130 * offset) * (1.0 - 0.92 * st.complete);
     float lag  = 0.22 + 0.55 * offset;
-    float live = 1.2 + 2.8 * repeats;
+    // LEVEL: a louder source is answered further down the series. More of the
+    // trail becomes audible as the voice rises, which is what an echo does in a
+    // room and what no amount of extra brightness would have said.
+    float live = 1.2 + 2.8 * repeats + 1.10 * clamp(level, 0.0, 1.0);
 
     float4 fNear = ms_flourish(t, 66.0);
 
@@ -1635,7 +1668,8 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1731,8 +1765,13 @@ static inline half4 ms_finish(float3 field, float3 inkLin, float containment,
     // came out as a single blown sweep with no marks in it at all. Overlapped
     // so the peak lands near 0.46: there is no value of L at which a mark is
     // fully formed, which is the species.
+    // ACTIVITY: the hand writes at the rate the text arrives. Marks form and go
+    // faster while something is being typed, which is the clock of this species
+    // and not a gloss on it.
     float L = 0.5 + 1.90 * ms_fbm3(P * (1.60 / S)
-                  + float3(0.0, 0.0, t * (0.300 + 0.34 * st.drive)), 2, 2.00, 0.50);
+                  + float3(0.0, 0.0, t * (0.300 + 0.34 * st.drive
+                                          + 0.45 * clamp(activity, 0.0, 1.0))),
+                  2, 2.00, 0.50);
     float peak = 0.30 + 0.30 * formation;
     float w2 = mix(0.20, 0.12, dissolve);
     float rise = smoothstep(peak - 0.16, peak + 0.10, L);

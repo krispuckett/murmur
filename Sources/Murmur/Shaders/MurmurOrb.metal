@@ -531,12 +531,17 @@ struct MOState {
     float turn;     // responding: the EXTRA ANGLE that urgency has turned so far
 };
 
+/// The six states are 0 idle, 1 listening, 2 thinking, 3 responding, 4 success,
+/// 5 error. Only two of them get an in-shader branch. `listening` deliberately
+/// does not: it is the state where `level` does its deepest work, and a live
+/// signal saying how loud the room is says far more about listening than any
+/// constant this function could return.
 static MOState mo_state(float stateIndex, float stateTau) {
     MOState o;
     o.crest = 0.0; o.wave = 9.0; o.accord = 0.0; o.settled = 0.0;
     o.drive = 0.0; o.turn = 0.0;
     float tau = max(stateTau, 0.0);
-    if (stateIndex > 2.5 && stateIndex < 3.5) {
+    if (stateIndex > 3.5 && stateIndex < 4.5) {
         float a = clamp(tau / 1.20, 0.0, 1.0);
         // In over about 0.2 s, out over the rest. The first cut rose in seven
         // frames at 30 fps, which reads as a strobe rather than as an arrival.
@@ -547,7 +552,7 @@ static MOState mo_state(float stateIndex, float stateTau) {
         o.wave   = 1.30 - 2.60 * smoothstep(0.0, 0.66, a);
         o.accord = smoothstep(0.06, 0.42, a) * (1.0 - smoothstep(0.66, 1.0, a));
         o.settled = smoothstep(0.30, 1.05, a);
-    } else if (stateIndex > 1.5 && stateIndex < 2.5) {
+    } else if (stateIndex > 2.5 && stateIndex < 3.5) {
         o.drive = smoothstep(0.0, 0.55, tau);
         o.turn  = mo_drive_turn(tau, 0.55);
     }
@@ -859,8 +864,35 @@ struct MOSpec {
     float a0, a1, a2, a3;
     float3 vec;      // one direction, for the species that need one
     float t;         // the species clock, speed already in it
+    float act;       // the host's live activity signal, for the two species that
+                     // spend it inside mo_level; the rest read the uniform in
+                     // their own preamble, where the arithmetic belongs
     float crest, wave, accord, settled, drive;   // the state read
 };
+
+// THE LIVE SIGNALS, and the one rule that governs every use of them in this file.
+//
+// `level` is voice energy and `activity` is typing or token-stream cadence, both
+// 0...1, both arriving fresh every frame from the host. They are the difference
+// between a presence and a decoration, and they are also the easiest way to put
+// a stutter in a rotating sphere.
+//
+// A LIVE SIGNAL MAY NEVER TOUCH A RATE. Every rotation in this pack is an angle
+// of the form rate * t. Multiply that rate by a signal that changes between
+// frames and the ANGLE jumps by the change times however many seconds the app
+// has been running -- at half a minute in, a two per cent wobble in the mic
+// level throws the sphere most of a radian, every frame, which reads as a
+// vibrating ball and not as responsiveness. It is the same trap mo_drive_turn
+// exists to defuse for the responding state, except that a state change happens
+// once and can be integrated in closed form, while a live signal changes forever
+// and cannot.
+//
+// So the signals here only ever move MAGNITUDES: a radius, a dot size, a band's
+// contrast, a swirl's depth, a ring's tightness, a tremor's floor, a flare's
+// width, a bead's length. Every one of them is written so that a signal of zero
+// leaves the species exactly as it was designed, which is also what makes them
+// safe to leave unwired: a host that never sends a signal gets the orb that was
+// approved, to the pixel.
 
 /// WHERE THE DOTS SIT. Four of the eight species move their lattice, and all
 /// four do it the same way: by warping the direction the lookup is done in,
@@ -994,8 +1026,17 @@ static float2 mo_level(MOSpec sp, float3 q, float3 view, float index) {
         // This is also where SUCCESS lands for this species -- accord evens the
         // weights out below, which is the honest way to say "in accord" when the
         // deviation itself is a rate and cannot be touched.
+        //
+        // ACTIVITY SHARPENS THE BELTS. A quicker stream does not make this
+        // sphere spin faster -- a live signal on a rate would shake it apart --
+        // it makes the banding more DEFINITE: the contrast between a fast lane
+        // and a slow one opens up while the mean brightness holds still, so the
+        // ball looks more strongly striped rather than merely brighter. That is
+        // the honest reading of cadence on a species whose whole idea is that
+        // different latitudes disagree about how fast they are going.
         float band = 0.5 + 0.5 * cos((1.4 + 4.2 * sp.k0) * M_PI_F * q.z);
-        lvl = 0.72 + 0.52 * band;
+        float con = 0.52 + 0.40 * sp.act;
+        lvl = (0.72 - 0.20 * sp.act) + con * band;
         rs  = 0.92 + 0.17 * band;
     } else if (sp.kind == 2) {
         // GLIMMER. Each dot owns a phase, hashed from its index, and lights when
@@ -1095,7 +1136,13 @@ static float2 mo_level(MOSpec sp, float3 q, float3 view, float index) {
         // stretch of thread at one. It is read straight off the knob here rather
         // than precomputed because it is the one thing about the bead that is a
         // shape and not a position.
-        float bd = (lat - sp.a2) / (0.24 + 0.52 * sp.k1);
+        //
+        // ACTIVITY DRAWS THE BEAD OUT. A fast stream does not send the bead
+        // round the thread quicker -- that would be a rate -- it lights MORE OF
+        // THE THREAD AT ONCE behind it, so a burst of typing shows as a long run
+        // of strung dots glowing at the same time and a pause shrinks back to a
+        // single travelling spark. Cadence as length rather than as speed.
+        float bd = (lat - sp.a2) / (0.24 + 0.52 * sp.k1 + 0.42 * sp.act);
         float bead = exp(-bd * bd);
         lvl = 0.32 + 0.74 * thr + 0.82 * thr * bead;
         rs  = 0.86 + 0.22 * thr + 0.16 * thr * bead;
@@ -1359,7 +1406,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1380,13 +1428,23 @@ static inline float mo_radius(float n, float dotSize) {
     sp.k0 = breath; sp.k1 = depthFade;
     // The deeper breath is a swell of the amplitude, not a change of the rate:
     // a breath that speeds up is a person startled, and this species is at rest.
-    sp.a0 = (0.22 + 0.55 * breath) * (1.0 + 0.62 * fl.x);
+    //
+    // LEVEL BREATHES WITH THE VOICE, and on this species that is the obvious
+    // and correct reading: the lattice is already inhaling, so a person speaking
+    // simply makes the breath deeper. It enters the amplitude, which the sphere
+    // radius below already follows, so the ball opens outward as the room gets
+    // louder rather than merely brightening. Nothing here touches the 0.66 rad/s
+    // breath rate; a live signal on that would make the orb hyperventilate in
+    // sympathy with the mic's own noise floor.
+    float lv = clamp(level, 0.0, 1.0);
+    sp.a0 = (0.22 + 0.55 * breath) * (1.0 + 0.62 * fl.x) + 0.55 * lv;
     // The lag is taken out on accord, which is this species' way of saying the
     // lattice has come into agreement: the whole ball breathing as one piece.
     sp.a1 = (0.45 + 1.45 * depthFade) * (1.0 - 0.85 * st.accord);
     sp.a2 = 0.0; sp.a3 = 0.0;
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1396,7 +1454,18 @@ static inline float mo_radius(float n, float dotSize) {
     float spin = t * 0.32 + 0.085 * mo_fbm1(t * 0.115, 2, 5.0) + 0.50 * st.turn;
     float tip  = 1.2708 + 0.055 * sin(t * 0.083);
 
-    float R = MO_R * (1.0 + 0.042 * sp.a0 * (0.5 + 0.5 * sin(t * 0.66)));
+    // Plus a steady opening with the voice on top of the oscillation, so a held
+    // note holds the sphere open instead of only deepening its rhythm.
+    //
+    // AND A CEILING, because the two swells stack. Breath at 1, a flourish at
+    // its peak and a voice at full would put the limb at 0.416 uv, and the
+    // containment starts its fall at 0.42: four thousandths of margin, which is
+    // not margin, it is luck. Lab sliders find corners like that on purpose. The
+    // ball simply stops growing at 0.408 instead, which nobody will ever see
+    // happen and which guarantees the limb is never dimmed by the guard that
+    // exists to catch things that leave the frame.
+    float R = min(MO_R * (1.0 + 0.042 * sp.a0 * (0.5 + 0.5 * sin(t * 0.66))
+                              + 0.055 * lv), 0.408);
     return mo_orb(sp, mat, mo_frame(spin, tip), R, position, size, pixelScale,
                   inkColor, toneColor, hueShift, depth, glow, 0.32);
 }
@@ -1433,7 +1502,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1463,6 +1533,7 @@ static inline float mo_radius(float n, float dotSize) {
     sp.a3 = (fl.z - 0.5) * 1.70;             // which one it is
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1508,7 +1579,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1534,11 +1606,21 @@ static inline float mo_radius(float n, float dotSize) {
     sp.a0 = t * rate + rate * 1.10 * st.turn;
     // Wider on accord, so at the top of a success every dot is lit at once --
     // which for this species is exactly what "the lattice completes" means.
-    sp.a1 = mix(mix(24.0, 5.0, spread), 0.9, st.accord);
+    //
+    // ACTIVITY WIDENS THE BUMP, which is to say it changes HOW MANY dots are
+    // lit at once rather than how fast the count runs. A quick stream has more
+    // of the constellation alight simultaneously; a pause narrows back to one or
+    // two stars at a time. Speeding the count instead would have been the
+    // obvious move and it is a rate, so it is not available -- and this is the
+    // better picture anyway, because the eye reads density instantly and reads a
+    // change of tempo only after several seconds of watching.
+    sp.a1 = mix(mix(mix(24.0, 5.0, spread), 1.9, 0.55 * clamp(activity, 0.0, 1.0)),
+                0.9, st.accord);
     sp.a2 = fl.x;                            // the chain
     sp.a3 = 1.15 - 2.30 * fl.y;              // where along the ball it has got to
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1584,7 +1666,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1597,8 +1680,14 @@ static inline float mo_radius(float n, float dotSize) {
     // second and a half and lets go. Accord releases the whole thing, which for
     // this species is the lattice snapping back to its even seats -- the most
     // literal reading of "every dot briefly in accord" in the pack.
+    //
+    // LEVEL PULLS HARDER. The beat is the depth of the draw and the depth of the
+    // winding at once, so putting the voice into it means a louder room drags
+    // the lattice further up toward the pole and twists it tighter on the way --
+    // the vortex bites when you speak. An amplitude, not a rate: the 33 second
+    // beat keeps its own time no matter what the mic is doing.
     float beat = (0.5 + 0.5 * sin(t * 0.187 - 1.10)) * (1.0 - 0.82 * st.accord)
-               + 0.26 * fl.x;
+               + 0.26 * fl.x + 0.32 * clamp(level, 0.0, 1.0);
     beat = clamp(beat, 0.0, 1.15);
 
     // c3 is the material dial for every species in this family.
@@ -1620,6 +1709,7 @@ static inline float mo_radius(float n, float dotSize) {
     sp.a2 = 0.0; sp.a3 = 0.0;
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1673,7 +1763,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1703,13 +1794,21 @@ static inline float mo_radius(float n, float dotSize) {
     sp.a0 = (law.z * (1.0 - 0.92 * st.accord) + 0.045) * (1.0 + 0.30 * fl.x);
     // The ring's power law. RESPONDING packs it tighter: an answer being
     // delivered is an answer whose parts have stopped moving apart.
-    sp.a1 = 1.0 + (0.60 + 2.00 * ring) * arc * (1.0 + 0.35 * st.drive);
+    //
+    // LEVEL PACKS IT TIGHTER STILL, and only once the ring exists -- the term
+    // rides on `arc`, so a voice cannot summon a band out of a cloud that has
+    // not gathered yet. It can only draw a finished ring finer. That ordering is
+    // the difference between a signal that participates in the species' idea and
+    // one that overrides it.
+    sp.a1 = 1.0 + (0.60 + 2.00 * ring) * arc
+                * (1.0 + 0.35 * st.drive + 0.45 * clamp(level, 0.0, 1.0));
     // The fold's own drift, taken from the law's INTEGRAL so it slows exactly the
     // way the scatter does and then keeps creeping forever at the hold rate.
     sp.a2 = law.y * 0.95 + 0.55 * fl.x;
     sp.a3 = arc;
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1759,7 +1858,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1780,12 +1880,20 @@ static inline float mo_radius(float n, float dotSize) {
     sp.back = 0.72;
     sp.key  = 1.0;
     sp.k0 = jitter; sp.k1 = settle;
-    sp.a0 = (0.16 + 0.84 * env) * (1.0 - 0.90 * st.accord) * (1.0 - 0.35 * st.drive);
+    // ACTIVITY RAISES THE TREMOR FLOOR, which is the most literal signal
+    // response in the pack: this species is a pair of hands, and hands get
+    // busier when there is more coming in. Between gestures the lattice is
+    // normally almost seated; under a fast stream it never quite settles. The
+    // flourish still arrives on its own aperiodic clock on top -- cadence sets
+    // how restless the hands are, not when they move.
+    sp.a0 = min((0.16 + 0.36 * clamp(activity, 0.0, 1.0) + 0.84 * env), 1.20)
+          * (1.0 - 0.90 * st.accord) * (1.0 - 0.35 * st.drive);
     sp.a1 = 0.0;
     sp.a2 = t * 0.185 + 0.62 * fl.x;          // the field the jostle is read in
     sp.a3 = 0.0;
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1830,7 +1938,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1856,14 +1965,21 @@ static inline float mo_radius(float n, float dotSize) {
     // modelling when the sun is edge on. The sun does the rest.
     sp.key  = 0.28;
     sp.k0 = sweep; sp.k1 = softness;
-    sp.a0 = 0.55 + 0.95 * fl.x;                       // the flare along the line
+    // The flare along the dawn line -- and LEVEL FLARES IT. The dawn line is
+    // already this species' brightest structure and its whole figure, so the
+    // voice lands exactly where the eye is: speak, and the sunrise blazes along
+    // the terminator and the atmosphere it is shining through gets thicker.
+    // Nothing moves the sun's own progress, which keeps its day.
+    float lv = clamp(level, 0.0, 1.0);
+    sp.a0 = 0.55 + 0.95 * fl.x + 0.75 * lv;
     sp.a1 = 0.0; sp.a2 = 0.0;
     // The terminator's width, and accord floods it: at the top of a success the
     // terminator is wider than the planet and the whole lattice is in daylight
     // at once, which is this family's arrival said in this species' own physics.
-    sp.a3 = (0.10 + 0.30 * softness) * (1.0 + 3.4 * st.accord);
+    sp.a3 = (0.10 + 0.30 * softness) * (1.0 + 3.4 * st.accord + 0.40 * lv);
     sp.vec = normalize(float3(cos(sa) * 0.94, -0.32, 0.34 + 0.60 * sin(sa)));
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 
@@ -1911,7 +2027,8 @@ static inline float mo_radius(float n, float dotSize) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float t = time * max(speed, 0.0);
     MOState st = mo_state(stateIndex, stateTau);
@@ -1946,6 +2063,7 @@ static inline float mo_radius(float n, float dotSize) {
     sp.a3 = (0.095 + 0.070 * (1.0 - trail)) * (1.0 + 11.0 * st.accord);
     sp.vec = float3(0.0, 0.0, 1.0);
     sp.t = t;
+    sp.act = clamp(activity, 0.0, 1.0);
     sp.crest = st.crest; sp.wave = st.wave; sp.accord = st.accord;
     sp.settled = st.settled; sp.drive = st.drive;
 

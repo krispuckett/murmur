@@ -25,6 +25,7 @@ import SwiftUI
 public struct MurmurView: View {
     private let configuration: MurmurConfiguration
     private let state: MurmurState
+    private let signals: MurmurSignals
     private let animated: Bool
     private let stillTime: Double
     private let fps: Double
@@ -37,16 +38,21 @@ public struct MurmurView: View {
     @State private var previousState: MurmurState
     @State private var stateChangedAt: Date
     @State private var phaseAtChange: Double = 0
+    /// Smoothed live signals. A reference type so stepping it per frame does
+    /// not write view state mid-update. See MurmurSignalEnvelope.
+    @State private var envelope = MurmurSignalEnvelope()
 
     public init(
         _ configuration: MurmurConfiguration,
         state: MurmurState = .thinking,
+        signals: MurmurSignals = .none,
         animated: Bool = true,
         stillTime: Double = 4.0,
         fps: Double = 30
     ) {
         self.configuration = configuration
         self.state = state
+        self.signals = signals
         self.animated = animated
         self.stillTime = stillTime
         self.fps = fps
@@ -71,15 +77,20 @@ public struct MurmurView: View {
                 // be taken half a second in to catch a success flash or four
                 // seconds in to show the settled look.
                 let design = configuration.resolvedParameters(for: state)
+                // Raw, unsmoothed: a still frame has no previous frame to
+                // smooth from, and a screenshot rig wants exactly what it
+                // asked for.
+                let live = signals.clamped
                 field(
                     time: stillTime,
-                    speed: design.speed,
-                    glow: design.glow,
+                    speed: design.speed * (1 + MurmurSignals.activitySpeedLift * live.activity),
+                    glow: design.glow * (1 + MurmurSignals.levelGlowLift * live.level),
                     depth: design.depth,
                     hueShift: design.hueShift,
                     formScale: design.formScale,
                     character: design.character,
-                    stateTau: stillTime
+                    stateTau: stillTime,
+                    signals: live
                 )
             }
         }
@@ -103,6 +114,7 @@ public struct MurmurView: View {
             if newState.restartsArc, configuration.style.hasArc {
                 birth = now
                 phaseAtChange = 0
+                envelope.resetPhase()
             }
         }
         // Deliberately no accessibility treatment. A filled shape is not an
@@ -132,17 +144,29 @@ public struct MurmurView: View {
         let run = phaseAtChange + MurmurClock.phase(
             through: tau, from: from, to: to, entry: entry
         )
-        let phase = max(run + entry.phaseOffset(at: tau) * to.speed, 0)
+        let base = max(run + entry.phaseOffset(at: tau) * to.speed, 0)
+
+        // The live signals ride on top of the finished state design. Activity
+        // quickens, level lifts the light. Both are small on purpose: this is
+        // the generic response every species gets, and the presence family
+        // builds its real reaction from the raw uniforms in the shader.
+        let live = envelope.step(toward: signals, at: now, baseTempo: tempo)
+        let quickened = tempo * (1 + MurmurSignals.activitySpeedLift * live.activity)
 
         return field(
-            time: phase / max(tempo, 1e-6),
-            speed: tempo,
-            glow: design.glow * entry.glowBoost(at: tau),
+            // The activity lift is integrated, not multiplied onto the clock,
+            // so a moving signal cannot drag the field forward. See the note
+            // on MurmurSignalEnvelope.step.
+            time: (base + envelope.extraPhase) / max(quickened, 1e-6),
+            speed: quickened,
+            glow: design.glow * entry.glowBoost(at: tau)
+                * (1 + MurmurSignals.levelGlowLift * live.level),
             depth: design.depth,
             hueShift: design.hueShift,
             formScale: design.formScale,
             character: design.character,
-            stateTau: max(tau, 0)
+            stateTau: max(tau, 0),
+            signals: live
         )
     }
 
@@ -154,7 +178,8 @@ public struct MurmurView: View {
         hueShift: Double,
         formScale: Double,
         character: [Double],
-        stateTau: Double
+        stateTau: Double,
+        signals: MurmurSignals
     ) -> some View {
         // Hoisted out of the effect closure: it is @Sendable, so it captures
         // values, never the view.
@@ -165,6 +190,8 @@ public struct MurmurView: View {
         // During a crossfade the shader is told where it is GOING. A pack
         // branches on this, and half a branch is worse than either side.
         let stateIndex = state.shaderIndex
+        let level = signals.level
+        let activity = signals.activity
 
         return Rectangle()
             .fill(ink)
@@ -189,7 +216,9 @@ public struct MurmurView: View {
                         // restarts an arc rezeroes it. See the file header.
                         .float(0),
                         .float(stateIndex),
-                        .float(stateTau)
+                        .float(stateTau),
+                        .float(level),
+                        .float(activity)
                     )
                 )
             }

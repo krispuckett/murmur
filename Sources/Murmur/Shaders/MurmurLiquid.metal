@@ -493,7 +493,11 @@ static inline MLState ml_state(float stateIndex, float stateTau) {
     s.surge = 0.0; s.front = 0.0; s.lift = 0.0; s.drive = 0.0; s.push = 0.0;
     float tau = max(stateTau, 0.0);
 
-    if (abs(stateIndex - 3.0) < 0.5) {
+    // SUCCESS is index 4 and RESPONDING is 3 since `listening` was inserted at 1.
+    // These two numbers are the only place in the pack that knows the ordering,
+    // which is the whole reason the state machinery was shared in the first
+    // place: a renumber is a two-line edit rather than sixteen.
+    if (abs(stateIndex - 4.0) < 0.5) {
         const float D = 1.20;                 // the arrival's whole window
         float x = min(tau / D, 1.0);
         s.front = mix(-0.30, 1.30, x);
@@ -502,7 +506,7 @@ static inline MLState ml_state(float stateIndex, float stateTau) {
         // was and lets that go over a couple of seconds, handing off to the
         // success state's own parameter set rather than ending on a step.
         s.lift = smoothstep(0.45, 1.0, x) * exp(-max(tau - D, 0.0) / 2.4);
-    } else if (abs(stateIndex - 2.0) < 0.5) {
+    } else if (abs(stateIndex - 3.0) < 0.5) {
         float k = min(tau / 0.45, 1.0);
         s.drive = k * k * (3.0 - 2.0 * k);
         s.push = (tau <= 0.45) ? 0.45 * (k * k * k - 0.5 * k * k * k * k)
@@ -629,7 +633,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -675,8 +680,14 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // offset and not a rate: a rate boost would leave the field permanently
     // further round than the clock says it should be.
     float2 tic = ml_tic(T + 0.0, 3.0, 2.3);
+    // LEVEL DEEPENS THE COIL. Voice energy adds a bounded extra twist on the
+    // same radial profile the turn already uses, so the spiral draws in while
+    // someone is speaking and relaxes when they stop. An OFFSET and not a rate,
+    // for the reason the tic is one: level can change at any instant, and
+    // anything multiplying an accumulated rate would jump the whole field.
     float th = rigid * (T + 7.0) + amp * 0.95 * st.push
-             + diff * TW + tic.x * 0.50 * prof;
+             + diff * TW + tic.x * 0.50 * prof
+             + clamp(level, 0.0, 1.0) * 1.35 * prof;
 
     // THE SPIRAL IS TURNED ON THE BODY, NOT ON THE FRAME. Rotating the flat
     // pixel gave a spiral drawn on a disc; rotating the SURFACE POINT about the
@@ -785,7 +796,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -918,7 +930,10 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // of the presence floor it was driving the collar to 0.99 on the rail, and a
     // well whose mouth is white paper is lit from inside, which is the opposite
     // of a well. The floor buys the legibility now; the squeeze only leans on it.
-    float lum = 1.0 + (0.30 + 0.60 * dglow) * conv * throat;
+    // LEVEL DEEPENS THE PULL. Louder voice, harder convergence: the material
+    // gathers further in and the collar burns brighter, which is the one thing
+    // this species can do more of without moving faster.
+    float lum = 1.0 + (0.30 + 0.60 * dglow + 0.55 * clamp(level, 0.0, 1.0)) * conv * throat;
     // Kneed at 0.58 rather than clamped: the collar is where this field runs hot
     // and a clamp there draws a hard contour around the mouth.
     // SUCCESS: the surge comes UP the well and out of its mouth, which is the
@@ -985,7 +1000,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1005,7 +1021,12 @@ static inline float2 ml_tic(float t, float lane, float dur) {
 
     // THE TIC: THE BIG ONE. Every so often a wash comes in taller than the rest.
     float2 tic = ml_tic(T + 3.1, 19.0, 2.8);
-    float A = (0.16 + 0.30 * reach) * (1.0 + 0.30 * tic.x + 0.28 * st.drive);
+    // ACTIVITY THROWS A BIGGER WASH. Cadence goes into the AMPLITUDE and never
+    // into the period: the phase is an accumulated w * T, so retuning the
+    // frequency live would teleport the water. A bigger throw at the same tempo
+    // is what a busier stream actually looks like in a bowl.
+    float A = (0.16 + 0.30 * reach)
+            * (1.0 + 0.30 * tic.x + 0.28 * st.drive + 0.45 * clamp(activity, 0.0, 1.0));
     float pos = -A * cos(ph);              // position: the integral of the speed
     float vel = sin(ph);                   // normalised speed, +1 crossing right
     float sway = pos / max(A, 1e-4);       // -1..1, which side the weight is on
@@ -1030,8 +1051,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // Only a little of the surge goes into the LEVEL. Raising it further looked
     // obvious and made the arrival dimmer, because depth here means extinction:
     // the extra water arrives already dark. The wash's light lives in its foam.
-    float level = 0.055 + ripple - 0.115 * tic.x - 0.10 * surge;
-    float below = level - hgt;             // positive under water
+    float waterline = 0.055 + ripple - 0.115 * tic.x - 0.10 * surge;
+    float below = waterline - hgt;         // positive under water
 
     // The liquid itself, sampled on the body so it turns with the slosh.
     float f = 2.6 / S;
@@ -1052,8 +1073,13 @@ static inline float2 ml_tic(float t, float lane, float dur) {
 
     // The foam, straddling the waterline and torn by the same field.
     float edge = below - 0.012 - 0.045 * n;
-    float crest = exp(-(edge * edge) / (0.052 * 0.052)) * foam * (0.30 + 0.70 * abs(vel)) * orb.mask
-               * (1.0 + 2.6 * surge);
+    // Activity reaches the FOAM as well as the throw. A wider swing alone moves
+    // the texture without changing the picture much at any one instant; choppier
+    // water is what a busy stream actually looks like, and the foam is where
+    // this species keeps its light.
+    float crest = exp(-(edge * edge) / (0.052 * 0.052))
+               * (foam + 0.55 * clamp(activity, 0.0, 1.0)) * (0.30 + 0.70 * abs(vel))
+               * orb.mask * (1.0 + 2.6 * surge);
     // The air over the water, so the cap above the line is dim rather than empty.
     float mist = 0.13 * exp(-max(-below, 0.0) / 0.20) * orb.mask;
 
@@ -1130,7 +1156,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1149,8 +1176,10 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // and both bands foreshorten toward the limb because lam and phi do.
     MLOrb orb = ml_orb(uv, 0.38);
     float sPhase = 0.085 * T;
+    // Activity presses the two currents harder against each other, so the
+    // interface waves more steeply. A shape, not a speed.
     float iface = 0.62 * (bias - 0.5)
-                + 0.30 * sin(orb.lam * 2.1 + sPhase)
+                + (0.30 + 0.26 * clamp(activity, 0.0, 1.0)) * sin(orb.lam * 2.1 + sPhase)
                 + 0.08 * sin(T * 0.099);
     float across = orb.phi - iface;
     float mUp = 1.0 - smoothstep(-0.26, 0.26, across);
@@ -1190,7 +1219,10 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // seam modulates a band that is always there rather than gating it: gated,
     // it broke into a dashed run wherever the two fields happened to disagree.
     float d = na - nb;
-    float wid = 0.075 + 0.170 * (1.0 - contrast);
+    // ACTIVITY SHARPENS THE SEAM. A busier stream tightens the shear line rather
+    // than speeding the sheets, so the picture gets more definite instead of
+    // more hurried, and the slip's accumulated offset is left alone.
+    float wid = (0.075 + 0.170 * (1.0 - contrast)) * (1.0 - 0.35 * clamp(activity, 0.0, 1.0));
     float seam = (wid * wid) / (wid * wid + d * d);
     float line = (0.38 + 0.62 * seam) * exp(-(across * across) / (0.17 * 0.17)) * orb.mask * orb.z;
     float braid = seam * 4.0 * mUp * (1.0 - mUp) * (0.30 + 0.55 * contrast) * orb.mask * orb.z;
@@ -1255,7 +1287,8 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1305,7 +1338,10 @@ static inline float2 ml_tic(float t, float lane, float dur) {
     // channel keeps one width where it turns.
     float dist = (orb.phi - yc) / sqrt(1.0 + slope * slope);
 
-    float wv = (0.135 + 0.200 * width) * S * (1.0 - 0.16 * st.drive);
+    // LEVEL SWELLS THE CHANNEL. More voice, more water in the river: a width, so
+    // it can move with the signal without the flow having to jump.
+    float wv = (0.135 + 0.200 * width) * S * (1.0 - 0.16 * st.drive)
+             * (1.0 + 0.42 * clamp(level, 0.0, 1.0));
     wv *= 0.80 + 0.36 * (0.5 + 0.5 * ml_vnoise1(xa * 0.55 + 3.3, 19.0));
     float uu = dist / max(wv, 1e-4);
 
@@ -1437,7 +1473,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1476,7 +1513,11 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // The fork rests at 80 per cent of its birth spread, not 45: the arc still
     // reads as two flows committing to each other, and the shape stays a Y for
     // as long as the indicator is on screen. A Y that has healed over is a line.
-    float spread = mix(0.34, 1.20, angleK) * (0.80 + 0.20 * e) * (1.0 - 0.22 * st.drive);
+    // ACTIVITY CLOSES THE FORK. A steady stream reads as the two flows agreeing:
+    // the Y narrows toward one channel while the words keep coming and opens
+    // again in the gaps. Spread is a pure amplitude, so it is safe to move live.
+    float spread = mix(0.34, 1.20, angleK) * (0.80 + 0.20 * e)
+                 * (1.0 - 0.22 * st.drive) * (1.0 - 0.30 * clamp(activity, 0.0, 1.0));
     float sep = 0.045 + (0.075 + 0.300 * approach) * e;
     float sj = 0.55 * e;
     float conv = 1.0 - smoothstep(sj - 0.62, sj + 0.34, sAx);
@@ -1534,10 +1575,11 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // travels with the flow, so it reads as disturbance and not as glitter, and
     // it walks upstream with `sj` as the arc runs.
     float ds = sAx - sj;
-    float mw = 0.20 * (1.0 + 0.75 * tic.x);
+    float mw = 0.20 * (1.0 + 0.75 * tic.x + 0.55 * clamp(activity, 0.0, 1.0));
     float meet = exp(-(ds * ds) / (mw * mw)) * exp(-(nAx * nAx) / (0.18 * 0.18)) * orb.mask;
     float shN = ml_noise3(float3(sAx * 3.0 / S - travel * 1.9, nAx * 3.0 / S, 0.40 * travel));
-    float churnUp = (0.10 + 0.30 * shimmer) * meet * (0.45 + 0.55 * (0.5 + 0.5 * shN));
+    float churnUp = (0.10 + 0.30 * shimmer + 0.26 * clamp(activity, 0.0, 1.0))
+                  * meet * (0.45 + 0.55 * (0.5 + 0.5 * shN));
 
     float3 qh = orb.n * (2.2 / S) + float3(0.0, 0.0, 40.0 + 0.049 * T);
     float haze = smoothstep(0.28, 0.96, 0.5 + 1.0 * ml_fbm3(qh, 2, 2.03, 0.5)) * orb.mask;
@@ -1611,7 +1653,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1750,7 +1793,11 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     // THE VEINS, read in the mass's own warped frame so they deform with it.
     float3 qi = float3(p * (3.6 / S), 80.0 + 0.16 * rate * T);
     float vein = smoothstep(0.42, 0.93, 0.5 + 1.05 * ml_fbm3(qi, 3, 2.03, 0.5));
-    float cracks = skin * vein * (0.40 + 0.60 * heat) * (0.35 + 0.65 * deep);
+    // LEVEL RAISES THE HEAT. Voice opens the crust: the veins brighten and more
+    // of the interior shows through, which is what this material has instead of
+    // a volume knob.
+    float cracks = skin * vein * (0.40 + 0.60 * heat + 0.50 * clamp(level, 0.0, 1.0))
+                 * (0.35 + 0.65 * deep);
 
     // SUCCESS: the interior glows THROUGH, a bloom that starts at the core and
     // comes out to the skin. It multiplies the cracks and the depth, so the ink
@@ -1841,7 +1888,8 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = ml_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1943,8 +1991,11 @@ static inline float3 ml_join_law(float tau, float joinTime) {
     const float RIB_P = 0.95;                  // one ribbon at a time on the body
     float phase = (along + 0.085 * wob - travel) / RIB_P;
     float w = phase - floor(phase) - 0.5;
+    // ACTIVITY BROADENS THE RIBBON. More stream, more light lying across the
+    // body. A width and not a speed, so the film never jumps when the cadence
+    // changes mid-slide.
     float widthR = mix(0.155, 0.085, sheetK) * (1.0 - 0.10 * st.drive)
-                 * (1.0 + 0.95 * surge);
+                 * (1.0 + 0.95 * surge) * (1.0 + 0.55 * clamp(activity, 0.0, 1.0));
     float rib = exp(-(w * w) / (widthR * widthR));
     // It thins over the ridges and pools in the hollows, the same term that made
     // the old fronts belong to the form rather than float over it.

@@ -590,11 +590,16 @@ struct MGState {
     float flaring;  // 1 while the success flash is running
 };
 
+/// The indices are the host's, and they were RENUMBERED when `listening` was
+/// added at 1: idle 0, listening 1, thinking 2, responding 3, success 4,
+/// error 5. Responding and success therefore moved up one each. This is the
+/// only place in the pack that knows the numbering, which is why moving it was
+/// a two line change rather than eight.
 static inline MGState mg_state(float stateIndex, float stateTau) {
     MGState s;
     s.tau = max(stateTau, 0.0);
-    bool responding = (stateIndex > 1.5 && stateIndex < 2.5);
-    bool success    = (stateIndex > 2.5 && stateIndex < 3.5);
+    bool responding = (stateIndex > 2.5 && stateIndex < 3.5);
+    bool success    = (stateIndex > 3.5 && stateIndex < 4.5);
     // Responding eases in over four tenths of a second rather than snapping on,
     // because a drive that arrives instantly reads as a glitch rather than as a
     // decision.
@@ -666,6 +671,29 @@ static inline float mg_flare(MGState s, float d) {
     if (u <= 0.0 || u >= 1.0) { return 0.0; }
     return smoothstep(0.0, 0.30, u) * (1.0 - smoothstep(0.30, 1.0, u));
 }
+
+// MARK: - The live signals
+//
+// `level` is voice energy and `activity` is typing or stream cadence, both 0 to
+// 1, both arriving fresh every frame from the host. Each species takes ONE of
+// them, in its own grammar, and the choices are listed with the styles.
+//
+// THE RULE THEY ALL FOLLOW, and it is not a taste rule but a correctness one:
+// a live signal may move an AMPLITUDE, a THRESHOLD or a piece of GEOMETRY, and
+// it may never move a RATE. The reason is the one mg_driveDist already had to
+// solve, and it is worse here. Writing `position = velocity * t * (1 + level)`
+// gives an actual velocity of `v(1 + level) + v t level'`, and t is absolute
+// time in the thousands while level is a microphone: level' is large and
+// arbitrary many times a second, so the field would not quicken, it would
+// convulse. The drive could be integrated in closed form because its shape was
+// known in advance; a live signal has no closed form, and integrating it would
+// need state between frames, which this pack does not have and will not take.
+//
+// So nothing below multiplies t. What the signals do instead is open a gap
+// wider, focus a lens harder, part a fog further, deepen a fold: quantities
+// that are read fresh each frame and carry no history, so an arbitrary jump in
+// the signal produces an arbitrary jump in a shape and never a discontinuity in
+// a position. The Swift layer's generic response covers the tempo side.
 
 // MARK: - The beat
 //
@@ -816,7 +844,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));                    // the pour's own guard
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -903,7 +933,11 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // web itself gathers and blazes and then lets go. The species' own physics
     // does the work; nothing is overlaid.
     float flare = mg_flare(st, length(uv));
-    float k = (0.06 + 0.20 * deepK) * (1.0 + 0.90 * swell) * (1.0 + 1.25 * flare);
+    // ACTIVITY focuses the water harder, so a busier stream puts more of the
+    // surface past the fold threshold and more web appears. This is the lens's
+    // focal length, which is geometry and safe to drive live.
+    float k = (0.06 + 0.20 * deepK) * (1.0 + 0.90 * swell) * (1.0 + 1.25 * flare)
+            * (1.0 + 0.45 * clamp(activity, 0.0, 1.0));
     float det = (1.0 - k * hxx) * (1.0 - k * hyy) - k * k * hxy * hxy;
 
     // The fold, with a width instead of a singularity. Bounded in (0, 1] by
@@ -1024,7 +1058,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1154,7 +1190,10 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
         // each lamina folds on its own lane, so the three sets fold across each
         // other rather than as one sheet.
         float warp = mg_fbm1(xi * 1.15 - t * rate * 1.70, 2, lane + 5.0);
-        float ph = xi * (2.6 + 2.2 * foldK) + h * 0.55 + warp * (1.1 + 2.5 * foldK);
+        // LEVEL deepens the folding: a louder voice gathers the pleats harder,
+        // because it is the phase modulation's amplitude and nothing else.
+        float ph = xi * (2.6 + 2.2 * foldK) + h * 0.55
+                 + warp * (1.1 + 2.5 * foldK) * (1.0 + 0.55 * clamp(level, 0.0, 1.0));
         float pleat = pow(0.5 + 0.5 * cos(6.2831853 * ph), 2.2);
         float ray = 0.55 + 0.85 * pleat;
         // The far laminae are dimmer, the way the far side of a fold is.
@@ -1248,7 +1287,9 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1314,7 +1355,12 @@ static MGBeat mg_beat(float t, float lane, float period, float dur) {
     // threshold on the crust field itself rather than a band above a hearth
     // line: the hot places are wherever the coal happens to be thinnest, spread
     // over the whole body, and `floor` sets how much of it has broken open.
-    float bedMask = smoothstep(0.62 - 0.34 * floorK, 0.94 - 0.24 * floorK, bed);
+    // LEVEL breaks more of the crust open, so a louder voice shows more fire
+    // through the ash. A threshold on the medium, which is where this family
+    // puts everything.
+    float lv = clamp(level, 0.0, 1.0);
+    float bedMask = smoothstep(0.62 - 0.34 * floorK - 0.16 * lv,
+                               0.94 - 0.24 * floorK - 0.10 * lv, bed);
 
     // THE PLUME. Domain scrolls down so structure travels up; horizontal
     // frequency opens with height so the column widens as it climbs.
@@ -1464,7 +1510,9 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1518,7 +1566,13 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // The lamp's power is untouched by this, as it is by everything else: what
     // changes is how much medium is standing in the way.
     MGBeat g = mg_beat(t, 41.0, 7.1, 2.9);
-    float clearAmt = (0.58 + 0.22 * fract(g.seed * 7.31)) * g.env;
+    // LEVEL parts the fog around the source, riding the same clearing the
+    // gesture uses, so a voice makes the presence more legible through the
+    // medium without the lamp's power moving at all. Capped below the gesture's
+    // own depth so a loud room never fully clears the weather.
+    float clearAmt = (0.58 + 0.22 * fract(g.seed * 7.31)) * g.env
+                   + 0.34 * clamp(level, 0.0, 1.0);
+    clearAmt = min(clearAmt, 0.86);
 
     float rho0 = mg_fog(uv, flow, ff, fz, fogK, lamp, clearAmt);
     float rhoL = mg_fog(lamp, flow, ff, fz, fogK, lamp, clearAmt);
@@ -1673,7 +1727,9 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1754,7 +1810,11 @@ static inline float mg_fog(float2 p, float2 flow, float ff, float fz, float fogK
     // area tears equally is noise, and one that tears from the bottom up is
     // being refracted.
     float grip = smoothstep(-0.16, 0.10, d);
-    float ys = yy + band * (0.055 + 0.120 * bend) * (1.0 + 1.20 * surge) * grip;
+    // ACTIVITY roughens the air, so a busier stream tears the presence's image
+    // into more slices. The displacement's amplitude, which is what the fold
+    // threshold is a threshold on.
+    float ys = yy + band * (0.055 + 0.120 * bend)
+             * (1.0 + 1.20 * surge + 0.60 * clamp(activity, 0.0, 1.0)) * grip;
 
     // THE BODY, read at the displaced coordinate. This one line is the whole
     // translation: the sphere is built from (x, ys) rather than (x, d), so every
@@ -1911,7 +1971,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -1941,7 +2003,10 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // The rest radius, and the seam it opens from. R0 is not zero: an aperture
     // that starts fully shut starts as a black disc, and a thinking indicator
     // that begins as nothing has a frame where it looks broken.
-    float Rrest = (0.100 + 0.150 * apertureK) * S;
+    // LEVEL opens the aperture wider. It is the one thing an opening obviously
+    // does in answer to a voice, and it is pure geometry: the arc's law is
+    // untouched, only the radius it is relaxing toward.
+    float Rrest = (0.100 + 0.150 * apertureK) * (1.0 + 0.30 * clamp(level, 0.0, 1.0)) * S;
     float R = mix(0.022 * S, Rrest, law.x);
 
     // THE TORN LIP. Sampled on the unit circle, so it is periodic in the angle
@@ -2117,7 +2182,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -2190,7 +2257,7 @@ static inline float3 mg_open_law(float tau, float openTime) {
         // actually happens.
         float2 gust = float2(sin(t * (0.83 - 0.21 * fi) + fi * 2.3),
                              cos(t * (0.61 + 0.17 * fi) + fi * 1.1))
-                    * (0.012 + 0.045 * breeze);
+                    * (0.012 + 0.045 * breeze) * (1.0 + 0.85 * clamp(activity, 0.0, 1.0));
         float3 q = float3((orb.wrap + dr + gust + chase * (1.0 - 0.55 * fi)) * freq,
                           t * (0.17 - 0.05 * fi));
         float n = mg_fbm3(q, 2, 2.03, 0.5);
@@ -2321,7 +2388,9 @@ static inline float3 mg_open_law(float tau, float openTime) {
     float  c3,
     float  epoch,
     float  stateIndex,
-    float  stateTau
+    float  stateTau,
+    float  level,
+    float  activity
 ) {
     float2 res = max(size, float2(1.0));
     float2 uv = (position - 0.5 * res) / min(res.x, res.y);
@@ -2420,7 +2489,11 @@ static inline float3 mg_open_law(float tau, float openTime) {
     // instead of round.
     float2 cring = float2(cos(angO), sin(angO)) * 1.90 + float2(11.3, -7.1);
     float plumeN = 0.5 + 0.5 * mg_fbm3(float3(cring, t * 0.22), 2, 2.03, 0.5);
-    float hC = (0.022 + 0.070 * coronaK) * S * (0.35 + 1.45 * plumeN);
+    // LEVEL blooms the corona further out. The corona is this species' subject,
+    // so a voice reaching it is the reading that costs nothing to believe, and
+    // the reach is a length rather than a speed.
+    float hC = (0.022 + 0.070 * coronaK) * S * (0.35 + 1.45 * plumeN)
+             * (1.0 + 0.50 * clamp(level, 0.0, 1.0));
     float limb = exp(-max(ro - Rocc, 0.0) / max(hC, 1e-4));
     // AND THE CORONA IS BLOCKED BY THE MASS, which is the whole reason this
     // style failed its first calibration. `max(ro - Rocc, 0)` is zero at every

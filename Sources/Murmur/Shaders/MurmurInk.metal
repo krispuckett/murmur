@@ -530,17 +530,30 @@ struct MIState {
     float sTau;      // seconds since the state was entered
     float drive;     // 0 to 1, responding, eased in over 0.45 s
     float lean;      // 0 to 1, responding, saturating: a bounded advance
+    float level;     // live voice energy from the host, 0 to 1
+    float activity;  // live typing and stream cadence from the host, 0 to 1
 };
 
-static MIState mi_state(float stateIndex, float stateTau) {
+/// The roster gained `listening` at index 1, so everything after it moved up by
+/// one: responding is 3 and success is 4. The indices are read off the SPEC
+/// signature comment rather than remembered, because a silently shifted enum is
+/// the kind of thing that shows up as the wrong state animating and nothing
+/// else going wrong.
+static MIState mi_state(float stateIndex, float stateTau, float level, float activity) {
     MIState s;
     float tau = max(stateTau, 0.0);
     int idx = int(stateIndex + 0.5);
     s.sTau = tau;
-    s.success = (idx == 3) ? 1.0 : 0.0;
-    float resp = (idx == 2) ? 1.0 : 0.0;
+    s.success = (idx == 4) ? 1.0 : 0.0;
+    float resp = (idx == 3) ? 1.0 : 0.0;
     s.drive = resp * smoothstep(0.0, 0.45, tau);
     s.lean = resp * (1.0 - exp(-tau / 0.50));
+    // THE LIVE SIGNALS. Every species uses these ADDITIVELY on top of its
+    // designed look, never as a multiplier on it, so that a host sending
+    // nothing renders exactly the material that was approved. Silence is not a
+    // dimmed version of the design; it is the design.
+    s.level = clamp(level, 0.0, 1.0);
+    s.activity = clamp(activity, 0.0, 1.0);
     return s;
 }
 
@@ -622,7 +635,8 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -631,7 +645,7 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     float tailK  = clamp(c2, 0.0, 1.0);
     float asym   = clamp(c3, 0.0, 1.0);
 
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
 
     // THE ORB. Ink blooming inside a glassy ball. The physics is untouched: the
@@ -647,7 +661,11 @@ static inline half4 mi_finish(float3 field, float3 inkLin, float shore,
     // distance it is measured against is simply three-dimensional now.
     const float T = 1.25;
     float k = exp(-tau / T);                      // 1 at the drop, 0 arrived
-    float Rinf = (0.62 + 0.55 * spread) * (1.0 + 0.13 * st.lean);
+    // ACTIVITY feeds the front. Stream cadence is ink arriving, and ink
+    // arriving is the one thing that makes a blot bigger, so the reservoir the
+    // area law is spending grows with it. Additive: at zero this is the number
+    // that was approved.
+    float Rinf = (0.62 + 0.55 * spread + 0.30 * st.activity) * (1.0 + 0.13 * st.lean);
     float R = Rinf * sqrt(max(1.0 - k, 0.0));
 
     // Where the drop went in. Off centre and off axis, so the bloom is a thing
@@ -760,7 +778,8 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -770,7 +789,7 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     float contrast = clamp(c2, 0.0, 1.0);
     float driftK   = clamp(c3, 0.0, 1.0);
 
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
 
     // THE ORB. Marbled ink wrapping a ball. One dominant comb, drawn through
     // the sphere rather than across a plane, so the folds curve with the
@@ -789,7 +808,10 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     const float3 AX2 = float3(0.0, 0.4067, 0.9135);
     sp = normalize(sp - LAY * (st.lean * 0.075));
 
-    float A = 0.085 + 0.130 * comb;
+    // LEVEL draws the comb deeper. Voice energy is the hand on the rake, and
+    // the rake's amplitude is the one dial in this species that is literally a
+    // hand: louder is a longer pull through the bath, not a brighter bath.
+    float A = 0.085 + 0.130 * comb + 0.070 * st.level;
     sp = mi_rake3(sp, AX1, LAY, 3.1, A * (1.0 + 0.55 * st.drive), t * 0.57);
     sp = mi_rake3(sp, LAY, AX2, 5.3, A * 0.28, -t * 0.41 + 1.7);
 
@@ -871,12 +893,13 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     // Up is +y here and nowhere else in this file. This style is ABOUT the
     // direction, so it gets to own the sign.
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
     float climb   = clamp(c0, 0.0, 1.0);
@@ -898,7 +921,12 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     // and on a turning globe that cut walks around into view.
     float3 lon = normalize(float3(sp.x, 0.0, sp.z + 1e-5));
 
-    float h0 = -0.42 + 0.92 * climb;
+    // LEVEL raises the climb, and of everything in this pack this is the
+    // mapping that was already waiting to be made: a wetted front rising up a
+    // body IS a level, and voice energy putting more ink into it is the same
+    // sentence said twice. Additive, so silence sits at the designed height
+    // rather than at the floor.
+    float h0 = -0.42 + 0.92 * climb + 0.55 * st.level;
     float rag = mi_fbm3(float3(lon.x, lon.z, t * 0.175 + 4.0) * (2.6 + 1.4 * fiber),
                         3, 2.03, 0.5);
     float front = h0 + (0.10 + 0.20 * fiber) * rag;
@@ -995,7 +1023,8 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
@@ -1005,7 +1034,7 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     float disturb = clamp(c2, 0.0, 1.0);
     float tiltK   = clamp(c3, 0.0, 1.0);
 
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float tau = max(time - epoch, 0.0) * max(speed, 0.0);
     float T = 1.6 / (0.55 + 0.90 * settle);
     float k = exp(-tau / T);                       // 1 suspended, 0 settled
@@ -1027,8 +1056,11 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     float lat = -(sp.y * ca - sp.x * sa);          // up the tilted axis
     float across = sp.x * ca + sp.y * sa;
 
+    // ACTIVITY stirs the bed. Cadence arriving is something moving in the
+    // vessel, and what that does to settled sediment is disturb it, which is a
+    // knob this species already has and already means.
     float rip = mi_fbm3(sp * 2.2 + float3(0.0, 0.0, t * 0.128 + 31.0), 2, 2.03, 0.5);
-    float y = lat + disturb * 0.085 * rip;
+    float y = lat + (disturb + 0.45 * st.activity) * 0.085 * rip;
 
     // The heap, and the arc that builds it. Turbid, the surface sits near the
     // crown and is soft enough to be no surface at all, which is a cloud
@@ -1126,12 +1158,13 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float massK  = clamp(c0, 0.0, 1.0);
     float corona = clamp(c1, 0.0, 1.0);
     float morph  = clamp(c2, 0.0, 1.0);
@@ -1187,7 +1220,11 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     // The pedestal guarantees a body at every angle however the noise lands, and
     // the amplitude is what makes it a lobed mass rather than a circle with
     // texture: the radius swings about a third either side.
-    float bodyR = (0.74 + 0.16 * massK) / (1.0 + 0.18 * st.drive) * (1.0 + 0.34 * lobeN);
+    // LEVEL swells the mass. A presence with more to say takes up more room;
+    // it grows rather than glows, which keeps the signal in the silhouette
+    // where this species keeps everything else.
+    float bodyR = (0.74 + 0.16 * massK + 0.12 * st.level)
+                / (1.0 + 0.18 * st.drive) * (1.0 + 0.34 * lobeN);
     float d = (bodyR - rc) * mi_orb_radius(S);    // signed, in frame units
 
     float inside = smoothstep(-0.004, 0.010, d);
@@ -1270,12 +1307,13 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float tension = clamp(c0, 0.0, 1.0);
     float tremor  = clamp(c1, 0.0, 1.0);
     float sheenK  = clamp(c2, 0.0, 1.0);
@@ -1300,9 +1338,14 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     // differences would have cost four more taps to learn something the field
     // already knows.
     const float SF = 2.4;
-    float4 Sf = mi_fbmd3(sp * SF + float3(0.0, 0.0, t * (0.062 + 0.130 * tremor) + 41.0),
+    // LEVEL ripples the skin, and this is the most literal reading of the
+    // signal anywhere in the pack: sound falling on a still liquid is what a
+    // tremor IS. It enters the tremor knob, which already means exactly this,
+    // rather than being bolted alongside it.
+    float trem = tremor + 0.55 * st.level;
+    float4 Sf = mi_fbmd3(sp * SF + float3(0.0, 0.0, t * (0.062 + 0.130 * trem) + 41.0),
                          3, 2.03, 0.5);
-    float3 ripple = Sf.yzw * (0.055 + 0.150 * tremor);
+    float3 ripple = Sf.yzw * (0.055 + 0.150 * trem);
 
     // THE FLOURISH: one ring from an unseen touch, running out from a point on
     // the ball and dying. It is added to the NORMAL and makes no light of its
@@ -1412,11 +1455,12 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float bleed   = clamp(c0, 0.0, 1.0);
     float fiber   = clamp(c1, 0.0, 1.0);
     float dirK    = clamp(c2, 0.0, 1.0);
@@ -1473,7 +1517,9 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     // walk and eases into its stop.
     const float T = 1.45;
     float L0 = 0.10;
-    float Linf = (0.58 + 0.44 * bleed) * (1.0 + 0.15 * st.lean);
+    // ACTIVITY feeds the bleed. More arriving is more solvent behind the
+    // front, and this species' whole law is how far a fixed reservoir carries.
+    float Linf = (0.58 + 0.44 * bleed + 0.26 * st.activity) * (1.0 + 0.15 * st.lean);
     float L = Linf + (L0 - Linf) * exp(-tau / T);
 
     float u = alo + 0.12;                          // 0 just behind the touch
@@ -1602,12 +1648,13 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau
+    float stateIndex, float stateTau,
+    float level, float activity
 ) {
     float2 uv = mi_uv(position, size);
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
-    MIState st = mi_state(stateIndex, stateTau);
+    MIState st = mi_state(stateIndex, stateTau, level, activity);
     float layers     = clamp(c0, 0.0, 1.0);
     float legibility = clamp(c1, 0.0, 1.0);
     float surfacing  = clamp(c2, 0.0, 1.0);
@@ -1626,7 +1673,10 @@ static inline float3 mi_rake3(float3 p, float3 axis, float3 across,
     // travels BOILS, and boiling is flicker, not surfacing. Surfacing is a
     // directional act, so a front of legibility crosses the body and the
     // writing comes up ahead of it and goes back down behind.
-    float3 sweep = float3(-0.140, 0.100, 0.0) * (t * (1.0 + 1.5 * st.drive));
+    // ACTIVITY drives the front of legibility across the body: the more that
+    // is arriving, the faster the page gives up what it used to say.
+    float3 sweep = float3(-0.140, 0.100, 0.0)
+                 * (t * (1.0 + 1.5 * st.drive + 0.9 * st.activity));
     float env = mi_noise3(sp * 2.0 + sweep + float3(0.0, 0.0, t * 0.030 + 19.0));
     float lift = 0.30 + 0.70 * smoothstep(-0.24, 0.30, env);
 

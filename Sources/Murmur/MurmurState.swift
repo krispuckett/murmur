@@ -17,6 +17,10 @@ import Foundation
 public enum MurmurState: String, CaseIterable, Codable, Sendable {
     /// Present, waiting, doing nothing. The material at its quietest.
     case idle
+    /// Hearing a voice. Attentive and open rather than busy: this is where
+    /// the live `level` signal does its deepest work, so the design leaves
+    /// room for it to move rather than spending everything up front.
+    case listening
     /// Working, and the state a MurmurView shows unless told otherwise.
     /// It opens the material up rather than passing it through.
     case thinking
@@ -34,10 +38,11 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
     public var shaderIndex: Double {
         switch self {
         case .idle: 0
-        case .thinking: 1
-        case .responding: 2
-        case .success: 3
-        case .error: 4
+        case .listening: 1
+        case .thinking: 2
+        case .responding: 3
+        case .success: 4
+        case .error: 5
         }
     }
 
@@ -81,6 +86,13 @@ public enum MurmurState: String, CaseIterable, Codable, Sendable {
         // so there is no entry.
         case .idle:
             MurmurStateSeed(speed: 0.30, glow: 0.65, depth: 0.75, hueShift: 0, entry: .none)
+        // Attentive, not busy. Awake and open compared to idle, but well
+        // under thinking, because the voice is what should move here: a
+        // design that is already loud has nothing left to say when someone
+        // speaks. No entry, since listening starts when the mic opens and
+        // that is not an event the material should announce.
+        case .listening:
+            MurmurStateSeed(speed: 0.90, glow: 1.10, depth: 1.10, hueShift: 0, entry: .none)
         // The out-of-box look, because thinking is the default state. It
         // does MORE than the raw material rather than passing it through:
         // the palette opens, the light lifts, the motion picks up. A style

@@ -16,7 +16,7 @@ import Testing
 // MARK: - Roster
 
 @Test func rosterIsComplete() {
-    #expect(MurmurStyle.allCases.count == 40)
+    #expect(MurmurStyle.allCases.count == 48)
     for style in MurmurStyle.allCases {
         #expect(style.characterKnobs.count == 4, "\(style.rawValue) knob count")
         #expect(!style.shaderName.isEmpty, "\(style.rawValue) shader name")
@@ -38,14 +38,15 @@ import Testing
     #expect(MurmurStyle.caustic.shaderName == "mg_caustic")
     #expect(MurmurStyle.murmuration.shaderName == "ms_murmuration")
     #expect(MurmurStyle.breathe.shaderName == "mo_breathe")
+    #expect(MurmurStyle.halo.shaderName == "mq_halo")
 }
 
-@Test func fiveFamiliesOfEight() {
-    #expect(MurmurFamily.allCases.count == 5)
+@Test func sixFamiliesOfEight() {
+    #expect(MurmurFamily.allCases.count == 6)
     for family in MurmurFamily.allCases {
         #expect(family.styles.count == 8, "\(family.rawValue) style count")
     }
-    // Every style lands in exactly one family, so the five sets partition
+    // Every style lands in exactly one family, so the six sets partition
     // the roster rather than merely covering it.
     let grouped = MurmurFamily.allCases.flatMap(\.styles)
     #expect(Set(grouped) == Set(MurmurStyle.allCases))
@@ -53,10 +54,12 @@ import Testing
 }
 
 @Test func familiesHaveDistinctPrefixesAndPackFiles() {
-    #expect(Set(MurmurFamily.allCases.map(\.shaderPrefix)).count == 5)
-    #expect(Set(MurmurFamily.allCases.map(\.packFileName)).count == 5)
+    #expect(Set(MurmurFamily.allCases.map(\.shaderPrefix)).count == 6)
+    #expect(Set(MurmurFamily.allCases.map(\.packFileName)).count == 6)
     #expect(MurmurFamily.orb.shaderPrefix == "mo_")
     #expect(MurmurFamily.orb.packFileName == "MurmurOrb")
+    #expect(MurmurFamily.presence.shaderPrefix == "mq_")
+    #expect(MurmurFamily.presence.packFileName == "MurmurPresence")
 }
 
 @Test func arcStylesAreFlagged() {
@@ -118,10 +121,141 @@ import Testing
     }
 }
 
+@Test func presenceStylesCarryTheirRosterRow() {
+    #expect(
+        MurmurFamily.presence.styles
+            == [.halo, .nucleus, .iris, .filament, .flare, .braid, .mote, .ripple]
+    )
+    for style in MurmurFamily.presence.styles {
+        #expect(style.family == .presence, "\(style.rawValue)")
+        #expect(style.shaderName == "mq_" + style.rawValue, "\(style.rawValue)")
+        // The responsive cast is arc-free: their arrival is the signal
+        // arriving, not a settle they run on their own.
+        #expect(!style.hasArc, "\(style.rawValue) should not be an arc style")
+    }
+    #expect(MurmurStyle.halo.characterDefaults == [0.5, 0.4, 0.5, 0.4])
+    #expect(MurmurStyle.mote.characterKnobs.map(\.label) == ["wander", "lean", "size", "tail"])
+    #expect(MurmurStyle.mote.characterDefaults == [0.4, 0.5, 0.4, 0.3])
+    #expect(MurmurStyle.flare.characterDefaults == [0.5, 0.5, 0.5, 0.3])
+}
+
+// MARK: - Live signals
+
+@Test func signalsDefaultToNothingHappening() {
+    let signals = MurmurSignals()
+    #expect(signals.level == 0)
+    #expect(signals.activity == 0)
+    #expect(MurmurSignals.none == signals)
+    #expect(MurmurSignals(level: 0.5).activity == 0)
+    #expect(MurmurSignals(activity: 0.5).level == 0)
+}
+
+@Test func signalsClampRatherThanReject() {
+    // A host feeding a hot mic must not push the shader out of range, and a
+    // negative must not run the material backward.
+    let hot = MurmurSignals(level: 3, activity: -2).clamped
+    #expect(hot.level == 1)
+    #expect(hot.activity == 0)
+    // The stored value is left alone; only what reaches the shader is bounded.
+    #expect(MurmurSignals(level: 3).level == 3)
+}
+
+@Test func theEnvelopeSnapsOnTheFirstFrameThenSmooths() {
+    let envelope = MurmurSignalEnvelope()
+    let start = Date(timeIntervalSinceReferenceDate: 0)
+
+    // A host that opens with the mic already hot should not watch a fake ramp.
+    let first = envelope.step(toward: MurmurSignals(level: 0.8), at: start, baseTempo: 1)
+    #expect(first.level == 0.8)
+
+    // Then it eases rather than cutting.
+    let next = envelope.step(
+        toward: MurmurSignals(level: 0), at: start.addingTimeInterval(0.02), baseTempo: 1
+    )
+    #expect(next.level < 0.8)
+    #expect(next.level > 0.6, "a 20 ms step must not collapse a release")
+}
+
+@Test func theEnvelopeRisesFasterThanItFalls() {
+    let step = 0.05
+    func travel(from a: Double, to b: Double) -> Double {
+        let envelope = MurmurSignalEnvelope()
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        _ = envelope.step(toward: MurmurSignals(level: a), at: start, baseTempo: 1)
+        let moved = envelope.step(
+            toward: MurmurSignals(level: b), at: start.addingTimeInterval(step), baseTempo: 1
+        )
+        return abs(moved.level - a)
+    }
+    // Same distance, same dt: the rise must cover more ground than the fall.
+    // Asymmetry is what keeps gaps between words from reading as flicker.
+    #expect(travel(from: 0, to: 1) > travel(from: 1, to: 0))
+}
+
+@Test func theEnvelopeConvergesAndIsIdempotentWithinAFrame() {
+    let envelope = MurmurSignalEnvelope()
+    var now = Date(timeIntervalSinceReferenceDate: 0)
+    _ = envelope.step(toward: MurmurSignals(), at: now, baseTempo: 1)
+
+    let target = MurmurSignals(level: 0.9, activity: 0.7)
+    for _ in 0..<120 {
+        now = now.addingTimeInterval(1.0 / 30.0)
+        _ = envelope.step(toward: target, at: now, baseTempo: 1)
+    }
+    #expect(abs(envelope.current.level - 0.9) < 0.001)
+    #expect(abs(envelope.current.activity - 0.7) < 0.001)
+
+    // SwiftUI may evaluate body more than once per tick. A second call at the
+    // same instant must not advance the envelope or double count the phase.
+    let settled = envelope.current
+    let phase = envelope.extraPhase
+    let again = envelope.step(toward: MurmurSignals(level: 0), at: now, baseTempo: 1)
+    #expect(again == settled)
+    #expect(envelope.extraPhase == phase)
+}
+
+@Test func activityAccumulatesPhaseRatherThanScalingTheClock() {
+    let envelope = MurmurSignalEnvelope()
+    var now = Date(timeIntervalSinceReferenceDate: 0)
+    _ = envelope.step(toward: MurmurSignals(activity: 1), at: now, baseTempo: 1)
+    #expect(envelope.extraPhase == 0, "nothing accumulates before time passes")
+
+    // One second at full activity and unit tempo adds the lift, once.
+    for _ in 0..<60 {
+        now = now.addingTimeInterval(1.0 / 60.0)
+        _ = envelope.step(toward: MurmurSignals(activity: 1), at: now, baseTempo: 1)
+    }
+    #expect(abs(envelope.extraPhase - MurmurSignals.activitySpeedLift) < 0.01)
+
+    // It only ever advances, so the field cannot be dragged backward when a
+    // signal drops.
+    let peak = envelope.extraPhase
+    for _ in 0..<60 {
+        now = now.addingTimeInterval(1.0 / 60.0)
+        _ = envelope.step(toward: MurmurSignals(), at: now, baseTempo: 1)
+    }
+    #expect(envelope.extraPhase >= peak)
+
+    envelope.resetPhase()
+    #expect(envelope.extraPhase == 0)
+}
+
+@Test func theEnvelopeSurvivesABackgroundGap() {
+    // Returning from background hands us one enormous dt. It must not arrive
+    // as a lurch in the accumulated phase.
+    let envelope = MurmurSignalEnvelope()
+    let start = Date(timeIntervalSinceReferenceDate: 0)
+    _ = envelope.step(toward: MurmurSignals(activity: 1), at: start, baseTempo: 1)
+    _ = envelope.step(
+        toward: MurmurSignals(activity: 1), at: start.addingTimeInterval(600), baseTempo: 1
+    )
+    #expect(envelope.extraPhase < 0.1, "a ten minute gap must be clamped")
+}
+
 // MARK: - States and treatments
 
 @Test func everyStateSeedsAWholeDesign() {
-    #expect(MurmurState.allCases.count == 5)
+    #expect(MurmurState.allCases.count == 6)
     for state in MurmurState.allCases {
         let p = state.seedParameters(for: .eddy)
         #expect(p.speed > 0, "\(state.rawValue) speed")
@@ -144,14 +278,23 @@ import Testing
 
 @Test func stateIndicesMatchTheShaderContract() {
     #expect(MurmurState.idle.shaderIndex == 0)
-    #expect(MurmurState.thinking.shaderIndex == 1)
-    #expect(MurmurState.responding.shaderIndex == 2)
-    #expect(MurmurState.success.shaderIndex == 3)
-    #expect(MurmurState.error.shaderIndex == 4)
+    #expect(MurmurState.listening.shaderIndex == 1)
+    #expect(MurmurState.thinking.shaderIndex == 2)
+    #expect(MurmurState.responding.shaderIndex == 3)
+    #expect(MurmurState.success.shaderIndex == 4)
+    #expect(MurmurState.error.shaderIndex == 5)
+
+    // The index is the declaration order, and a pack branches on it, so the
+    // two must not drift apart.
+    for (offset, state) in MurmurState.allCases.enumerated() {
+        #expect(state.shaderIndex == Double(offset), "\(state.rawValue)")
+    }
+    #expect(Set(MurmurState.allCases.map(\.shaderIndex)).count == 6)
 }
 
 @Test func entryDefaultsMatchTheBrief() {
     #expect(MurmurState.idle.defaultEntry == .none)
+    #expect(MurmurState.listening.defaultEntry == .none)
     #expect(MurmurState.thinking.defaultEntry == .wake)
     #expect(MurmurState.responding.defaultEntry == .none)
     #expect(MurmurState.success.defaultEntry == .swell)
@@ -173,7 +316,9 @@ import Testing
 
 @Test func tempoRisesFromIdleToResponding() {
     func speed(_ state: MurmurState) -> Double { state.seedParameters(for: .eddy).speed }
-    #expect(speed(.idle) < speed(.thinking))
+    // The ladder: resting, attentive, working, answering.
+    #expect(speed(.idle) < speed(.listening))
+    #expect(speed(.listening) < speed(.thinking))
     #expect(speed(.thinking) < speed(.responding))
     // Success is the settle after work, so it drops back below thinking.
     #expect(speed(.success) < speed(.thinking))
@@ -389,8 +534,8 @@ func entriesAreIdentityOutsideTheirWindow(entry: MurmurEntry) {
         let config = MurmurConfiguration(style: style)
         #expect(config.ink == .ink)
         #expect(config.tone == .tone)
-        #expect(config.states.count == 5)
-        #expect(config.entries.count == 5)
+        #expect(config.states.count == 6)
+        #expect(config.entries.count == 6)
         #expect(config.customizedStates.isEmpty)
         for state in MurmurState.allCases {
             #expect(
@@ -513,7 +658,7 @@ func entriesAreIdentityOutsideTheirWindow(entry: MurmurEntry) {
         MurmurConfiguration.self, from: Data(trimmed.utf8)
     )
     #expect(decoded.style == .eddy)
-    #expect(decoded.states.count == 5)
+    #expect(decoded.states.count == 6)
     #expect(decoded.customizedStates.isEmpty)
 }
 
@@ -618,7 +763,7 @@ private func prose(of prompt: String) -> String {
     #expect(!prose(of: prompt).contains("\u{2014}"))
 }
 
-@Test func exportListsAllFiveDesignsWithTheirValues() {
+@Test func exportListsEveryDesignWithItsValues() {
     let config = MurmurConfiguration(style: .eddy)
     let prompt = config.agentPrompt(as: .indicator)
     for state in MurmurState.allCases {
@@ -639,6 +784,28 @@ private func prose(of prompt: String) -> String {
     #expect(prompt.contains("stateIndex"))
     #expect(prompt.contains("stateTau"))
     #expect(prompt.contains("0 idle"))
+    #expect(prompt.contains("1 listening"))
+    #expect(prompt.contains("5 error"))
+}
+
+@Test(arguments: MurmurExportSurface.allCases)
+func exportExplainsTheLiveSignals(surface: MurmurExportSurface) {
+    // An agent that wires the states but not the signals has built half of
+    // this, so the prompt has to carry both.
+    let prompt = MurmurConfiguration(style: .halo).agentPrompt(as: surface)
+    #expect(prompt.contains("level"))
+    #expect(prompt.contains("activity"))
+    #expect(prompt.contains("microphone"))
+    #expect(!prose(of: prompt).contains("\u{2014}"))
+
+    switch surface {
+    case .pill:
+        #expect(prompt.contains("MurmurPill(Self.murmur, state: state, signals: MurmurSignals("))
+    case .indicator:
+        #expect(prompt.contains("MurmurView(Self.murmur, state: state, signals: MurmurSignals("))
+    case .swiftUIOnly:
+        #expect(prompt.contains("last two shader arguments"))
+    }
 }
 
 @Test func exportNamesEveryEntry() {

@@ -10,7 +10,7 @@ import Foundation
 /// liquid has weight, ink has capillary time, light passes through media,
 /// signal finds order in noise.
 public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
-    case liquid, ink, light, signal, orb
+    case liquid, ink, light, signal, orb, presence
 
     public var displayName: String { rawValue.capitalized }
 
@@ -24,6 +24,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .light: "mg_"
         case .signal: "ms_"
         case .orb: "mo_"
+        case .presence: "mq_"
         }
     }
 
@@ -36,6 +37,7 @@ public enum MurmurFamily: String, CaseIterable, Sendable, Codable {
         case .light: "MurmurLight"
         case .signal: "MurmurSignal"
         case .orb: "MurmurOrb"
+        case .presence: "MurmurPresence"
         }
     }
 
@@ -65,6 +67,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     case caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse
     case murmuration, loom, cipher, tuning, current, veil, echo, glyph
     case breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein
+    case halo, nucleus, iris, filament, flare, braid, mote, ripple
 
     public var id: String { rawValue }
 
@@ -82,6 +85,8 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             .signal
         case .breathe, .orbit, .glimmer, .vortex, .gather, .stir, .daybreak, .skein:
             .orb
+        case .halo, .nucleus, .iris, .filament, .flare, .braid, .mote, .ripple:
+            .presence
         }
     }
 
@@ -182,6 +187,22 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "a terminator of light sweeping the sphere, dawn crossing a small planet"
         case .skein:
             "dots strung along a winding thread wrapping the sphere, wound and unwound"
+        case .halo:
+            "a thin luminous ring tilting in 3D like a coin's edge; voice travels its circumference as a wave, never bars"
+        case .nucleus:
+            "a steady bright core wearing a shell of circulating mist; voice swells the shell, success collapses it into the core"
+        case .iris:
+            "an aperture of soft light petals; voice opens it, silence closes it to a slit glow"
+        case .filament:
+            "one continuous thread of light: knotting loosely while thinking, taut while responding, coiled at rest"
+        case .flare:
+            "a soft solar disc whose edge sprouts short organic licks with voice level; a sun, never an EQ"
+        case .braid:
+            "two strands orbiting a common center: loose at idle, braided tight while responding; the conversation itself"
+        case .mote:
+            "the minimal presence: one soft light wandering a small path, leaning toward typing, stretching slightly with voice; designed at 18 pt first"
+        case .ripple:
+            "a still face-on liquid disc where input lands: each impulse of activity drops one soft propagating ring"
         }
     }
 
@@ -278,6 +299,25 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("sweep", 0.5), k("softness", 0.5), k("dotSize", 0.5), k("material", 0.3)]
         case .skein:
             [k("winding", 0.5), k("trail", 0.5), k("dotSize", 0.5), k("material", 0.3)]
+        // Presence. Designed reactive-first: these eight are built for the live
+        // signals and for the 18 pt mount, so their knobs shape a gesture that
+        // has to survive being tiny.
+        case .halo:
+            [k("tilt", 0.5), k("thickness", 0.4), k("waviness", 0.5), k("shimmer", 0.4)]
+        case .nucleus:
+            [k("coreSize", 0.5), k("shell", 0.5), k("circulate", 0.5), k("swellRange", 0.5)]
+        case .iris:
+            [k("petals", 0.5), k("openness", 0.5), k("softness", 0.5), k("twist", 0.4)]
+        case .filament:
+            [k("length", 0.5), k("knot", 0.5), k("brightness", 0.5), k("sway", 0.4)]
+        case .flare:
+            [k("discSize", 0.5), k("licks", 0.5), k("reach", 0.5), k("flicker", 0.3)]
+        case .braid:
+            [k("strands", 0.5), k("twist", 0.5), k("separation", 0.5), k("glowBalance", 0.5)]
+        case .mote:
+            [k("wander", 0.4), k("lean", 0.5), k("size", 0.4), k("tail", 0.3)]
+        case .ripple:
+            [k("stillness", 0.5), k("ringSpeed", 0.5), k("decay", 0.5), k("sheen", 0.5)]
         }
     }
 

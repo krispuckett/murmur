@@ -5,10 +5,10 @@
 // and every number spelled out in prose underneath in case the snippet has
 // to be adapted.
 //
-// Since a state is a full design, the export has to carry five dial sets,
-// not one. It prints the construction for every state that departs from its
-// seed and lists all five in prose, so nothing depends on a reader knowing
-// what the seeds are.
+// Since a state is a full design, the export has to carry six dial sets, not
+// one. It prints the construction for every state that departs from its seed
+// and lists them all in prose, so nothing depends on a reader knowing what
+// the seeds are. The live signals ride alongside them.
 //
 // House voice throughout: plain sentences, no em dashes, no adjectives that
 // sell. The agent reading this needs facts, not a pitch.
@@ -152,8 +152,8 @@ extension MurmurConfiguration {
         lines.append("## Driving the state")
         lines.append("")
         lines.append(
-            "There are five states: idle, thinking, responding, success and "
-                + "error. Each one is a complete design rather than a tint on a "
+            "There are six states: idle, listening, thinking, responding, success "
+                + "and error. Each one is a complete design rather than a tint on a "
                 + "base, and the view crosses the whole dial set over about "
                 + "\(MurmurExport.number(MurmurState.transitionDuration)) seconds "
                 + "when the state changes. Pass the state that matches what the "
@@ -174,7 +174,7 @@ extension MurmurConfiguration {
             lines.append("")
         case .swiftUIOnly:
             lines.append(
-                "The view above holds one state. To drive five, swap in the dial "
+                "The view above holds one state. To drive all six, swap in the dial "
                     + "sets listed below, cross them over about "
                     + "\(MurmurExport.number(MurmurState.transitionDuration)) seconds "
                     + "with a smoothstep, and pass the matching stateIndex."
@@ -193,17 +193,60 @@ extension MurmurConfiguration {
         lines.append("")
         lines.append(
             "The shader is told which state it is in: stateIndex is 0 idle, "
-                + "1 thinking, 2 responding, 3 success, 4 error, and stateTau is "
-                + "the seconds since that state was entered. During a crossfade "
-                + "the index is the state being entered."
+                + "1 listening, 2 thinking, 3 responding, 4 success, 5 error, and "
+                + "stateTau is the seconds since that state was entered. During a "
+                + "crossfade the index is the state being entered."
+        )
+        lines.append("")
+        lines.append(contentsOf: Self.signalLines(for: surface))
+        return lines
+    }
+
+    /// The live half. A presence that ignores its person is decoration, so
+    /// an agent that wires the states but not the signals has built half of
+    /// this.
+    private static func signalLines(for surface: MurmurExportSurface) -> [String] {
+        var lines = [
+            "The indicator also listens. Feed it two live scalars, both 0 to 1: "
+                + "level is voice energy off the microphone, and activity is typing "
+                + "cadence or token stream rate. Send them every frame; they are "
+                + "not saved with the design, they are what is happening right now.",
+            "",
+        ]
+        switch surface {
+        case .pill:
+            lines.append("```swift")
+            lines.append("MurmurPill(Self.murmur, state: state, signals: MurmurSignals(level: micLevel, activity: typingRate))")
+            lines.append("```")
+        case .indicator:
+            lines.append("```swift")
+            lines.append("MurmurView(Self.murmur, state: state, signals: MurmurSignals(level: micLevel, activity: typingRate))")
+            lines.append("```")
+        case .swiftUIOnly:
+            lines.append(
+                "They are the last two shader arguments. Smooth them before "
+                    + "they reach the shader, with a rise of about "
+                    + "\(MurmurExport.number(MurmurSignals.attack)) seconds and a fall of about "
+                    + "\(MurmurExport.number(MurmurSignals.release)) seconds, or the "
+                    + "waveform's own jitter arrives as flicker."
+            )
+        }
+        lines.append("")
+        lines.append(
+            "Every species gets a small generic response on top of its design: "
+                + "activity quickens the tempo by up to "
+                + "\(Int(MurmurSignals.activitySpeedLift * 100)) percent and level "
+                + "lifts the glow by up to \(Int(MurmurSignals.levelGlowLift * 100)) "
+                + "percent. The presence family builds a deeper per-species "
+                + "response from the raw values as well."
         )
         return lines
     }
 
-    /// The five designs in prose, so nothing depends on reading the snippet.
+    /// Every design in prose, so nothing depends on reading the snippet.
     private func designSection() -> [String] {
         var lines: [String] = []
-        lines.append("## The five state designs")
+        lines.append("## The six state designs")
         lines.append("")
         lines.append(
             "Each block is one complete dial set. 1.0 is the value the style "
@@ -350,6 +393,10 @@ extension MurmurConfiguration {
             /// listed below, along with what stateIndex and stateTau mean.
             struct \(style.displayName)Indicator: View {
                 var size: CGFloat = 46
+                /// Live signals from the host, 0 to 1. Smooth them before
+                /// they get here: rise about \(MurmurExport.number(MurmurSignals.attack)) s, fall about \(MurmurExport.number(MurmurSignals.release)) s.
+                var level: Double = 0
+                var activity: Double = 0
 
                 @Environment(\\.displayScale) private var displayScale
                 @State private var birth = Date.now
@@ -378,8 +425,10 @@ extension MurmurConfiguration {
                                         .float(\(MurmurExport.number(design.glow))),  // glow
             \(knobLines)
                                         .float(0.0),  // epoch
-                                        .float(1.0),  // stateIndex: thinking
-                                        .float(time)  // stateTau
+                                        .float(2.0),  // stateIndex: thinking
+                                        .float(time),  // stateTau
+                                        .float(level),
+                                        .float(activity)
                                     )
                                 )
                             }
