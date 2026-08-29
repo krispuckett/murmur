@@ -4300,56 +4300,55 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
 // MARK: - 14. Helix
 
-// HELIX. A double strand of light, slowly climbing and turning.
+// HELIX. Two strands winding a vertical axis: the double helix.
 //
-// THE DISTANCE TO A HELIX, CHEAPLY. There is no closed form for the nearest
-// point on a helix, but there is a very good approximation that costs one
-// atan2: read the sample's own angle and radius about the helix axis, work out
-// what angle the strand is at THAT HEIGHT, and take the wrapped difference. The
-// lateral distance is that angle difference times the radius; the radial
-// distance is how far the sample is off the strand's cylinder. Adding them in
-// quadrature is exact for a strand of zero pitch and off by a factor of the
-// cosine of the pitch angle for a real one -- which at the pitches this species
-// uses is under a tenth, and is absorbed into the width. The wrap is what makes
-// it work at all: without it the strand tears open along one radius, which is
-// the same seam limn's arc and comet's trail each had to be rebuilt to avoid.
+// THE GESTALT TEST IS THE SPEC -- somebody says "DNA" inside three seconds or
+// the species has failed -- and the first build failed it by being a cousin of
+// flux: broad soft strands on a leaning axis read as crossing horizontal
+// streaks. Three things were wrong and all three are structural.
 //
-// TAPERED LIKE ARC'S THREAD, and for the same reason: a strand of even width
-// running out of the top of the body reads as a cut cable. Both ends fall away
-// on a profile in height, so the pair emerges out of the glass and returns into
-// it, and the strands never touch the shell.
+// THE AXIS IS VERTICAL AND STAYS VERTICAL. It was leaning up to twenty degrees,
+// which is enough to destroy the read: a helix is legible only against a clear
+// upright, and once the upright tips the crossings stop looking like crossings
+// and start looking like a weave. The yaw is kept -- rotating about the vertical
+// turns the pair toward and away from the viewer without disturbing the upright,
+// which is exactly the motion this wants -- and the tilt is down to about six
+// degrees, enough that it is not a diagram.
 //
-// EIGHT STEPS RATHER THAN FIVE. The strands are narrower than a sheet and
-// broader than arc's filament, which puts them exactly in the gap where five
-// taps step over them and a closed-form integral is not available. Eight is the
-// smallest count that samples a 0.095 strand honestly, and this species can
-// afford it because its distance function is trigonometry rather than noise.
+// THE CROSSING RHYTHM IS COUNTED, not left to fall out. A double helix seen
+// side-on crosses twice per turn, so the roster's "turns" is now set to put
+// about one and three quarter turns inside the visible height: three or four
+// crossings, which is the count the eye reads as a helix rather than as a
+// spring. More than that is a coil; fewer is a wave.
 //
-// THE TWO STRANDS ARE THE DUOTONE'S NATURAL HOME. They sit half a turn apart
-// and at opposite ends of the spread axis, so with one anchor they are two
-// neighbours of the tone and with two they are the two anchors themselves,
-// climbing around each other. Nothing else in the collection states a
-// two-colour configuration as plainly.
+// THE STRANDS ARE THREADS, and getting there meant giving up the atan2. The
+// distance to the strand is measured IN THE HORIZONTAL PLANE AT THE SAMPLE'S OWN
+// HEIGHT: at height y the strand is one point in that plane, so the distance is
+// a subtract. That costs one sincos where the angular form cost an inverse
+// tangent, which is what makes twenty steps affordable -- and twenty steps is
+// what lets the strand be 0.062 wide instead of 0.11. The approximation
+// overstates the cross-section by the secant of the pitch angle, about a fifth
+// here, and is absorbed into the width. It is the same trade arc made and it
+// buys the same thing: a thread instead of a rope.
 //
-// LEVEL FEEDS THE STRANDS: voice brightens and thickens them, which on a form
-// this linear reads as the light in a filament being turned up. ACTIVITY
-// QUICKENS THE CLIMB, so cadence moves the pattern up through the body faster
-// without changing its shape.
+// AND THEY TAPER LIKE ARC'S. Width and brightness fall together on one profile
+// in height, so each strand is thickest and brightest in the middle of its run
+// and vanishes to nothing top and bottom -- the pair emerges from the glass and
+// returns to it rather than being cut off by the shell.
 //
-// RESPONDING WINDS IT TIGHTER: the turn count rises by half and the climb
-// nearly doubles. A helix under drive is visibly more coiled, which is about as
-// direct a picture of effort as a geometric form can give.
+// EVERYTHING ELSE GETS OUT OF THE WAY. The medium runs at a third of what the
+// other luminous heroes carry and the rim at three quarters, because this is a
+// species whose whole content is two thin lines and anything else in the body
+// competes with them for the read.
 //
-// THE GESTURE, every nine seconds or so: the whole helix draws in and winds
-// tighter, then relaxes.
+// LEVEL feeds the strands, ACTIVITY quickens the climb, RESPONDING winds it
+// tighter and drives it up, the gesture draws it in for a breath, and SUCCESS
+// runs a bright band up both strands to the top.
 //
-// SUCCESS: a bright pulse climbs both strands to the top on the state's sweep.
-//
-// SIZE: at 18 pt the turns drop from about three to one and a half and the
-// strands thicken by 80 per cent -- three turns of a thin strand inside a
-// thirteen-point bead is a texture, and one and a half turns of a fat one is a
-// double helix. The climb also slows a third, because the same rate over a
-// shorter visible run reads as faster than it is.
+// SIZE: at 18 pt the turns halve to about one -- three crossings inside a
+// thirteen-point bead is a texture -- and the strands thicken by 90 per cent.
+// What survives is two threads crossing once, which is still unmistakably the
+// figure.
 [[ stitchable ]] half4 mh_helix(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -4362,10 +4361,10 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
 
-    float turnsK  = clamp(c0, 0.0, 1.0);   // how many turns across the body
-    float riseK   = clamp(c1, 0.0, 1.0);   // how fast it climbs
-    float glowK   = clamp(c2, 0.0, 1.0);   // the strands' light
-    float spreadK = clamp(c3, 0.0, 1.0);   // the two strands' hues
+    float turnsK  = clamp(c0, 0.0, 1.0);
+    float riseK   = clamp(c1, 0.0, 1.0);
+    float glowK   = clamp(c2, 0.0, 1.0);
+    float spreadK = clamp(c3, 0.0, 1.0);
 
     MHState st = mh_state(stateIndex, stateTau);
     MHLive live = mh_live(level, activity, stateIndex);
@@ -4381,78 +4380,61 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
     float4 fl = mh_flourish(t, 17.0, 9.3);
 
-    // The axis leans and turns slowly, so the helix is never seen from the same
-    // angle twice and its pole is never a landmark.
+    // THE UPRIGHT. Yaw turns the pair to face you; the tilt is a whisper.
     float ay = mh_drift(t, 0.055, 0.50, 2.0);
-    float ax = 0.22 + 0.13 * sin(t * 0.031);
+    float ax = 0.06 + 0.05 * sin(t * 0.031);
 
-    float turns = (1.7 + 2.2 * turnsK) * mix(1.0, 0.52, small)
-                * (1.0 + 0.50 * st.drive + 0.30 * fl.x);
-    float climb = mh_drift(t, (0.22 + 0.34 * riseK) * mix(1.0, 0.66, small), 0.44, 5.0)
+    // About one and three quarter turns across the visible height at the
+    // default: three or four crossings.
+    float turns = (1.75 + 1.10 * turnsK) * mix(1.0, 0.50, small)
+                * (1.0 + 0.35 * st.drive + 0.20 * fl.x);
+    float climb = mh_drift(t, (0.20 + 0.30 * riseK) * mix(1.0, 0.70, small), 0.44, 5.0)
                 * (1.0 + 0.75 * live.pace + 0.85 * st.drive);
-    float r0 = (0.40 + 0.10 * turnsK) * S * (1.0 - 0.16 * st.drive - 0.12 * fl.x);
-    float w = (0.095 + 0.030 * glowK) * S * mix(1.0, 1.80, small)
-            * (1.0 + 0.30 * live.voice);
-    float bright = (0.72 + 0.60 * glowK) * (1.0 + 0.80 * live.voice);
+    float r0 = (0.42 + 0.10 * turnsK) * S * (1.0 - 0.14 * st.drive - 0.10 * fl.x);
+    float w = (0.062 + 0.022 * glowK) * S * mix(1.0, 1.90, small)
+            * (1.0 + 0.25 * live.voice);
+    float bright = (0.80 + 0.65 * glowK) * (1.0 + 0.80 * live.voice);
 
-    float medAmt = mix(0.055, 0.030, small);
-
-    // FOURTEEN STEPS FOR THE STRANDS, FIVE FOR THE MEDIUM, and splitting them is
-    // what fixed this species. At eight shared steps the interval was 0.25 and
-    // the strands are 0.22 across, so a ray crossed one between taps as often as
-    // through them: what drew was a DASHED helix, a stack of disconnected
-    // streaks that read as stripes rather than as two continuous strands
-    // climbing. Fourteen halves the interval and the strands close up.
-    //
-    // They can be afforded because this loop reads no noise at all -- the
-    // distance to a helix is trigonometry -- so fourteen of these cost less than
-    // the eight shared steps did. The medium keeps the family's five, which is
-    // honest for something that broad, and carries the only noise here.
-    const int STRANDS = 14;
+    // TWENTY STEPS, and they are cheap: one sincos each, no noise, no atan2.
+    const int TAPS = 20;
     float2 acc = float2(0.0);
     float trans = 1.0;
-    float ds = L / float(STRANDS);
+    float ds = L / float(TAPS);
 
-    for (int i = 0; i < STRANDS; i++) {
+    for (int i = 0; i < TAPS; i++) {
         float3 p = b.P + rd * ((float(i) + 0.5) * ds);
         float fade = mh_inside(p);
         if (fade <= 0.001) continue;
 
         float3 q = mh_spin(p, ay, ax) / S;
-        float rho = length(q.xz);
-        float th = atan2(q.z, q.x);
 
-        // Where the strands are at this height. The second is half a turn round.
+        // THE SPINDLE, in height: width and brightness fall together, so each
+        // strand is a stroke laid down with pressure in the middle.
+        float u = clamp(abs(q.y) / 0.88, 0.0, 1.0);
+        float prof = pow(max(1.0 - u * u, 0.0), 0.80);
+        if (prof <= 0.002) continue;
+        float wl = w * (0.30 + 0.70 * prof);
+
+        // Where the two strands are at this height, as two points in the
+        // horizontal plane. One sincos serves both: the second is the negation.
         float phi = turns * q.y * 3.14159265 + climb;
+        float cp = cos(phi), sp = sin(phi);
+        float2 c0p = float2(r0 * cp, r0 * sp);
 
-        // THE TAPER, in height: the pair emerges from the glass and returns to
-        // it rather than being cut off by the shell.
-        float hp = 1.0 - smoothstep(0.30, 0.86, abs(q.y));
+        float2 d0v = q.xz - c0p;
+        float2 d1v = q.xz + c0p;
+        float a0 = dot(d0v, d0v) / (wl * wl);
+        float a1 = dot(d1v, d1v) / (wl * wl);
 
-        float dr0 = rho - r0;
-        float aw0 = th - phi;
-        aw0 = aw0 - 6.2831853 * floor(aw0 / 6.2831853 + 0.5);
-        float lat0 = rho * aw0;
-        float a0 = (dr0 * dr0 + lat0 * lat0) / (w * w);
-
-        float aw1 = th - phi - 3.14159265;
-        aw1 = aw1 - 6.2831853 * floor(aw1 / 6.2831853 + 0.5);
-        float lat1 = rho * aw1;
-        float a1 = (dr0 * dr0 + lat1 * lat1) / (w * w);
-
-        // SUCCESS climbs the strands: a bright band travels up the pair.
         float lift = 1.0;
         if (st.complete > 0.001) {
             float sr = (q.y - mix(-1.0, 1.0, st.sweep)) / 0.26;
             lift += st.complete * (0.35 + 2.10 * exp(-sr * sr));
         }
 
-        float e0 = (exp(-a0) + mh_scatter(a0, 0.20)) * hp;
-        float e1 = (exp(-a1) + mh_scatter(a1, 0.20)) * hp;
+        float e0 = (exp(-a0) + mh_scatter(a0, 0.16)) * prof;
+        float e1 = (exp(-a1) + mh_scatter(a1, 0.16)) * prof;
         float strands = (e0 + e1) * bright * lift;
-
-        // The two strands at the two ends of the spread axis, which under
-        // duotone is the two anchors themselves.
         float hueW = (e1 - e0) * bright * lift;
 
         float e = strands * 0.80 * fade;
@@ -4461,7 +4443,9 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
         trans *= exp(-(3.00 * e + MH_EXT) * ds);
     }
 
-    // The medium, at the family's five.
+    // The medium, at a third of the family's usual: nothing may compete with
+    // two thin lines.
+    float medAmt = mix(0.020, 0.012, small);
     float medE = 0.0;
     float mtrans = 1.0;
     float mds = L / float(MH_TAPS);
@@ -4475,10 +4459,10 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
     }
     acc.x += medE;
 
-    float interior = acc.x * 4.20 * b.m * mh_transmit(b.fres) * (1.0 + 0.22 * st.settled);
+    float interior = acc.x * 5.60 * b.m * mh_transmit(b.fres) * (1.0 + 0.22 * st.settled);
     float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.48, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.60 + 0.28 * live.voice, 0.38, 0.12);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
@@ -4490,53 +4474,51 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
 // MARK: - 15. Geode
 
-// GEODE. Crystalline facets inside the glass, catching light as the body turns.
+// GEODE. A cut crystal inside the glass, catching light face by face.
 //
-// A FACET IS A DIRECTION, NOT A POLYGON. Drawing real interior planes would mean
-// clipping a solid against six half-spaces per sample, and none of it would
-// survive five taps. So the crystal is built the other way round: six axes on a
-// slowly turning frame, and every point in the volume belongs to whichever axis
-// its own direction is most aligned with. That partition IS the faceting -- the
-// boundaries between the six regions are the crystal's edges, and they fall
-// where they would on a real cut stone, because "nearest axis" is exactly how a
-// convex polyhedron divides the directions around itself.
+// A FACET IS A PLANE, AND THE FIRST BUILD'S WASN'T. It partitioned the volume by
+// which of six DIRECTIONS a point was most aligned with, which is a defensible
+// way to divide a sphere and a hopeless way to draw a crystal: the partition was
+// then integrated along the view ray, and integrating a hard-edged structure
+// through five samples averages exactly the angularity that was the point. What
+// drew was a fuzzy blob with a bright wedge in it -- no planes, no edges, no
+// believable angles.
 //
-// WHAT MAKES IT CATCH LIGHT is then one dot product: each facet is lit by how
-// squarely its own axis faces the key, so as the frame turns, facets come up
-// bright one after another and go dark as they roll away. That sequence is the
-// species. It needs no animation of its own -- the turning does all of it -- and
-// it is why this hero reads as crystalline rather than as a lit blob.
+// SO THE CRYSTAL IS A REAL CONVEX SOLID, INTERSECTED. Four axes make eight
+// planes -- a slab per axis, with different offsets on the two sides so the
+// solid is an irregular gem rather than a symmetric octahedron -- and the ray is
+// tested against them by the slab method: the entry is the LAST plane the ray
+// crosses going in, the exit is the FIRST it crosses coming out, and the solid
+// is hit when the entry precedes the exit. That is eight divides, it is exact,
+// and it gives what the direction partition could not: real straight edges
+// meeting at the angles the plane offsets actually imply.
 //
-// SOFT-EDGED, WHICH THE BRIEF INSISTS ON AND WHICH THE PARTITION DOES NOT GIVE
-// FOR FREE. The gap between the best axis and the runner-up is how far inside
-// its facet a point is, and near an edge that gap goes to zero -- so the edge is
-// available as a smooth field rather than as a discontinuity. It is used twice:
-// to crossfade the lighting between neighbouring facets so no boundary is ever
-// a step, and to lay a fine bright line along the edges themselves, which is
-// what a cut crystal does and what `glimmer` dials.
+// AND THE ENTRY PLANE IS THE FACE YOU ARE LOOKING AT, which is the whole species.
+// Its normal shades it against the key, so as the solid turns, faces come up
+// bright one at a time and roll away into near-darkness -- some face-on and
+// blazing, some edge-on and almost black, exactly as a cut stone does. Nothing
+// animates this; the rotation does all of it.
 //
-// THE CRYSTAL SITS INSIDE THE GLASS rather than filling it: a shell profile
-// keeps it clear of the shell so it reads as a stone suspended in a body rather
-// than as the body's own faceting. `depthCrystal` moves it in and out.
+// SOFT-EDGED WITHOUT BEING BLURRED, and the two are not the same thing. The
+// silhouette softens for free: the chord through the solid goes to zero at every
+// edge of the silhouette, so the crystal fades out where it is thin rather than
+// stopping at a line. The interior edges soften from the runner-up: when two
+// entry planes are nearly equally last, the ray is arriving at an edge, so the
+// shading normal blends between the two faces over a narrow band. Both are soft
+// transitions across HARD geometry, which is what "angular structure with soft
+// edges" means and what a blur cannot imitate.
 //
-// LEVEL LIGHTS THE STONE: voice raises the facets' response to the key, so more
-// of them are bright at once and the crystal opens up. ACTIVITY TURNS IT: the
-// frame's rotation quickens, so facets change over faster -- a busy assistant's
-// stone is turning in the light.
+// LEVEL OPENS THE STONE: voice widens each face's response to the key, so more
+// faces are lit at once. ACTIVITY TURNS IT, so the light crosses faces faster.
+// RESPONDING settles the tumble into one steady rotation.
 //
-// RESPONDING SETTLES IT INTO ONE ATTITUDE and drives the turn one way, so the
-// tumbling becomes a rotation with a direction.
+// THE GESTURE, every ten seconds or so: one face takes far more than its share
+// for a breath, the way a real stone throws a flash as it passes an angle.
+// SUCCESS lights every face at once, which on a faceted body is unmistakable.
 //
-// THE GESTURE, every ten seconds or so: one facet takes far more light than its
-// share for a breath, the way a real stone throws a flash as it passes an angle.
-//
-// SUCCESS: every facet lights at once, which on a faceted body is unmistakably
-// an event, and then settles back to the sequence.
-//
-// SIZE: at 18 pt the axis count drops from six to four -- six facets across a
-// thirteen-point bead is a texture, four is a cut stone -- the edge lines switch
-// off, and the crystal grows to fill more of the body. What survives is a small
-// turning solid catching light on two or three faces.
+// SIZE: at 18 pt the fourth axis retires, leaving a six-faced solid whose faces
+// are half again as large -- eight facets across a thirteen-point bead is a
+// texture, six is a gem -- and the edge lines switch off.
 [[ stitchable ]] half4 mh_geode(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -4549,10 +4531,10 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
 
-    float facetK  = clamp(c0, 0.0, 1.0);   // how sharply cut
+    float facetK  = clamp(c0, 0.0, 1.0);   // how hard the faces are cut
     float glimK   = clamp(c1, 0.0, 1.0);   // the edge lines
     float depthK  = clamp(c2, 0.0, 1.0);   // how big the stone is
-    float spreadK = clamp(c3, 0.0, 1.0);   // facet hues
+    float spreadK = clamp(c3, 0.0, 1.0);
 
     MHState st = mh_state(stateIndex, stateTau);
     MHLive live = mh_live(level, activity, stateIndex);
@@ -4568,129 +4550,112 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
     float4 fl = mh_flourish(t, 19.0, 10.2);
 
-    // The frame the stone is cut on. Tumbling at rest, driven under responding.
+    // The stone tumbles at rest and rotates steadily under drive.
     float sp = (1.0 + 0.80 * live.pace + 1.00 * st.drive);
     float ay = mix(mh_drift(t, 0.088 * sp, 0.48, 2.0), t * 0.30 * sp, st.drive * 0.7);
     float ax = mix(0.34 + 0.22 * sin(t * 0.041), 0.30, st.drive * 0.7);
 
-    // Six axes: three orthogonal pairs, tilted off the cardinal directions so
-    // the cut never lines up with the frame and looks machined.
-    float3 A0 = normalize(float3( 0.94,  0.28,  0.19));
-    float3 A1 = normalize(float3(-0.22,  0.91,  0.35));
-    float3 A2 = normalize(float3( 0.16, -0.31,  0.94));
-    float3 A3 = normalize(float3( 0.61, -0.58,  0.54));
-    float3 A4 = normalize(float3(-0.66, -0.42,  0.62));
-    float3 A5 = normalize(float3( 0.38,  0.72, -0.58));
-    float fifth = 1.0 - smoothstep(0.24, 0.66, small);   // six facets down to four
+    // THE RAY, IN THE STONE'S FRAME. Rotating the ray in is one transform;
+    // rotating the eight planes out would be eight.
+    float3 Pc = mh_spin(b.P, ay, ax);
+    float3 Rc = mh_spin(rd, ay, ax);
 
-    float3 keyF = mh_spin(mh_key(t), ay, ax);
+    // FOUR AXES, EIGHT PLANES. Off the cardinals so the cut never looks
+    // machined, and with unequal offsets either side so the gem is irregular.
+    float3 A0 = normalize(float3( 0.92,  0.30,  0.25));
+    float3 A1 = normalize(float3(-0.26,  0.90,  0.35));
+    float3 A2 = normalize(float3( 0.20, -0.34,  0.92));
+    float3 A3 = normalize(float3( 0.58, -0.55,  0.60));
 
-    float Rin = (0.62 + 0.16 * depthK) * S * mix(1.0, 1.12, small);
-    float sharp = 3.0 + 7.0 * facetK;
-    float glimAmt = glimK * (1.0 - small) * (0.55 + 0.55 * live.voice);
-    float medAmt = mix(0.052, 0.030, small);
+    // The stone has to sit INSIDE the glass with room around it. At 0.56 it
+    // reached the shell and the containment cut its corners off, which turns a
+    // gem into a cropped shape -- and a crystal whose silhouette is decided by
+    // something other than its own planes has stopped being a crystal.
+    float scale = (0.34 + 0.12 * depthK) * S * mix(1.0, 1.20, small);
+    float fourth = 1.0 - smoothstep(0.24, 0.66, small);
+    // Offsets: the fourth axis opens out at small size until it stops cutting.
+    float o4 = mix(6.0, 1.02, fourth);
+    float dp[4]; float dm[4];
+    dp[0] = 1.00 * scale; dm[0] = 0.86 * scale;
+    dp[1] = 0.92 * scale; dm[1] = 1.04 * scale;
+    dp[2] = 0.98 * scale; dm[2] = 0.88 * scale;
+    dp[3] = o4 * scale;   dm[3] = o4 * 0.94 * scale;
 
+    // THE SLAB TEST. Entry is the last plane in, exit the first plane out.
+    float tIn = -1e9, tOut = 1e9, tIn2 = -1e9;
+    float3 fN = float3(0.0, 0.0, 1.0), fN2 = float3(0.0, 0.0, 1.0);
+    for (int k = 0; k < 4; k++) {
+        float3 A = (k == 0) ? A0 : (k == 1) ? A1 : (k == 2) ? A2 : A3;
+        float na = dot(A, Rc);
+        float pa = dot(A, Pc);
+        if (abs(na) < 1e-5) {
+            if (pa > dp[k] || pa < -dm[k]) { tIn = 1e9; tOut = -1e9; }
+            continue;
+        }
+        float t1 = (dp[k] - pa) / na;
+        float t2 = (-dm[k] - pa) / na;
+        float tn = min(t1, t2), tf = max(t1, t2);
+        // Which side of the slab the ray entered through.
+        float3 nIn = (t1 < t2) ? A : -A;
+        if (tn > tIn) { tIn2 = tIn; fN2 = fN; tIn = tn; fN = nIn; }
+        else if (tn > tIn2) { tIn2 = tn; fN2 = nIn; }
+        tOut = min(tOut, tf);
+    }
+
+    float crystalE = 0.0, crystalH = 0.0;
+    float sEnter = max(tIn, 0.0);
+    float chord = min(tOut, L) - sEnter;
+    if (chord > 0.0 && sEnter < L) {
+        // THE EDGE. Two planes nearly equally last means the ray is arriving at
+        // an edge, so the shading normal blends across a narrow band. Soft
+        // transition, hard geometry.
+        float soft = (0.10 - 0.055 * facetK) * scale;
+        float eMix = exp(-max(tIn - tIn2, 0.0) / max(soft, 1e-4));
+        float3 nrm = normalize(mix(fN, fN2, 0.5 * eMix) + 1e-5);
+
+        float3 keyF = mh_spin(mh_key(t), ay, ax);
+        float sharp = 1.4 + 2.6 * facetK - 1.0 * live.voice;
+        float face = pow(clamp(dot(nrm, keyF), 0.0, 1.0), max(sharp, 0.7));
+        float lit = 0.10 + 1.25 * face;
+
+        if (fl.x > 0.002) lit += fl.x * 1.70 * pow(clamp(dot(nrm, normalize(A0 + A2)), 0.0, 1.0), 3.0);
+        if (st.complete > 0.001) lit += st.complete * 0.70;
+
+        // The silhouette softens by itself: the chord vanishes at every edge of
+        // the outline, so the stone fades where it is thin.
+        float body = smoothstep(0.0, 0.34 * scale, chord);
+        float vis = mh_inside(b.P + rd * (sEnter + chord * 0.4)) * exp(-MH_EXT * sEnter);
+
+        // A bright line where two faces meet.
+        float edge = glimK * (1.0 - small) * 0.85 * eMix * (1.0 - eMix * 0.4);
+
+        crystalE = (lit * body + edge * body) * vis;
+        // Faces take hue by which way they point, so neighbouring faces of the
+        // stone are neighbouring hues.
+        crystalH = crystalE * clamp(nrm.x * 0.7 + nrm.y * 0.5, -1.0, 1.0);
+    }
+
+    float medAmt = mix(0.048, 0.028, small);
     float2 acc = float2(0.0);
     float trans = 1.0;
     float ds = L / float(MH_TAPS);
-
     for (int i = 0; i < MH_TAPS; i++) {
         float3 p = b.P + rd * ((float(i) + 0.5) * ds);
         float fade = mh_inside(p);
         if (fade <= 0.001) continue;
-
-        // The stone: a soft solid sitting inside the glass.
-        // A SHELL, NOT A BALL, and the reason is a real degeneracy rather than
-        // a preference. The facet a point belongs to is decided by its
-        // DIRECTION from the centre, and direction is undefined at the centre
-        // and changes arbitrarily fast near it -- so every ray passing through
-        // the middle of the stone crossed several facets in a few samples and
-        // drew a hard radial seam out of the core. Fading the crystal out below
-        // 0.38 of its radius removes the degenerate region entirely and leaves a
-        // soft glowing heart where the facets used to fight, which is what the
-        // inside of a geode looks like anyway.
-        float rr = length(p) / max(Rin, 1e-3);
-        float stone = (1.0 - smoothstep(0.55, 1.05, rr)) * smoothstep(0.10, 0.38, rr);
-        if (stone <= 0.002) {
-            float med0 = mh_medium(p, t, 2.0 / S) * medAmt * fade;
-            acc.x += med0 * trans * ds;
-            trans *= exp(-(2.0 * med0 + MH_EXT) * ds);
-            continue;
-        }
-
-        float3 n = mh_spin(normalize(p + 1e-5), ay, ax);
-
-        // WHICH FACET, and how far inside it. The runner-up is kept because the
-        // gap between first and second IS the distance to the edge.
-        float d0 = dot(n, A0), d1 = dot(n, A1), d2 = dot(n, A2);
-        float d3 = dot(n, A3), d4 = dot(n, A4), d5 = dot(n, A5) * fifth;
-        float best = max(max(max(d0, d1), max(d2, d3)), max(d4, d5));
-        float second = -2.0;
-        second = max(second, (d0 < best) ? d0 : -2.0);
-        second = max(second, (d1 < best) ? d1 : -2.0);
-        second = max(second, (d2 < best) ? d2 : -2.0);
-        second = max(second, (d3 < best) ? d3 : -2.0);
-        second = max(second, (d4 < best) ? d4 : -2.0);
-        second = max(second, (d5 < best) ? d5 : -2.0);
-
-        // Which axis won, as a light and a hue. Written as a weighted blend
-        // rather than a branch so the crossover between neighbouring facets is
-        // a crossfade: the brief says soft-edged, and a hard pick here would put
-        // a visible crease down every boundary in the stone.
-        float soft = 0.055 + 0.075 * (1.0 - facetK);
-        float w0 = exp((d0 - best) / soft), w1 = exp((d1 - best) / soft);
-        float w2 = exp((d2 - best) / soft), w3 = exp((d3 - best) / soft);
-        float w4 = exp((d4 - best) / soft), w5 = exp((d5 - best) / soft) * fifth;
-        float wsum = w0 + w1 + w2 + w3 + w4 + w5 + 1e-5;
-
-        float3 fn = normalize((A0 * w0 + A1 * w1 + A2 * w2
-                             + A3 * w3 + A4 * w4 + A5 * w5) / wsum + 1e-5);
-
-        // THE CATCH. Each facet is lit by how squarely it faces the key -- and
-        // the comparison happens in the STONE'S frame, with the key rotated into
-        // it, rather than the other way round. Rotations preserve dot products,
-        // so the answer is identical, and this way there is no inverse rotation
-        // to write: the axes are already in the cut frame and the key only has
-        // to be carried across once, outside the loop.
-        float face = pow(clamp(dot(fn, keyF), 0.0, 1.0), sharp * 0.5);
-        float lit = 0.16 + 1.05 * face * (1.0 + 0.75 * live.voice);
-
-        // THE GESTURE: one facet takes far more than its share for a breath.
-        if (fl.x > 0.002) {
-            float pick = floor(fl.z * 5.999);
-            float mine = (pick < 0.5) ? w0 : (pick < 1.5) ? w1 : (pick < 2.5) ? w2
-                       : (pick < 3.5) ? w3 : (pick < 4.5) ? w4 : w5;
-            lit += fl.x * 1.60 * (mine / wsum);
-        }
-        if (st.complete > 0.001) lit += st.complete * 0.85;
-
-        // THE EDGES. The gap between the winner and the runner-up, read as a
-        // thin bright line along every boundary in the stone.
-        float edge = 0.0;
-        if (glimAmt > 0.002) {
-            float gap = (best - second) / soft;
-            edge = glimAmt * 0.55 * exp(-gap * gap * 0.35);
-        }
-
-        float e = (stone * lit * 0.42 + edge * stone) * fade;
-        float med = mh_medium(p, t, 2.0 / S) * medAmt * fade;
-        e += med;
-
+        float e = mh_medium(p, t, 2.0 / S) * medAmt;
         acc.x += e * trans * ds;
-        // Facets take hue by which axis won, so neighbouring faces of the stone
-        // are neighbouring hues and the crystal has play of colour in it.
-        float hk = (w0 * -1.0 + w1 * -0.4 + w2 * 0.15 + w3 * 0.55 + w4 * 1.0 + w5 * 0.3) / wsum;
-        acc.y += (stone * lit * 0.42) * hk * fade * trans * ds;
-        trans *= exp(-(2.40 * e + MH_EXT) * ds);
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
     }
 
-    float interior = acc.x * 4.40 * b.m * mh_transmit(b.fres) * (1.0 + 0.22 * st.settled);
-    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+    float interior = (acc.x * 3.20 + crystalE * 0.92) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.22 * st.settled);
+    float hue = (crystalE > 1e-5 ? crystalH / crystalE : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.72, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.74 + 0.32 * live.voice, 0.62, 0.14);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
-    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+    float hueMix = hue * (crystalE * 0.92) / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
@@ -4699,56 +4664,57 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
 // MARK: - 16. Sol
 
-// SOL. A miniature sun: soft prominences lifting and falling inside the glass.
+// SOL. A miniature sun: one composed core, and prominences as calligraphy.
 //
-// THE KNEE DOES THE HEAVY WORK HERE, and this is the one species designed around
-// it rather than merely protected by it. A star is the only subject in the
-// collection whose honest dynamic range is enormous: the photosphere is orders
-// of magnitude above the corona, which is orders above the prominences. Fed
-// straight to the rail that renders as a flat white disc with some dim fuzz
-// round it -- which is exactly what a clamp would give and exactly what the
-// first cut of droplet's success looked like. mh_knee compresses the overshoot
-// asymptotically instead, so a core running at four times the rail's top still
-// has structure in it and the prominences an eighth as bright are still
-// separable. Everything below is built assuming that compression exists; at a
-// clamp this hero would have no picture.
+// THE CORE IS THE MASS AND THE PROMINENCES ARE THE LINE, and the first build had
+// neither. Its core was marched, so what drew was whatever shape five samples
+// happened to make of a soft ball -- an amoeba -- and its prominences were wide
+// angular lobes that merged with the corona into the same mass. Both are now
+// solved rather than sampled, and they are solved differently because they are
+// different kinds of thing.
 //
-// THREE LAYERS, AND THEY ARE DIFFERENT KINDS OF THING. The PHOTOSPHERE is a
-// solid body with a soft limb, granulated by a fine field that `simmer` dials --
-// it is the only opaque object any hero puts in the glass, and the interior
-// march's transmittance makes it genuinely occlude what is behind it. The CORONA
-// is a wide soft falloff off that limb, which is what gives the sun its size. The
-// PROMINENCES are tongues: soft plumes rooted on the surface at drifting
-// directions, each lifting and falling on its own long cycle so the sun's
-// silhouette is always changing without ever pulsing.
+// THE CORE IS A PERFECT DISC, and it costs one square root. The photosphere is a
+// sphere centred at the origin, so the only thing a view ray needs to know is
+// its own perpendicular distance to that origin -- and a disc thresholded on
+// that distance is exactly, analytically round from every angle, at every frame,
+// with no sampling in it anywhere. It is droplet's discipline applied to the one
+// hero that most needed it: centred, circular, breathing a couple of per cent on
+// the house breath, and nothing else.
 //
-// A PROMINENCE IS A DIRECTION PLUS A HEIGHT. The angular term is how close the
-// sample's own direction is to the plume's, the radial term is a soft arch from
-// the surface out to the plume's current height and back, and the product is a
-// tongue of light standing off the limb. Four of them on incommensurate periods
-// -- 13, 17, 21 and 25 seconds -- so they are never all up or all down and the
-// star never looks like it is breathing.
+// THE PROMINENCES ARE THIN ARCS THAT LIFT AND FALL. Each is rooted at two points
+// on the core's limb and arches out between them -- swept along the surface by
+// an angle and lifted radially by a height that rises and falls on its own long
+// cycle. They are integrated the way arc's filament is: sample the CURVE for the
+// point nearest the ray, refine it with a parabola, and use the closed form for
+// a gaussian tube crossed at an angle. That is what makes them thin. A marched
+// prominence has to be wide enough for the march to find it, which is precisely
+// how the first build's became lobes.
 //
-// LEVEL LIFTS THEM: voice raises every plume's height and brightens the core, so
-// speaking makes the sun visibly more active. That is the most literal reading
-// of `level` in the collection and on this subject it is the right one.
-// ACTIVITY QUICKENS THE SIMMER, the fine granulation crawling across the
-// photosphere, which is the small motion a working star should have.
+// ONE OR TWO AT A TIME. Three prominences on periods of 13, 17 and 21 seconds,
+// each spending most of its cycle flat against the surface, so the sun is never
+// symmetric and never crowded. The lift is sin-squared, flat at both ends, so a
+// tongue leaves the surface and returns to it without ever appearing.
 //
-// RESPONDING DRIVES ONE PROMINENCE OUT: the plumes bias toward a single heading
-// and the leading one reaches half again its usual height. A star with a flare
-// pointing somewhere reads as intent.
+// AND THE CORE OCCLUDES THEM. A prominence whose nearest point lies behind the
+// core's front surface, within the disc, is hidden -- which is what puts the far
+// tongues behind the star instead of in front of it, and is the cue that makes
+// the core read as a solid body rather than as a bright patch.
 //
-// THE GESTURE, every twelve seconds or so: one plume arches much higher than the
-// rest and settles back.
+// THE KNEE STILL DOES THE HEAVY WORK. The photosphere runs well above the rail's
+// top and the tongues an eighth of it; under a clamp the core would be a flat
+// white plate and the prominences would be the only picture. The asymptotic
+// compression is what keeps structure in the core while the line work stays
+// separable.
 //
-// SUCCESS: every prominence lifts together and the corona flares, which is the
-// only moment the star is symmetric, then it settles brighter.
+// LEVEL LIFTS THE TONGUES and brightens the core. ACTIVITY quickens the
+// granulation crawling across the photosphere -- read in the volume, never on
+// the direction, because direction is undefined at the centre and sampling it
+// there grew a starburst out of the core. RESPONDING biases every tongue toward
+// one heading. The gesture arches one much higher; SUCCESS lifts all of them.
 //
-// SIZE: at 18 pt two of the four plumes crossfade away, the survivors are half
-// again as wide, the granulation switches off, and the core grows to fill more
-// of the body. What survives is a small bright sun with one or two soft tongues
-// standing off it.
+// SIZE: at 18 pt one prominence retires, the survivors thicken by two thirds,
+// the granulation switches off and the core grows. What survives is a small
+// round sun with one tongue standing off it.
 [[ stitchable ]] half4 mh_sol(
     float2 position, half4 currentColor, float2 size, float time, float pixelScale,
     half4 inkColor, half4 toneColor,
@@ -4761,9 +4727,9 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
     float S = max(formScale, 0.10);
     float t = time * max(speed, 0.0);
 
-    float coronaK = clamp(c0, 0.0, 1.0);   // how far the corona reaches
-    float promK   = clamp(c1, 0.0, 1.0);   // how high the tongues stand
-    float simmerK = clamp(c2, 0.0, 1.0);   // the granulation
+    float coronaK = clamp(c0, 0.0, 1.0);
+    float promK   = clamp(c1, 0.0, 1.0);
+    float simmerK = clamp(c2, 0.0, 1.0);
     float spreadK = clamp(c3, 0.0, 1.0);
 
     MHState st = mh_state(stateIndex, stateTau);
@@ -4780,104 +4746,158 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
 
     float4 fl = mh_flourish(t, 23.0, 12.4);
 
-    float Rs = (0.30 + 0.10 * coronaK) * S * mix(1.0, 1.45, small);
-    // The corona came down by a third from the first cut. It is what gives the
-    // star its size, but at the original reach it filled every angle the
-    // prominences stand in and they had nothing dark to stand against -- four
-    // tongues were being drawn and none of them could be seen.
-    float corona = (0.17 + 0.16 * coronaK) * S * (1.0 + 0.25 * live.voice);
-    float coreBright = (1.05 + 0.45 * coronaK) * (1.0 + 0.55 * live.voice)
-                     * (1.0 + 0.55 * st.complete);
+    // The core breathes a couple of per cent and nothing else moves it.
+    float Rs = (0.30 + 0.09 * coronaK) * S * mix(1.0, 1.42, small)
+             * (1.0 + 0.030 * (mh_breath(t, 2.7) - 0.5) * 2.0 + 0.035 * live.voice);
+
+    // THE RAY'S PERPENDICULAR DISTANCE TO THE CENTRE: the whole core, in three
+    // lines and one square root.
+    float bq = dot(b.P, rd);
+    float perp2 = max(dot(b.P, b.P) - bq * bq, 0.0);
+    float perp = sqrt(perp2);
+    float disc = smoothstep(Rs * 1.04, Rs * 0.86, perp);
+    float sFront = -bq - sqrt(max(Rs * Rs - perp2, 0.0));
 
     float simGate = mh_aa(6.2831853 * 8.5 / (MH_R * S), size, pixelScale) * (1.0 - small);
-    float simAmt = simGate * (0.35 + 0.65 * simmerK) * (0.55 + 0.65 * live.pace);
-    float simRate = t * (0.35 + 0.75 * live.pace);
+    float simAmt = simGate * (0.30 + 0.55 * simmerK) * (0.55 + 0.65 * live.pace);
+    float gran = 1.0;
+    if (simAmt > 0.002 && disc > 0.002) {
+        float3 sp3 = b.P + rd * max(sFront, 0.0);
+        // Weighted to the INTERIOR of the disc. Granulation applied across the
+        // limb modulates the very threshold that makes the core round, and the
+        // photosphere grew notches in its outline -- which on the one hero whose
+        // brief is a composed circular core is the worst place to lose it.
+        gran += simAmt * 0.32 * smoothstep(0.55, 1.0, disc)
+              * mh_noise3(sp3 * (8.5 / S)
+                        + float3(0.0, 0.0, t * (0.35 + 0.75 * live.pace)));
+    }
+    float coreBright = (1.20 + 0.45 * coronaK) * (1.0 + 0.55 * live.voice)
+                     * (1.0 + 0.55 * st.complete);
+    float coreE = disc * gran * coreBright;
 
+    // The corona: a clean radially symmetric falloff off the limb.
+    float coronaW = (0.16 + 0.15 * coronaK) * S * (1.0 + 0.25 * live.voice);
+    float coronaE = exp(-max(perp - Rs, 0.0) / max(coronaW, 1e-3))
+                  * (1.0 - disc * 0.60) * (0.42 + 0.30 * coronaK);
+
+    // THE PROMINENCES, solved the way arc's filament is.
     float pairB = 1.0 - smoothstep(0.28, 0.70, small);
-    float promW = (0.26 + 0.12 * promK) * mix(1.0, 1.55, small);
-    float promH = (0.55 + 0.60 * promK) * (1.0 + 0.55 * live.voice) * S;
+    float promW = (0.034 + 0.017 * promK) * S * mix(1.0, 1.75, small);
+    float promE = 0.0;
+    const float SQRTPI = 1.7724539;
 
+    for (int k = 0; k < 3; k++) {
+        float wk = (k < 2) ? 1.0 : pairB;
+        if (wk < 0.002) continue;
+        float fk = float(k);
+
+        float per = 13.0 + 4.0 * fk;
+        float sn = sin(6.2831853 * t / per + fk * 2.13);
+        float lift = sn * sn;
+        if (fl.x > 0.002 && k == int(fl.z * 2.999)) lift = max(lift, fl.x);
+        lift = mix(lift, 1.0, st.complete * 0.85);
+        if (lift < 0.02) continue;
+
+        // Where it is rooted, and which way it sweeps.
+        float a1 = t * (0.048 + 0.011 * fk) + fk * 1.9;
+        float a2 = t * (0.037 + 0.009 * fk) + fk * 3.1;
+        float3 dir = normalize(float3(cos(a1) * cos(a2), sin(a2), sin(a1) * cos(a2)));
+        dir = normalize(mix(dir, normalize(float3(0.86, -0.32, 0.39)), st.drive * 0.70));
+        float3 tang = normalize(cross(dir, float3(0.13, 0.97, 0.21)) + 1e-4);
+        float hk = (0.24 + 0.28 * promK) * S * lift * (1.0 + 0.45 * live.voice);
+        // A wider sweep along the limb, so a tongue travels a visible ARC of the
+        // surface before it falls back. At 0.55 they left radially and read as
+        // antennae; a prominence is a loop rooted at two feet, not a spike.
+        float swp = 0.85 + 0.30 * promK;
+
+        // The curve: swept along the limb by +/- swp and lifted radially by a
+        // parabola that is exactly zero at both feet.
+        float bestG = 1e9, bestU = 0.0, bestS = 0.0;
+        for (int i = 0; i < 9; i++) {
+            float u = -1.0 + 2.0 * (float(i) / 8.0);
+            float an = swp * u;
+            float3 C = (Rs + hk * (1.0 - u * u)) * (cos(an) * dir + sin(an) * tang);
+            float3 D = C - b.P;
+            float sc = dot(D, rd);
+            float g = dot(D, D) - sc * sc;
+            if (g < bestG) { bestG = g; bestU = u; bestS = sc; }
+        }
+        if (bestS <= 0.0 || bestS >= L) continue;
+
+        // One parabolic refinement, on the same sampled function.
+        float du = 2.0 / 8.0;
+        float gm = 0.0, gp = 0.0;
+        for (int i = 0; i < 2; i++) {
+            float u = clamp(bestU + (i == 0 ? -du : du), -1.0, 1.0);
+            float an = swp * u;
+            float3 C = (Rs + hk * (1.0 - u * u)) * (cos(an) * dir + sin(an) * tang);
+            float3 D = C - b.P;
+            float sc = dot(D, rd);
+            float g = dot(D, D) - sc * sc;
+            if (i == 0) gm = g; else gp = g;
+        }
+        float den = gm - 2.0 * bestG + gp;
+        float off = (abs(den) > 1e-7) ? clamp(0.5 * (gm - gp) / den, -1.0, 1.0) : 0.0;
+        float uu = clamp(bestU + off * du, -1.0, 1.0);
+        float an = swp * uu;
+        float3 C = (Rs + hk * (1.0 - uu * uu)) * (cos(an) * dir + sin(an) * tang);
+        float3 D = C - b.P;
+        float sc = dot(D, rd);
+        float pp = max(dot(D, D) - sc * sc, 0.0);
+        if (sc <= 0.0 || sc >= L) continue;
+
+        // The spindle: thinner and dimmer toward each foot, so a tongue tapers
+        // into the surface instead of ending on it.
+        float prof = pow(max(1.0 - uu * uu * 0.85, 0.0), 0.70);
+        float wl = promW * (0.42 + 0.58 * prof);
+
+        // The tangent of the curve, for the grazing term.
+        float3 T = normalize(cross(dir, tang) * 0.0
+                           + (-sin(an) * dir + cos(an) * tang) * (Rs + hk * (1.0 - uu * uu))
+                           - 2.0 * hk * uu * (cos(an) * dir + sin(an) * tang) + 1e-5);
+        float sinA = max(length(cross(rd, T)), 0.55);
+
+        // THE CORE OCCLUDES. A tongue behind the front surface, inside the disc,
+        // is behind the star.
+        float hidden = (sc > sFront) ? disc : 0.0;
+
+        float vis = mh_inside(b.P + rd * sc) * exp(-MH_EXT * sc) * (1.0 - 0.94 * hidden);
+        float core = (wl * SQRTPI / sinA) * exp(-pp / (wl * wl));
+        float halo = 0.10 * ((wl * 3.19) * SQRTPI / sinA) * exp(-pp / (wl * wl * 10.2));
+        promE += (core + halo) * prof * lift * vis * wk;
+    }
+
+    float medAmt = mix(0.030, 0.018, small);
     float2 acc = float2(0.0);
     float trans = 1.0;
     float ds = L / float(MH_TAPS);
-
     for (int i = 0; i < MH_TAPS; i++) {
         float3 p = b.P + rd * ((float(i) + 0.5) * ds);
         float fade = mh_inside(p);
         if (fade <= 0.001) continue;
-
-        float r = length(p);
-        float3 n = normalize(p + 1e-5);
-
-        // THE PHOTOSPHERE. A solid body with a soft limb -- the only opaque
-        // thing in the collection -- granulated by a fine field.
-        float core = 1.0 - smoothstep(Rs * 0.78, Rs * 1.10, r);
-        if (simAmt > 0.002) {
-            // READ IN THE VOLUME, NOT ON THE DIRECTION. Sampling granulation at
-            // normalize(p) is the same degeneracy geode's facets hit: direction
-            // is undefined at the centre and spins arbitrarily fast near it, so
-            // the photosphere grew a hard radial starburst out of its own core.
-            // A plain 3D field has no such point, and on a body this size the
-            // difference in what it draws on the LIMB -- where granulation is
-            // actually read -- is nothing.
-            core *= 1.0 + simAmt * 0.40 * mh_noise3(p * (8.5 / S) + float3(0.0, 0.0, simRate));
-        }
-
-        // THE CORONA: a wide soft falloff off the limb, which is the sun's size.
-        float cor = exp(-max(r - Rs, 0.0) / max(corona, 1e-3)) * (1.0 - core * 0.55);
-
-        // THE PROMINENCES. Four tongues, each a direction and a height, on
-        // periods that never come into step.
-        float prom = 0.0;
-        for (int k = 0; k < 4; k++) {
-            float wk = (k < 2) ? 1.0 : pairB;
-            if (wk < 0.002) continue;
-            float fk = float(k);
-            float per = 13.0 + 4.0 * fk;
-            float ph = fk * 2.13;
-            // Lift and fall: sin-squared, so it leaves the surface and returns
-            // to it with flat ends and never snaps.
-            float sn = sin(6.2831853 * t / per + ph);
-            float lift = sn * sn;
-            if (fl.x > 0.002 && k == int(fl.z * 3.999)) lift = max(lift, fl.x);
-            lift = mix(lift, 1.0, st.complete * 0.85);
-
-            // The plume's heading, drifting slowly; under drive they all bias
-            // toward one direction and the leading one reaches higher.
-            float a1 = t * (0.048 + 0.011 * fk) + fk * 1.9;
-            float a2 = t * (0.037 + 0.009 * fk) + fk * 3.1;
-            float3 dir = normalize(float3(cos(a1) * cos(a2), sin(a2), sin(a1) * cos(a2)));
-            dir = normalize(mix(dir, normalize(float3(0.86, -0.32, 0.39)), st.drive * 0.70));
-            float hk = promH * lift * (1.0 + 0.55 * st.drive * (k == 0 ? 1.0 : 0.0));
-
-            float ang = clamp(dot(n, dir), -1.0, 1.0);
-            float lat = (1.0 - ang) / max(promW * promW, 1e-4);
-            // The arch: up off the surface to hk and back down.
-            float hgt = (r - Rs) / max(hk, 1e-3);
-            float arch = exp(-lat) * exp(-hgt * hgt * 1.35) * step(0.0, r - Rs * 0.85);
-            prom += arch * wk * lift;
-        }
-
-        float e = (core * coreBright + cor * 0.42 + prom * 1.65) * fade;
-
+        float e = mh_medium(p, t, 2.0 / S) * medAmt;
         acc.x += e * trans * ds;
-        // Hue runs outward: the core on the anchor, the corona and the tongues
-        // walking to the neighbour, which is what a star's own colour does with
-        // depth through its atmosphere.
-        acc.y += (cor * 0.42 + prom * 1.65) * fade * trans * ds;
-        // The photosphere is OPAQUE. This is the coefficient that makes it so,
-        // and it is what puts a real silhouette between the near tongues and the
-        // far ones.
-        trans *= exp(-(5.20 * core + 1.30 * (cor + prom) + MH_EXT) * ds);
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
     }
 
-    float interior = acc.x * 2.30 * b.m * mh_transmit(b.fres) * (1.0 + 0.20 * st.settled);
-    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+    // THE PROMINENCE GAIN IS 4.2, NOT THE 26 THE FIRST PASS GUESSED. A closed-
+    // form line integral returns a length -- w times root pi over the crossing
+    // angle -- where a march returns a sum of samples times a step, and the two
+    // are nowhere near the same scale. Carrying a marched hero's gain across to
+    // an integrated one put every tongue five times over the rail's top, which
+    // is why they drew as white slabs instead of as line work.
+    float interior = (acc.x * 3.00 + coreE + coronaE + promE * 6.60)
+                   * b.m * mh_transmit(b.fres) * (1.0 + 0.20 * st.settled);
+    // Hue runs outward: the core on the anchor, the corona and the tongues
+    // walking to the neighbour.
+    float outer = coronaE + promE * 6.60;
+    float hue = (interior > 1e-4 ? outer / max(coreE + outer, 1e-4) : 0.0)
+              * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.72 + 0.35 * live.voice, 0.58, 0.16);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.70 + 0.32 * live.voice, 0.52, 0.16);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
-    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+    float hueMix = hue * interior / max(e, 1e-4);
 
     MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
