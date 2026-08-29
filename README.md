@@ -1,9 +1,10 @@
 # Murmur
 
 Thinking indicators for AI products, built as living material. Murmur is a
-Swift package with 32 Metal shader species behind one SwiftUI view, five AI
-states with designed transitions, a lab app for tuning a configuration by
-hand, and an export that writes the implementation prompt for a coding agent.
+Swift package with 40 Metal shader species in five families behind one
+SwiftUI view, five AI states with designed transitions, a lab app for tuning
+a configuration by hand, and an export that writes the implementation prompt
+for a coding agent.
 
 Every style is generated per pixel in a fragment shader. There are no videos,
 no particle systems, no sprite sheets, and nothing that pulses for attention.
@@ -76,7 +77,7 @@ jumps straight to any studio, which is how agents drive it for screenshots.
 
 ## The roster
 
-Four families, eight species each. Names are `MurmurStyle` cases.
+Five families, eight species each. Names are `MurmurStyle` cases.
 
 | Family | Species |
 |---|---|
@@ -84,8 +85,15 @@ Four families, eight species each. Names are `MurmurStyle` cases.
 | ink | bloom, marbling, wick, strata, halation, pool, feather, palimpsest |
 | light | caustic, aurora, ember, lantern, mirage, oculus, dapple, eclipse |
 | signal | murmuration, loom, cipher, tuning, current, veil, echo, glyph |
+| orb | breathe, orbit, glimmer, vortex, gather, stir, daybreak, skein |
 
-Six species (confluence, bloom, strata, oculus, tuning, feather) have an arrival arc:
+The four field families are per-pixel generative fields, each shaped into a
+clear figure. The orb family is the canonical AI dot-sphere, rebuilt in the
+Murmur material: a fibonacci lattice on a rotating sphere, amber dots with
+cream peaks and a few tone-colored accents, rendered per pixel with a
+constant-time inverse spherical-fibonacci lookup.
+
+Seven species (confluence, bloom, strata, oculus, tuning, feather, gather) have an arrival arc:
 they run once from birth toward a settled state when the view appears, and
 settled is still alive, a whisper of drift rather than a freeze. The arcs are
 closed-form, so any time value renders the correct frame.
