@@ -1,6 +1,6 @@
 # Murmur
 
-Responsive AI presences for SwiftUI. Volumetric glass orbs, rendered per pixel in Metal, that listen to your app.
+Responsive AI presences for SwiftUI. Volumetric glass orbs, rendered in Metal, that work with your app.
 
 - **18 glass species** (aura, droplet, limn, comet, nebula, prism, duet, still, fathom, arc, opal, flux, tempest, helix, geode, sol, abyss, chorus) plus a 48-species archive
 - **6 states**: idle, listening, thinking, responding, success, error, with designed transitions
