@@ -16,7 +16,7 @@ import Testing
 // MARK: - Roster
 
 @Test func rosterIsComplete() {
-    #expect(MurmurStyle.allCases.count == 60)
+    #expect(MurmurStyle.allCases.count == 66)
     for style in MurmurStyle.allCases {
         #expect(style.characterKnobs.count == 4, "\(style.rawValue) knob count")
         #expect(!style.shaderName.isEmpty, "\(style.rawValue) shader name")
@@ -45,11 +45,11 @@ import Testing
 @Test func sevenFamiliesAndTheirSizes() {
     #expect(MurmurFamily.allCases.count == 7)
     for family in MurmurFamily.allCases {
-        // The hero collection is twelve; the six archive families are eight.
-        let expected = family == .glass ? 12 : 8
+        // The hero collection is eighteen; the six archive families are eight.
+        let expected = family == .glass ? 18 : 8
         #expect(family.styles.count == expected, "\(family.rawValue) style count")
     }
-    #expect(MurmurStyle.allCases.count == 60)
+    #expect(MurmurStyle.allCases.count == 66)
     // Every style lands in exactly one family, so the seven sets partition
     // the roster rather than merely covering it.
     let grouped = MurmurFamily.allCases.flatMap(\.styles)
@@ -150,6 +150,7 @@ import Testing
         MurmurFamily.glass.styles == [
             .aura, .droplet, .nebula, .prism, .limn, .duet,
             .fathom, .arc, .opal, .comet, .still, .flux,
+            .tempest, .helix, .geode, .sol, .abyss, .chorus,
         ]
     )
     for style in MurmurFamily.glass.styles {
@@ -164,6 +165,10 @@ import Testing
     #expect(MurmurStyle.still.characterDefaults == [0.3, 0.6, 0.5, 0.2])
     #expect(MurmurStyle.opal.characterDefaults == [0.5, 0.4, 0.6, 0.7])
     #expect(MurmurStyle.prism.characterDefaults == [0.4, 0.5, 0.5, 0.6])
+    #expect(MurmurStyle.abyss.characterKnobs.map(\.label) == ["creatures", "rarity", "drift", "spread"])
+    #expect(MurmurStyle.abyss.characterDefaults == [0.4, 0.6, 0.5, 0.4])
+    #expect(MurmurStyle.chorus.characterDefaults == [0.5, 0.5, 0.4, 0.5])
+    #expect(MurmurStyle.helix.characterDefaults == [0.5, 0.4, 0.5, 0.6])
 }
 
 @Test func everyHeroSharesTheSpreadKnob() {
@@ -186,12 +191,121 @@ import Testing
     #expect(MurmurStyle.aura.characterKnobs[3].label == "depth3d")
 
     let values = MurmurFamily.glass.styles.compactMap { spread($0)?.defaultValue }
-    #expect(values.count == 12)
+    #expect(values.count == 18)
     #expect(Set(values).count > 1, "the heroes should not all sit at the same spread")
     // still is the minimal hero and opal is the play-of-color one, so they
     // bracket the family.
     #expect(spread(.still)?.defaultValue == values.min())
     #expect(spread(.opal)?.defaultValue == values.max())
+}
+
+// MARK: - Duotone and the glass signature extension
+
+@Test func tone2IsNilUntilSetAndFoldsOntoTone() {
+    var config = MurmurConfiguration(style: .aura)
+    #expect(config.tone2 == nil)
+    // Classic is a duotone whose anchors happen to match, so the shader
+    // always has a value and no call site deals in optionals.
+    #expect(config.resolvedTone2 == config.tone)
+
+    let second = MurmurRGBA(r: 0.9, g: 0.35, b: 0.55)
+    config.tone2 = second
+    #expect(config.resolvedTone2 == second)
+}
+
+@Test func tone2SurvivesACodableRoundTripInBothStates() throws {
+    let classic = MurmurConfiguration(style: .geode)
+    let decodedClassic = try JSONDecoder().decode(
+        MurmurConfiguration.self, from: JSONEncoder().encode(classic)
+    )
+    #expect(decodedClassic.tone2 == nil)
+    #expect(decodedClassic == classic)
+
+    var duotone = MurmurConfiguration(style: .geode)
+    duotone.tone2 = MurmurRGBA(r: 0.9, g: 0.35, b: 0.55)
+    let decodedDuotone = try JSONDecoder().decode(
+        MurmurConfiguration.self, from: JSONEncoder().encode(duotone)
+    )
+    #expect(decodedDuotone.tone2 == duotone.tone2)
+    #expect(decodedDuotone == duotone)
+    #expect(decodedDuotone != decodedClassic)
+}
+
+@Test func onlyTheHeroesTakeTheWiderArgumentList() {
+    func count(_ style: MurmurStyle, glass: MurmurGlassArguments?) -> Int {
+        murmurShaderArguments(
+            size: CGSize(width: 46, height: 46),
+            time: 1, pixelScale: 3,
+            ink: MurmurRGBA.ink.color, tone: MurmurRGBA.tone.color,
+            hueShift: 0, formScale: 1, speed: 1, depth: 1, glow: 1,
+            character: [0.5, 0.5, 0.5, 0.5],
+            stateIndex: style.family == .glass ? 2 : 2, stateTau: 0,
+            level: 0, activity: 0,
+            glass: glass
+        ).count
+    }
+    // colorEffect supplies position and currentColor on top of these, which
+    // is what makes the archive families 21 in Metal and the heroes 23.
+    #expect(count(.eddy, glass: nil) == 19)
+    #expect(
+        count(
+            .aura,
+            glass: MurmurGlassArguments(tilt: CGPoint(x: 0.3, y: -0.2), tone2: MurmurRGBA.amber.color)
+        ) == 21
+    )
+}
+
+@Test func theViewChoosesTheArgumentListByFamily() {
+    // Construction only: this cannot render, but it does exercise the branch
+    // that decides which call shape a style gets, for every style.
+    for style in MurmurStyle.allCases {
+        var config = MurmurConfiguration(style: style)
+        config.tone2 = MurmurRGBA.amber
+        _ = MurmurView(
+            config,
+            state: .listening,
+            signals: MurmurSignals(level: 0.4, activity: 0.2),
+            tilt: CGPoint(x: 0.2, y: -0.1),
+            haptics: true
+        )
+        // The branch itself, asserted directly.
+        #expect((style.family == .glass) == (style.shaderName.hasPrefix("mh_")), "\(style.rawValue)")
+    }
+}
+
+@Test func exportCarriesTheSecondAnchorOnlyWhenSet() {
+    // The colors block lists the second anchor only when one exists. A hero's
+    // prompt always EXPLAINS tone2 in the signature section, so this has to
+    // match the bullet rather than the word.
+    let bullet = "- tone2, the second duotone anchor:"
+    let classic = MurmurConfiguration(style: .sol).agentPrompt(as: .pill)
+    #expect(!classic.contains("c.tone2"))
+    #expect(!classic.contains(bullet))
+
+    var duotone = MurmurConfiguration(style: .sol)
+    duotone.tone2 = MurmurRGBA.amber
+    let prompt = duotone.agentPrompt(as: .pill)
+    #expect(prompt.contains("c.tone2 = MurmurRGBA(r: 0.878, g: 0.545, b: 0.235)"))
+    #expect(prompt.contains("#E08B3C"))
+    #expect(prompt.contains(bullet))
+
+    // An archive style with a second anchor set still writes it: the value is
+    // part of the design even where only the heroes read it.
+    var archive = MurmurConfiguration(style: .eddy)
+    archive.tone2 = MurmurRGBA.amber
+    #expect(archive.agentPrompt(as: .pill).contains(bullet))
+    #expect(!prose(of: prompt).contains("\u{2014}"))
+}
+
+@Test func exportExplainsTheGlassExtensionOnlyForHeroes() {
+    let hero = MurmurConfiguration(style: .tempest).agentPrompt(as: .indicator)
+    #expect(hero.contains("float2 tilt"))
+    #expect(hero.contains("half4 tone2"))
+    #expect(hero.contains("CoreMotion"))
+
+    let archive = MurmurConfiguration(style: .eddy).agentPrompt(as: .indicator)
+    #expect(!archive.contains("float2 tilt"))
+    #expect(!archive.contains("glass hero"))
 }
 
 // MARK: - Live signals

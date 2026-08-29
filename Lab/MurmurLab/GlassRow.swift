@@ -124,6 +124,192 @@ struct DialRow: View {
     }
 }
 
+/// Two-axis tilt, dragged. The simulator has no gyro, so this stands in for
+/// tilting the phone: touch anywhere in the pad and the point under the finger
+/// is the tilt. Absolute rather than relative, unlike the dial rows, because a
+/// pad that models a physical attitude should go where you put it.
+struct TiltPad: View {
+    @Binding var value: CGPoint
+
+    private static let side: CGFloat = 120
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Text("tilt")
+                    .font(LabTheme.mono(13))
+                    .foregroundStyle(LabTheme.label)
+
+                Spacer(minLength: 8)
+
+                // Tapping the value recentres, the same reset every other row
+                // in the panel has. Double tapping the pad does it too, but
+                // this is the affordance the rest of the app already taught.
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { value = .zero }
+                } label: {
+                    Text(String(format: "%+.2f %+.2f", value.x, value.y))
+                        .font(LabTheme.mono(13, .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(isCentered ? LabTheme.valueIdle : LabTheme.valueLive)
+                        .frame(minHeight: 44, alignment: .trailing)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+
+            pad
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+    }
+
+    private var pad: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+
+            // Centre crosshair, so rest is legible without a label.
+            Rectangle().fill(.white.opacity(0.10)).frame(width: 1, height: 14)
+            Rectangle().fill(.white.opacity(0.10)).frame(width: 14, height: 1)
+
+            // The marker. A 2D attitude has no honest reading without one, so
+            // this is the one place a position dot earns its place.
+            Circle()
+                .fill(LabTheme.trackFill)
+                .frame(width: 10, height: 10)
+                .offset(
+                    x: CGFloat(value.x) * (Self.side / 2 - 10),
+                    y: CGFloat(value.y) * (Self.side / 2 - 10)
+                )
+        }
+        .frame(width: Self.side, height: Self.side)
+        .contentShape(.rect(cornerRadius: 14))
+        .overlay {
+            PadDrag(
+                onMove: { point in
+                    let half = Self.side / 2
+                    value = CGPoint(
+                        x: min(max((point.x - half) / half, -1), 1),
+                        y: min(max((point.y - half) / half, -1), 1)
+                    )
+                },
+                onReset: { value = .zero }
+            )
+        }
+    }
+
+    private var isCentered: Bool { abs(value.x) < 0.005 && abs(value.y) < 0.005 }
+}
+
+/// The pad's input: absolute location for the drag, double tap to recentre.
+private struct PadDrag: UIViewRepresentable {
+    let onMove: (CGPoint) -> Void
+    let onReset: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.pan(_:))
+        )
+        view.addGestureRecognizer(pan)
+
+        let doubleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.doubleTap(_:))
+        )
+        doubleTap.numberOfTapsRequired = 2
+        view.addGestureRecognizer(doubleTap)
+
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject {
+        var parent: PadDrag
+
+        init(_ parent: PadDrag) { self.parent = parent }
+
+        @objc func pan(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            switch gesture.state {
+            case .began, .changed, .ended:
+                parent.onMove(gesture.location(in: view))
+            default:
+                break
+            }
+        }
+
+        @objc func doubleTap(_ gesture: UITapGestureRecognizer) {
+            parent.onReset()
+        }
+    }
+}
+
+/// The second hue anchor, with a way back to one. Same swatches as the tone
+/// row plus Clear, which returns the configuration to a single-anchor rail.
+struct Tone2Row: View {
+    @Binding var selection: MurmurRGBA?
+    let swatches: [MurmurRGBA]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { selection = nil }
+            } label: {
+                ZStack {
+                    Circle().strokeBorder(.white.opacity(selection == nil ? 0.9 : 0.18),
+                                          lineWidth: selection == nil ? 2 : 1)
+                    Image(systemName: "slash.circle")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(selection == nil ? 0.9 : 0.35))
+                }
+                .frame(width: 32, height: 32)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            ForEach(Array(swatches.enumerated()), id: \.offset) { _, swatch in
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { selection = swatch }
+                } label: {
+                    Circle()
+                        .fill(swatch.color)
+                        .frame(width: 32, height: 32)
+                        .overlay {
+                            Circle().strokeBorder(
+                                .white.opacity(isSelected(swatch) ? 0.9 : 0.12),
+                                lineWidth: isSelected(swatch) ? 2 : 1
+                            )
+                        }
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func isSelected(_ swatch: MurmurRGBA) -> Bool {
+        guard let selection else { return false }
+        return abs(swatch.r - selection.r) < 0.004
+            && abs(swatch.g - selection.g) < 0.004
+            && abs(swatch.b - selection.b) < 0.004
+    }
+}
+
 /// A pan that only claims the touch when the finger is already moving
 /// sideways.
 ///

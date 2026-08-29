@@ -19,6 +19,8 @@ enum GlassRoster {
     static let landed: Set<String> = [
         "aura", "droplet", "limn", "comet",
         "nebula", "prism", "duet", "still",
+        "fathom", "arc", "opal", "flux",
+        "tempest", "helix", "geode", "sol", "abyss", "chorus",
     ]
 
     static var collection: [MurmurStyle] {

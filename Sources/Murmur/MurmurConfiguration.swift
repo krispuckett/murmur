@@ -71,8 +71,14 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
     /// The ground the field dissolves into. Shared by every state: a state
     /// change is the material moving, never the room changing color.
     public var ink: MurmurRGBA
-    /// The single hue family anchor, likewise shared.
+    /// The hue family anchor, likewise shared.
     public var tone: MurmurRGBA
+    /// The second duotone anchor, glass family only. Nil is the classic
+    /// single-anchor rail and is what the shader sees as "tone2 equals
+    /// tone": identical behavior. Set it and the interior palette
+    /// interpolates between the two anchors through OKLAB instead of
+    /// deriving that side from the spread knob.
+    public var tone2: MurmurRGBA?
     /// One complete design per state.
     public var states: [MurmurState: MurmurParameters]
     /// What each state's arrival looks like.
@@ -84,12 +90,14 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
         style: MurmurStyle,
         ink: MurmurRGBA = .ink,
         tone: MurmurRGBA = .tone,
+        tone2: MurmurRGBA? = nil,
         states: [MurmurState: MurmurParameters]? = nil,
         entries: [MurmurState: MurmurEntry]? = nil
     ) {
         self.style = style
         self.ink = ink
         self.tone = tone
+        self.tone2 = tone2
         self.states = Self.completed(states ?? [:], for: style)
         self.entries = Self.completed(entries ?? [:])
     }
@@ -107,6 +115,11 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
     public func resolvedParameters(for state: MurmurState) -> MurmurParameters {
         parameters(for: state).resolved(for: style)
     }
+
+    /// What the second anchor resolves to. Nil folds back onto `tone`, so
+    /// the shader always has a value and classic reads as a duotone whose
+    /// two anchors happen to match.
+    public var resolvedTone2: MurmurRGBA { tone2 ?? tone }
 
     public func entry(for state: MurmurState) -> MurmurEntry {
         entries[state] ?? state.defaultEntry
@@ -154,6 +167,7 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
             style: newStyle,
             ink: ink,
             tone: tone,
+            tone2: tone2,
             states: moved,
             entries: entries
         )
@@ -162,7 +176,7 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
-        case style, ink, tone, states, entries
+        case style, ink, tone, tone2, states, entries
     }
 
     /// A partial dictionary decodes to a complete one, filled from the
@@ -173,6 +187,9 @@ public struct MurmurConfiguration: Sendable, Codable, Equatable {
         style = try container.decode(MurmurStyle.self, forKey: .style)
         ink = try container.decode(MurmurRGBA.self, forKey: .ink)
         tone = try container.decode(MurmurRGBA.self, forKey: .tone)
+        // Absent and null both mean classic. The key only appears once a
+        // designer has actually set a second anchor.
+        tone2 = try container.decodeIfPresent(MurmurRGBA.self, forKey: .tone2)
         states = Self.completed(
             try container.decodeIfPresent(
                 [MurmurState: MurmurParameters].self, forKey: .states

@@ -73,6 +73,7 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
     // The hero collection. One iconic glass body; all identity lives inside it.
     case aura, droplet, nebula, prism, limn, duet
     case fathom, arc, opal, comet, still, flux
+    case tempest, helix, geode, sol, abyss, chorus
 
     public var id: String { rawValue }
 
@@ -93,7 +94,8 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
         case .halo, .nucleus, .iris, .filament, .flare, .braid, .mote, .ripple:
             .presence
         case .aura, .droplet, .nebula, .prism, .limn, .duet,
-            .fathom, .arc, .opal, .comet, .still, .flux:
+            .fathom, .arc, .opal, .comet, .still, .flux,
+            .tempest, .helix, .geode, .sol, .abyss, .chorus:
             .glass
         }
     }
@@ -235,6 +237,18 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             "the minimal hero: a quiet glass sphere, one slow internal glint"
         case .flux:
             "an aurora streaming inside the glass"
+        case .tempest:
+            "a contained storm: weather churning in the glass, lightning-soft flickers buried deep in the cloud, never at the surface"
+        case .helix:
+            "a double strand of light slowly climbing and rotating inside"
+        case .geode:
+            "crystalline facets inside the glass catching light as the body turns"
+        case .sol:
+            "a miniature sun: soft prominences lifting and falling inside"
+        case .abyss:
+            "deep-sea dark glass: rare bioluminescent glows passing through, mostly night"
+        case .chorus:
+            "many faint lights breathing loosely, falling into alignment while responding"
         }
     }
 
@@ -380,6 +394,18 @@ public enum MurmurStyle: String, CaseIterable, Identifiable, Sendable, Codable {
             [k("glintRate", 0.3), k("clarity", 0.6), k("presence", 0.5), k("spread", 0.2)]
         case .flux:
             [k("stream", 0.5), k("bend", 0.5), k("height", 0.5), k("spread", 0.6)]
+        case .tempest:
+            [k("storm", 0.5), k("churn", 0.5), k("flicker", 0.3), k("spread", 0.5)]
+        case .helix:
+            [k("turns", 0.5), k("rise", 0.4), k("strandGlow", 0.5), k("spread", 0.6)]
+        case .geode:
+            [k("facets", 0.5), k("glimmer", 0.4), k("depthCrystal", 0.5), k("spread", 0.5)]
+        case .sol:
+            [k("coronaSize", 0.5), k("prominence", 0.5), k("simmer", 0.4), k("spread", 0.4)]
+        case .abyss:
+            [k("creatures", 0.4), k("rarity", 0.6), k("drift", 0.5), k("spread", 0.4)]
+        case .chorus:
+            [k("voices", 0.5), k("sync", 0.5), k("breatheDepth", 0.4), k("spread", 0.5)]
         }
     }
 

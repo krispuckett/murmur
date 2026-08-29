@@ -26,6 +26,8 @@ public struct MurmurView: View {
     private let configuration: MurmurConfiguration
     private let state: MurmurState
     private let signals: MurmurSignals
+    private let tilt: CGPoint
+    private let haptics: Bool
     private let animated: Bool
     private let stillTime: Double
     private let fps: Double
@@ -46,6 +48,8 @@ public struct MurmurView: View {
         _ configuration: MurmurConfiguration,
         state: MurmurState = .thinking,
         signals: MurmurSignals = .none,
+        tilt: CGPoint = .zero,
+        haptics: Bool = false,
         animated: Bool = true,
         stillTime: Double = 4.0,
         fps: Double = 30
@@ -53,6 +57,8 @@ public struct MurmurView: View {
         self.configuration = configuration
         self.state = state
         self.signals = signals
+        self.tilt = tilt
+        self.haptics = haptics
         self.animated = animated
         self.stillTime = stillTime
         self.fps = fps
@@ -115,6 +121,11 @@ public struct MurmurView: View {
                 birth = now
                 phaseAtChange = 0
                 envelope.resetPhase()
+            }
+            // Once, on entry. The crossfade that follows is continuous and a
+            // haptic is not, so there is nothing to play during it.
+            if haptics {
+                MurmurHaptics.play(entering: newState)
             }
         }
         // Deliberately no accessibility treatment. A filled shape is not an
@@ -192,35 +203,98 @@ public struct MurmurView: View {
         let stateIndex = state.shaderIndex
         let level = signals.level
         let activity = signals.activity
+        // Only the heroes take the two extra uniforms. The archive families
+        // keep the call they were written against, argument for argument.
+        let glass: MurmurGlassArguments? = configuration.style.family == .glass
+            ? MurmurGlassArguments(tilt: tilt, tone2: configuration.resolvedTone2.color)
+            : nil
 
         return Rectangle()
             .fill(ink)
             .visualEffect { content, proxy in
                 content.colorEffect(
-                    ShaderLibrary.bundle(.module)[dynamicMember: name](
-                        .float2(proxy.size),
-                        .float(time),
-                        .float(scale),
-                        .color(ink),
-                        .color(tone),
-                        .float(hueShift),
-                        .float(formScale),
-                        .float(speed),
-                        .float(depth),
-                        .float(glow),
-                        .float(character[0]),
-                        .float(character[1]),
-                        .float(character[2]),
-                        .float(character[3]),
-                        // Time is already zeroed at birth, and a state that
-                        // restarts an arc rezeroes it. See the file header.
-                        .float(0),
-                        .float(stateIndex),
-                        .float(stateTau),
-                        .float(level),
-                        .float(activity)
+                    Shader(
+                        function: ShaderLibrary.bundle(.module)[dynamicMember: name],
+                        arguments: murmurShaderArguments(
+                            size: proxy.size,
+                            time: time,
+                            pixelScale: scale,
+                            ink: ink,
+                            tone: tone,
+                            hueShift: hueShift,
+                            formScale: formScale,
+                            speed: speed,
+                            depth: depth,
+                            glow: glow,
+                            character: character,
+                            stateIndex: stateIndex,
+                            stateTau: stateTau,
+                            level: level,
+                            activity: activity,
+                            glass: glass
+                        )
                     )
                 )
             }
     }
+}
+
+/// The glass family's signature extension: the two arguments only the heroes
+/// take, kept together so the call site cannot supply one without the other.
+struct MurmurGlassArguments: Equatable, Sendable {
+    /// Device attitude, roughly -1...1 per axis. Zero when unavailable.
+    var tilt: CGPoint
+    /// The second duotone anchor. Equal to tone means classic.
+    var tone2: Color
+}
+
+/// One place that knows the argument order, so the view and the tests agree
+/// about it. Nineteen for the archive families, twenty-one for the heroes;
+/// colorEffect supplies position and currentColor on top of these.
+func murmurShaderArguments(
+    size: CGSize,
+    time: Double,
+    pixelScale: Double,
+    ink: Color,
+    tone: Color,
+    hueShift: Double,
+    formScale: Double,
+    speed: Double,
+    depth: Double,
+    glow: Double,
+    character: [Double],
+    stateIndex: Double,
+    stateTau: Double,
+    level: Double,
+    activity: Double,
+    glass: MurmurGlassArguments?
+) -> [Shader.Argument] {
+    var arguments: [Shader.Argument] = [
+        .float2(size),
+        .float(time),
+        .float(pixelScale),
+        .color(ink),
+        .color(tone),
+        .float(hueShift),
+        .float(formScale),
+        .float(speed),
+        .float(depth),
+        .float(glow),
+        .float(character[0]),
+        .float(character[1]),
+        .float(character[2]),
+        .float(character[3]),
+        // Time is already zeroed at birth, and a state that restarts an arc
+        // rezeroes it. See the file header.
+        .float(0),
+        .float(stateIndex),
+        .float(stateTau),
+        .float(level),
+        .float(activity),
+    ]
+    if let glass {
+        arguments.append(.float2(glass.tilt))
+        arguments.append(.color(glass.tone2))
+    }
+    return arguments
 }

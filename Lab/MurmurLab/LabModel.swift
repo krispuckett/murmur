@@ -42,6 +42,15 @@ final class LabModel {
         MurmurSignals(level: demoLevel ?? level, activity: activity)
     }
 
+    /// Gyro parallax, faked. Each axis runs -1...1, which is what the device's
+    /// motion source would hand the view; the simulator has no motion hardware,
+    /// so the pad stands in for tilting the phone.
+    var tilt: CGPoint = .zero
+
+    /// The advanced capabilities are glass-family designs. Showing their
+    /// controls on an archive species would offer dials that do nothing.
+    var isGlass: Bool { config.style.family == .glass }
+
     var isPlayingVoiceDemo: Bool { demoLevel != nil }
 
     /// Roughly one spoken sentence.

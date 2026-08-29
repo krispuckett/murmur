@@ -42,6 +42,17 @@ struct Studio: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    // Renders the ground the current stage is wearing, so a
+                    // light preview exports a light still.
+                    if let url = StillExport.png(model.previewConfig, state: model.state) {
+                        StillExport.share(url)
+                    }
+                } label: {
+                    Text("Still").font(LabTheme.mono(13, .medium))
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
                     withAnimation(.smooth(duration: 0.28)) { model.isExporting = true }
                 } label: {
                     Text("Export").font(LabTheme.mono(13, .medium))
@@ -71,7 +82,7 @@ private struct StudioPreview: View {
             // the preview appear again, and appearing is an arrival, so the
             // new envelope runs immediately instead of waiting for the next
             // state change.
-            MurmurView(model.previewConfig, state: model.state, signals: model.signals)
+            MurmurView(model.previewConfig, state: model.state, signals: model.signals, tilt: model.tilt)
                 .id(model.demoTick)
                 .frame(width: 160, height: 160)
                 .frame(maxWidth: .infinity)
@@ -100,7 +111,7 @@ private struct StudioPreview: View {
 
     private func sizeChip(_ size: CGFloat) -> some View {
         VStack(spacing: 7) {
-            MurmurView(model.previewConfig, state: model.state, signals: model.signals)
+            MurmurView(model.previewConfig, state: model.state, signals: model.signals, tilt: model.tilt)
                 .id(model.demoTick)
                 .frame(width: size, height: size)
             Text("\(Int(size))")
@@ -163,7 +174,7 @@ private struct StateMini: View {
                 // bright, so the stroke had nothing to stand out against.
                 Group {
                     if isSelected {
-                        MurmurView(model.config, state: state, signals: model.signals, fps: 24)
+                        MurmurView(model.config, state: state, signals: model.signals, tilt: model.tilt, fps: 24)
                             .frame(width: 44, height: 44)
                             .padding(4)
                             .glassEffect(.regular.interactive(), in: .circle)
@@ -171,7 +182,7 @@ private struct StateMini: View {
                                 Circle().strokeBorder(LabTheme.selectedEdge, lineWidth: 2)
                             }
                     } else {
-                        MurmurView(model.config, state: state, signals: model.signals, fps: 24)
+                        MurmurView(model.config, state: state, signals: model.signals, tilt: model.tilt, fps: 24)
                             .frame(width: 44, height: 44)
                             .padding(4)
                             .overlay {
@@ -280,6 +291,9 @@ private struct StudioPanel: View {
                     DialRow(label: "activity", value: $model.activity,
                             range: 0...1, defaultValue: 0)
                     VoiceDemoRow()
+                    if model.isGlass {
+                        TiltPad(value: $model.tilt)
+                    }
                 }
 
                 // The state's name rides its section headings. Colors and the
@@ -319,6 +333,11 @@ private struct StudioPanel: View {
                     ControlRow(label: "ink") {
                         ColorPicker("", selection: inkColor, supportsOpacity: false)
                             .labelsHidden()
+                    }
+                    if model.isGlass {
+                        SectionHeading(text: "tone 2")
+                            .padding(.top, 4)
+                        Tone2Row(selection: $model.config.tone2, swatches: LabTheme.tones)
                     }
                 }
 
@@ -412,7 +431,7 @@ private struct StudioPanel: View {
 
             Spacer(minLength: 8)
 
-            MurmurView(groundedConfig(for: scheme), state: model.state, signals: model.signals)
+            MurmurView(groundedConfig(for: scheme), state: model.state, signals: model.signals, tilt: model.tilt)
                 .frame(width: 18, height: 18)
         }
         .padding(.horizontal, 16)
@@ -439,7 +458,9 @@ private struct StudioPanel: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(text: title)
-            VStack(spacing: 10) {
+            // Leading, or an intrinsic-width child like a sub-heading centres
+            // itself while every full-width row around it fills.
+            VStack(alignment: .leading, spacing: 10) {
                 content()
             }
         }

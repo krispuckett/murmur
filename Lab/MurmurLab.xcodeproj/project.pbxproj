@@ -14,9 +14,11 @@
 		51C80CCFE599FA7CD4A73BFD /* LabModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */; };
 		5E132CF8DD6AEF9A8B008282 /* MurmurLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E066182E45FCD74A226894 /* MurmurLabApp.swift */; };
 		65EC3961EEE83B1610F8BD4E /* GlassRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3BB78A3408F885D7F05C4E /* GlassRow.swift */; };
+		85BA81972E585314D4820E44 /* StillExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E9A7DA883FE86BD1658ADA /* StillExport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		26E9A7DA883FE86BD1658ADA /* StillExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillExport.swift; sourceTree = "<group>"; };
 		2F71CF16074527DEC56316CE /* ExportCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportCard.swift; sourceTree = "<group>"; };
 		79C035D3E2C85C3CFFAF2EC3 /* Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gallery.swift; sourceTree = "<group>"; };
 		79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabModel.swift; sourceTree = "<group>"; };
@@ -72,6 +74,7 @@
 				9B3BB78A3408F885D7F05C4E /* GlassRow.swift */,
 				79EFA2FACF720FAE4A2EAB67 /* LabModel.swift */,
 				B8E066182E45FCD74A226894 /* MurmurLabApp.swift */,
+				26E9A7DA883FE86BD1658ADA /* StillExport.swift */,
 				C3334A325326201996012D23 /* Studio.swift */,
 			);
 			path = MurmurLab;
@@ -146,6 +149,7 @@
 				65EC3961EEE83B1610F8BD4E /* GlassRow.swift in Sources */,
 				51C80CCFE599FA7CD4A73BFD /* LabModel.swift in Sources */,
 				5E132CF8DD6AEF9A8B008282 /* MurmurLabApp.swift in Sources */,
+				85BA81972E585314D4820E44 /* StillExport.swift in Sources */,
 				1F13A6AEA9E4831D216AE6AF /* Studio.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

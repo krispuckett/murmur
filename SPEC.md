@@ -396,6 +396,24 @@ the family flash = the interior igniting and settling):
 | comet | mh_comet | a bright point orbiting inside, leaving a fading trail; parseable at 18 pt | orbitTilt 0.5 | trail 0.5 | pointSize 0.4 | spread 0.3 |
 | still | mh_still | the minimal hero: a quiet glass sphere, one slow internal glint | glintRate 0.3 | clarity 0.6 | presence 0.5 | spread 0.2 |
 | flux | mh_flux | an aurora streaming inside the glass | stream 0.5 | bend 0.5 | height 0.5 | spread 0.6 |
+| tempest | mh_tempest | a contained storm: weather churning in the glass, lightning-soft flickers buried deep in the cloud, never at the surface | storm 0.5 | churn 0.5 | flicker 0.3 | spread 0.5 |
+| helix | mh_helix | a double strand of light slowly climbing and rotating inside | turns 0.5 | rise 0.4 | strandGlow 0.5 | spread 0.6 |
+| geode | mh_geode | crystalline facets inside the glass catching light as the body turns | facets 0.5 | glimmer 0.4 | depthCrystal 0.5 | spread 0.5 |
+| sol | mh_sol | a miniature sun: soft prominences lifting and falling inside | coronaSize 0.5 | prominence 0.5 | simmer 0.4 | spread 0.4 |
+| abyss | mh_abyss | deep-sea dark glass: rare bioluminescent glows passing through, mostly night | creatures 0.4 | rarity 0.6 | drift 0.5 | spread 0.4 |
+| chorus | mh_chorus | many faint lights breathing loosely, falling into alignment while responding | voices 0.5 | sync 0.5 | breatheDepth 0.4 | spread 0.5 |
+
+GLASS SIGNATURE EXTENSION (glass family only): after `activity`, glass
+functions take two more arguments: `float2 tilt` (device attitude from
+CoreMotion, roughly -1..1 each axis, 0,0 when unavailable; the INTERIOR
+parallaxes with it while the body holds, so the orb reads as physically
+real in the hand) and `half4 tone2` (the duotone anchor; when equal to
+`tone` behavior is identical to today, when different the interior palette
+interpolates between the two anchors through OKLAB, replacing the
+spread-derived neighbor on that side). The kit also gains a faint baked
+ENVIRONMENT: a soft directional sky-to-ground gradient reflected in the
+fresnel rim and specular so the glass sits in a world; barely-there, felt
+not seen, consistent across heroes.
 
 Build process for this family is DIFFERENT, per the exemplar doctrine: one
 builder, small batches (kit plus four heroes at a time), and the reviewing

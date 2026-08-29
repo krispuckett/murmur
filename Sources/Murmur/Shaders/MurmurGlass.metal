@@ -299,7 +299,14 @@ static inline float mh_paper(half4 inkColor) {
 /// Ordered dark to bright on an ink ground, PALE TO DEEP on a paper one, and
 /// mixed between the two by how light the ground is. Never more than one hue
 /// family wide either way.
-struct MHPalette { float3 s0, s1, s2, s3; float paper; };
+struct MHPalette {
+    float3 s0, s1, s2, s3;
+    float  paper;   // how light the ground is, 0 ink ... 1 paper
+    float  duo;     // how far tone2 is from tone, 0 when identical
+    float  dHue;    // tone2's hue minus tone's, the short way round
+    float  dC;      // tone2's chroma over tone's
+    float  dL;      // tone2's lightness over tone's
+};
 
 /// s0 is the ink the whole app sits on, so a field at zero dissolves into the
 /// screen with no seam. s1 is a deep shadow that KEEPS the tone's hue at half
@@ -307,7 +314,8 @@ struct MHPalette { float3 s0, s1, s2, s3; float paper; };
 /// is a pale specular a few degrees warmer, because light that has passed
 /// through anything comes out warmer than the thing it lit.
 /// `depth` opens the range from both ends without letting the hue wander.
-static MHPalette mh_palette(half4 inkColor, half4 toneColor, float hueShift, float depth) {
+static MHPalette mh_palette(half4 inkColor, half4 toneColor, half4 tone2Color,
+                            float hueShift, float depth) {
     float3 ink = mh_linear_to_oklab(mh_srgb_to_linear(float3(inkColor.rgb)));
     float3 tone = mh_linear_to_oklab(mh_srgb_to_linear(float3(toneColor.rgb)));
 
@@ -323,6 +331,30 @@ static MHPalette mh_palette(half4 inkColor, half4 toneColor, float hueShift, flo
     // the first cut of every one of these fields looked like.
     MHPalette p;
     p.paper = mh_paper(inkColor);
+
+    // THE SECOND ANCHOR. Read as a DIFFERENCE from the first rather than as a
+    // palette of its own, which is what keeps duotone inside the family's one
+    // law: the rail is still built entirely from `tone`, and tone2 only says
+    // where the spread's positive side is allowed to walk to. A configuration
+    // with two anchors is still one material lit two ways, not two materials.
+    //
+    // `duo` is a smoothstep on the OKLAB distance between the anchors and it is
+    // EXACTLY ZERO when they are equal, which is the property the whole upgrade
+    // rests on: at zero every term below collapses to the identity and the
+    // twelve heroes already reviewed render bit for bit as they did.
+    //
+    // The hue difference is taken the SHORT way round the wheel. Without the
+    // wrap, two anchors either side of the origin -- a red and a warm yellow,
+    // say -- would walk the long way through green to reach each other, which is
+    // both wrong and the one thing the one-hue-family rule exists to prevent.
+    float3 tone2 = mh_linear_to_oklab(mh_srgb_to_linear(float3(tone2Color.rgb)));
+    float C2 = length(tone2.yz);
+    float h2 = atan2(tone2.z, tone2.y) + hueShift;
+    float dh = h2 - (atan2(tone.z, tone.y) + hueShift);
+    p.dHue = dh - 6.2831853 * floor(dh / 6.2831853 + 0.5);
+    p.dC   = C2 / max(length(tone.yz), 1e-4);
+    p.dL   = tone2.x / max(tone.x, 1e-4);
+    p.duo  = smoothstep(0.004, 0.035, length(tone2 - tone));
 
     // THE INK RAIL. Dark to bright: energy becomes light.
     float3 d0 = ink;
@@ -376,6 +408,12 @@ static MHPalette mh_palette(half4 inkColor, half4 toneColor, float hueShift, flo
     return p;
 }
 
+/// The spread cap. 0.50 radians is about 29 degrees of OKLAB hue either side of
+/// the anchor: amber to gold one way, amber to ember the other. Two or three
+/// hues in conversation, which is the reference-orb look, and nowhere near a
+/// second hue family, which is the rule.
+constant float MH_SPREAD = 0.50;
+
 /// Walk the family. Three segments, each eased so its ends are flat, which
 /// makes the joins C1: no kink shows up as a contour line in a smooth field.
 /// Returns LINEAR light; mh_out does the encoding.
@@ -397,8 +435,33 @@ static float3 mh_shade(MHPalette p, float t, float hue) {
     } else {
         lab = mix(p.s2, p.s3, smoothstep(0.0, 1.0, (t - 0.78) * (1.0 / 0.22)));
     }
-    float ch = cos(hue), sh = sin(hue);
-    lab.yz = float2(lab.y * ch - lab.z * sh, lab.y * sh + lab.z * ch);
+    // THE SPREAD AXIS, AND DUOTONE RIDES IT. `hue` is a signed offset along the
+    // spread: negative is one neighbour of the anchor, positive the other. With
+    // one anchor both sides are the same rotation mirrored, which is what the
+    // twelve heroes were built on. With two, the POSITIVE side stops being a
+    // rotation of the anchor and becomes a walk toward tone2 -- its hue, its
+    // chroma and its lightness -- while the negative side is left exactly as it
+    // was. That is what "replaces the spread-derived neighbour on that side"
+    // means, and it is why spread still matters under duotone: spread is the
+    // axis, and it is what widens the palette around EACH anchor.
+    //
+    // Decomposed into pos and neg rather than clamped to the cap, because opal
+    // deliberately runs its spread a third past MH_SPREAD and a clamp here would
+    // silently take that back.
+    //
+    // At duo = 0 the positive side's mix returns MH_SPREAD, the two halves
+    // recombine to exactly `hue`, and both scales are exactly 1: the identity,
+    // for any magnitude, with no epsilon anywhere in it.
+    float a = hue * (1.0 / MH_SPREAD);
+    float pos = max(a, 0.0), neg = max(-a, 0.0);
+    float rot = -neg * MH_SPREAD + pos * mix(MH_SPREAD, p.dHue, p.duo);
+    float w = min(pos, 1.0) * p.duo;
+    float cS = 1.0 + w * (p.dC - 1.0);
+    float lS = 1.0 + w * (p.dL - 1.0);
+
+    float ch = cos(rot), sh = sin(rot);
+    lab.yz = float2(lab.y * ch - lab.z * sh, lab.y * sh + lab.z * ch) * cS;
+    lab.x *= lS;
     return mh_oklab_to_linear(lab);
 }
 
@@ -936,6 +999,44 @@ static inline float3 mh_refract(float3 V, float3 N, float eta) {
     return normalize(eta * V + (eta * ci - sqrt(k)) * N);
 }
 
+/// HOW FAR THE INTERIOR SWIMS WHEN THE DEVICE TURNS.
+///
+/// 0.13 of a radian-ish lean per unit of tilt, which over a two-unit chord
+/// moves the far side of the interior about a quarter of the body's radius
+/// while the near side barely stirs. That difference IS the parallax and it is
+/// the whole point: a picture that slid rigidly with the phone would read as a
+/// texture being panned, where content at different depths moving at different
+/// rates is the one cue the eye accepts as "there is really something in there".
+///
+/// Deliberately small. The reference for this is a spirit level or a compass
+/// under glass, not a marble in a bowl; at twice this it stops being a material
+/// property and becomes a toy.
+constant float MH_TILT = 0.13;
+
+/// THE INTERIOR'S LOOK DIRECTION, and the single place tilt enters the family.
+///
+/// Bending the RAY rather than moving the content is what makes one line serve
+/// all eighteen heroes: every interior in this file is expressed against this
+/// direction, whether it is marched (aura's sheets, nebula's weather) or solved
+/// in closed form (droplet's heart, comet's head, duet's pair, arc's filament,
+/// fathom's shells), so all of them parallax correctly and none of them needed a
+/// word changed. And because the offset accumulates along the ray, deep content
+/// moves further than shallow content for free -- which is the behaviour the
+/// brief asks for and would have been fiddly to arrange any other way.
+///
+/// The body, the rim and the silhouette are built from the surface normal and
+/// the entry point, neither of which this touches, so the glass itself holds
+/// perfectly still while its contents swim. That contrast is what sells it.
+///
+/// The zero test is exact rather than an epsilon: at tilt (0,0) this returns
+/// mh_refract's own vector untouched, so there is not even a renormalise
+/// between today's render and today's render.
+static inline float3 mh_look(float3 V, float3 N, float2 tilt) {
+    float3 rd = mh_refract(V, N, MH_ETA);
+    if (tilt.x == 0.0 && tilt.y == 0.0) return rd;
+    return normalize(rd + float3(tilt.x, tilt.y, 0.0) * MH_TILT);
+}
+
 /// How far the interior ray travels before it leaves. Solved against the
 /// UNDEFORMED unit sphere: the interior march does not need the surface to a
 /// fraction of a per cent, and a second deformation solve per pixel would double
@@ -1097,7 +1198,7 @@ static inline float3 mh_key(float t) {
 /// energy -- because the brief for it is "barely there": its job is to stop the
 /// silhouette meeting the ink as a cut line, not to be a halo anybody notices.
 static MHSurface mh_surface(MHBody b, float t, float small, half4 inkColor,
-                            float rimK, float specK, float glowK) {
+                            float2 tilt, float rimK, float specK, float glowK) {
     MHSurface o;
     float paper = mh_paper(inkColor);
     // The edge does more work on paper than it ever does on ink: it is the whole
@@ -1106,7 +1207,15 @@ static MHSurface mh_surface(MHBody b, float t, float small, half4 inkColor,
     // more of it, and no other term changes.
     rimK *= mix(1.0, 1.32, paper);
 
-    float3 H = normalize(mh_key(t) + float3(0.0, 0.0, 1.0));
+    // THE BARELY COUNTER-MOVE. Tilting the phone turns the ORB relative to the
+    // room, so the room's light arrives from a slightly different angle and the
+    // catchlight shifts -- against the tilt, because the world stays put while
+    // the object turns. It is a fifth of what the interior does and it is meant
+    // to be subliminal: what the eye should notice is the contents swimming
+    // while the glass holds, and a highlight that moved as much as the interior
+    // would say the whole object was sliding instead.
+    float3 H = normalize(mh_key(t) - float3(tilt.x, tilt.y, 0.0) * (MH_TILT * 0.20)
+                         + float3(0.0, 0.0, 1.0));
     float nh = clamp(dot(b.N, H), 0.0, 1.0);
     // THE TIGHT LOBE IS SIZE-ADAPTIVE, and it has to be: a 96-exponent highlight
     // covers about four pixels at 120 pt and a third of one at 18 pt, where it
@@ -1123,7 +1232,8 @@ static MHSurface mh_surface(MHBody b, float t, float small, half4 inkColor,
     // wears is a species decision -- droplet's whole surface is the point, and
     // limn's is a dark bead with one catchlight on it.
     float tight = mix(96.0, 16.0, small);
-    o.spec = (pow(nh, tight) + 0.09 * pow(nh, 4.0)) * b.m * specK;
+    o.spec = (pow(nh, tight) + 0.09 * pow(nh, 4.0)) * b.m * specK
+           * mix(0.92, 1.08, 0.5 - 0.5 * clamp(b.N.y, -1.0, 1.0));
 
     // The wrap is a LIGHTING cue -- brighter on the side away from the key --
     // and on paper the rim is not lighting at all: it is the refracted edge of a
@@ -1144,7 +1254,29 @@ static MHSurface mh_surface(MHBody b, float t, float small, half4 inkColor,
     // dark refracted edge of a clear sphere -- and a dark edge has to be FINE to
     // read as an edge rather than as a dirty ring. Same term, opposite polarity,
     // because the rail underneath it has turned over.
-    o.rim = pow(b.fres, mix(3.9, 5.4, paper)) * b.m * wrap * rimK;
+    // THE ENVIRONMENT, and the rule for it is that if you can see it, it is
+    // wrong. A real glass body reflects a room: brighter off whatever is above
+    // it, darker off whatever is below. So the rim and the catchlight carry a
+    // soft vertical gradient read straight off the surface normal -- fourteen
+    // per cent on the rim, eight on the specular -- and that is the entire
+    // feature. It is not a light and it does not move; it is the reason the
+    // glass looks like it is somewhere.
+    //
+    // IT IS A VALUE GRADIENT AND NOT A COLOUR ONE, on purpose. A cool sky and a
+    // warm ground is what an environment really does and it is exactly what this
+    // family may not have: a second hue in the picture, arriving through a term
+    // nobody dialled, would break the one-hue-family law from underneath.
+    //
+    // AND IT INVERTS ON PAPER. There, rim energy walks a descending rail, so
+    // more of it is DARKER -- and a sky-lit top edge on a light ground has to be
+    // paler, not deeper. Same gradient, mirrored, so the top of the sphere is
+    // the lighter half of its edge on both grounds.
+    //
+    // Screen y runs down, so a normal pointing up has negative y.
+    float sky = 0.5 - 0.5 * clamp(b.N.y, -1.0, 1.0);
+    float envRim = mix(mix(0.86, 1.14, sky), mix(1.14, 0.86, sky), paper);
+
+    o.rim = pow(b.fres, mix(3.9, 5.4, paper)) * b.m * wrap * rimK * envRim;
 
     // Outside only: (1 - m) is zero under the silhouette and rises through it.
     // 0.13 body units of width, down from 0.20: at 0.20 the bloom was wide
@@ -1239,11 +1371,6 @@ static inline half4 mh_present(float body, float spec, float contact, float hue,
     return mh_out(rgb, position * pixelScale);
 }
 
-/// The spread cap. 0.50 radians is about 29 degrees of OKLAB hue either side of
-/// the anchor: amber to gold one way, amber to ember the other. Two or three
-/// hues in conversation, which is the reference-orb look, and nowhere near a
-/// second hue family, which is the rule.
-constant float MH_SPREAD = 0.50;
 
 /// The number of taps down the interior ray. Five, and the argument for exactly
 /// five: four leaves a visible banding when a bright core passes between two
@@ -1320,7 +1447,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1342,7 +1470,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     // THE RIBBONS COUNT DOWN, and they count down twice rather than once. The
@@ -1585,13 +1713,13 @@ constant float MH_SPREAD = 0.50;
 
     // The rim's amplitude went UP when its exponent tightened: the same light in
     // an eighth of the width has to be brighter to be the same edge.
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.88 + 0.40 * live.voice, 0.52, 0.16);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.88 + 0.40 * live.voice, 0.52, 0.16);
     // The rim borrows the interior's colour, because it IS the interior seen
     // edge-on through more glass. The specular does not: it is the key light.
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -1654,7 +1782,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1700,7 +1829,7 @@ constant float MH_SPREAD = 0.50;
     // is in the same units. Nothing else needs unscaling.
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     // THE HEART IS COMPOSED, NOT ACCIDENTAL, and round one had it the other way
@@ -1793,7 +1922,7 @@ constant float MH_SPREAD = 0.50;
     // The sheen knob is this hero's: a wobbling surface is only visibly wobbling
     // if there is a highlight riding it, so droplet spends more of its energy on
     // the specular than any other hero does.
-    MHSurface sf = mh_surface(b, t, small, inkColor,
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt,
                               1.05 + 0.55 * sheenK + 0.35 * live.voice,
                               0.42 + 0.30 * sheenK,
                               0.16);
@@ -1801,7 +1930,7 @@ constant float MH_SPREAD = 0.50;
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.6) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -1863,7 +1992,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -1969,7 +2099,7 @@ constant float MH_SPREAD = 0.50;
     // glows faintly where that light entered.
     float3 arcDir = float3(cos(phi0), sin(phi0), 0.0);
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float hintAmt = (0.22 + 0.38 * hintK) * (1.0 + 0.9 * live.voice)
@@ -2021,12 +2151,12 @@ constant float MH_SPREAD = 0.50;
     // 0.30 is the fitted middle: enough that the silhouette closes all the way
     // round and the eye reads a sphere, far too little to compete with the arc,
     // which runs four times brighter than it does.
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.30, 0.78 + 0.35 * live.voice, 0.09);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.30, 0.78 + 0.35 * live.voice, 0.09);
 
     float e = interior + rimE + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (rimE + interior) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -2087,7 +2217,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -2107,7 +2238,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     // THE ORBIT PLANE. A tilt about x, then a slow eased precession about y, so
@@ -2273,12 +2404,12 @@ constant float MH_SPREAD = 0.50;
     // way in from the rim and reading as a stray artifact next to a species
     // whose entire brief is one point. At 0.22 it is a catchlight: the glass
     // still says it is glass, and there is only one thing in it.
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.22, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.22, 0.15);
 
     float e = interior + headE + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -2342,7 +2473,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -2362,7 +2494,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     // The mist's scale. Larger features at small mounts, because a fold has to be
@@ -2444,12 +2576,12 @@ constant float MH_SPREAD = 0.50;
     // The catchlight has to punch through weather. At 0.60 the cloud's own body
     // sat close enough to it that the frame had no cream in it anywhere and the
     // value hierarchy failed: a nebula is still an object with a lit surface.
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.78 + 0.35 * live.voice, 0.98, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.78 + 0.35 * live.voice, 0.98, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -2510,7 +2642,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -2530,7 +2663,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 8.0, 9.1);
@@ -2670,13 +2803,13 @@ constant float MH_SPREAD = 0.50;
     // specular on top of it made one blob with legs, and the legs are the
     // species. At 0.62 the entry still reads unmistakably as the source and the
     // fan below it is what the eye follows.
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice,
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice,
                               0.62 + 0.25 * live.voice, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.6) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -2746,7 +2879,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -2766,17 +2900,17 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 6.0, 8.3);
 
     // THE PLANE. Tilt bounded away from face-on and edge-on, wobbling slowly, and
     // precessing so the pair's geometry never repeats.
-    float tilt = 0.62 + 0.20 * sin(t * 0.037);
+    float lean = 0.62 + 0.20 * sin(t * 0.037);
     float prec = mh_drift(t, 0.064, 0.45, 2.0);
     float3 e1 = mh_spin(float3(1.0, 0.0, 0.0), prec, 0.0);
-    float3 e2 = mh_spin(float3(0.0, sin(tilt), cos(tilt)), prec, 0.0);
+    float3 e2 = mh_spin(float3(0.0, sin(lean), cos(lean)), prec, 0.0);
     float3 nrm = cross(e1, e2);
 
     // Separation. Cadence closes it a little, responding a lot, the gesture
@@ -2859,12 +2993,12 @@ constant float MH_SPREAD = 0.50;
     float hueW = (eA * 0.85 - eB * 1.0);
     float hue = (interior > 1e-4 ? hueW / max(eA + eB, 1e-4) : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.42, 0.15);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.42, 0.15);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (eA + eB) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -2930,7 +3064,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -2953,7 +3088,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     // THE CLOCK. About eleven and a half seconds at glintRate 0, seven at 1, so
@@ -3019,7 +3154,7 @@ constant float MH_SPREAD = 0.50;
     // header: with no interior to protect, the edge and the highlight are free to
     // be the figure. This is the one hero whose brightest pixel is always its
     // catchlight, at every state and every size.
-    MHSurface sf = mh_surface(b, t, small, inkColor,
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt,
                               1.15 + 0.45 * live.voice,
                               1.30 + 0.35 * live.voice,
                               0.13);
@@ -3027,7 +3162,7 @@ constant float MH_SPREAD = 0.50;
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(e - sf.spec - sf.glow, sf.spec, sf.glow, hueMix,
                        uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -3103,7 +3238,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -3123,7 +3259,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 9.0, 9.4);
@@ -3281,12 +3417,12 @@ constant float MH_SPREAD = 0.50;
                    * (1.0 + 0.20 * st.settled);
     float hue = (shellE > 1e-4 ? shellH / shellE : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.78 + 0.35 * live.voice, 0.46, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.78 + 0.35 * live.voice, 0.46, 0.14);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
                       uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -3387,7 +3523,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -3407,7 +3544,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 11.0, 8.1);
@@ -3623,12 +3760,12 @@ constant float MH_SPREAD = 0.50;
                    * (1.0 + 0.9 * st.complete) * (1.0 + 0.22 * st.settled);
     float hue = (filE > 1e-5 ? filH / filE : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.30, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.30, 0.14);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (filE * 35.0 * mix(1.0, 0.52, small)) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
                       uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -3688,7 +3825,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -3708,7 +3846,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 13.0, 10.6);
@@ -3791,12 +3929,12 @@ constant float MH_SPREAD = 0.50;
                    * (1.0 + 0.22 * st.settled);
     float hue = (flashE > 1e-4 ? flashH / flashE : 0.0) * spreadAmt;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.52, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.52, 0.14);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * flashE / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
                       uv, pal, glow, inkColor, position, pixelScale);
 }
@@ -3858,7 +3996,8 @@ constant float MH_SPREAD = 0.50;
     half4 inkColor, half4 toneColor,
     float hueShift, float formScale, float speed, float depth, float glow,
     float c0, float c1, float c2, float c3, float epoch,
-    float stateIndex, float stateTau, float level, float activity
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
 ) {
     float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
     float S = max(formScale, 0.10);
@@ -3878,7 +4017,7 @@ constant float MH_SPREAD = 0.50;
     MHBody b = mh_body(uv, t, px, sh);
 
     float3 V = float3(0.0, 0.0, -1.0);
-    float3 rd = mh_refract(V, b.N, MH_ETA);
+    float3 rd = mh_look(V, b.N, tilt);
     float L = mh_exit(b.P, rd);
 
     float4 fl = mh_flourish(t, 15.0, 11.3);
@@ -3984,12 +4123,1096 @@ constant float MH_SPREAD = 0.50;
                    * (1.0 + 0.75 * st.complete) * (1.0 + 0.22 * st.settled);
     float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
 
-    MHSurface sf = mh_surface(b, t, small, inkColor, 0.80 + 0.35 * live.voice, 0.55, 0.14);
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.55, 0.14);
 
     float e = interior + sf.rim + sf.spec + sf.glow;
     float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
 
-    MHPalette pal = mh_palette(inkColor, toneColor, hueShift, depth);
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 13. Tempest
+
+// TEMPEST. A contained storm: weather churning, with lightning buried in it.
+//
+// NEBULA'S SIBLING AND ITS OPPOSITE TEMPERAMENT. Both are weather and both are
+// domain-warped mist, and everything else about them differs. Nebula is lit
+// evenly from within and its business is depth: near folds silhouetting against
+// a deep glow. This one is lit from INSIDE ITS OWN FLASHES, its density runs
+// harder so the cloud has real dark in it, and its business is energy: a body
+// that is calm when nothing is happening and visibly working when something is.
+//
+// THE FLICKERS LIVE DEEP AND NEVER REACH THE SURFACE, which is the species'
+// one inviolable rule and the difference between a storm in a jar and a
+// novelty lamp. Two things enforce it. A depth mask kills any flash outside
+// 0.62 of the radius outright, so nothing can ignite near the shell. And the
+// flashes are evaluated INSIDE the march, so the cloud in front of them
+// attenuates them exactly as it attenuates everything else -- what reaches the
+// eye is a glow diffused through weather rather than a light with an edge. A
+// flash solved outside the loop, the way comet's head is, would sit on top of
+// the cloud and the species would be over.
+//
+// AND THEY DO NOT STROBE. The envelope is the flourish clock's sin-squared,
+// which is flat at both ends, over a gesture lasting most of a second: it
+// arrives and it leaves, and there is no frame where it switches. Two lanes at
+// 2.9 and 4.3 second slots interleave without ever landing together, so the
+// storm has an irregular pulse rather than a beat. At rest the lanes are slow
+// enough that minutes pass quietly.
+//
+// ACTIVITY IS THE STORM, and this is the deepest reading of cadence in the
+// collection. It raises the churn, quickens the weather, and shortens both
+// flicker slots -- so an assistant that is working has visible turbulence and
+// lightning in it, and one that is idle is a calm dark cloud. THINKING adds to
+// the same term on top of the signal, because that state is the one this
+// species was built to wear. LEVEL LIGHTS THE CLOUD: voice lifts the ambient
+// glow without touching the churn, so speaking makes the weather visible rather
+// than making it worse.
+//
+// RESPONDING GIVES THE STORM A HEADING: the whole domain advects one way and the
+// flickers stop wandering, so churning becomes streaming.
+//
+// SUCCESS: the cloud ignites from the inside and a front travels out through it.
+//
+// SIZE: at 18 pt the noise scale halves so the folds are features rather than
+// grain, the warp comes down with it, and the flickers grow by two thirds and
+// come round half as often -- one soft flash inside a dark bead every several
+// seconds, which is the species in the fewest events it can have.
+[[ stitchable ]] half4 mh_tempest(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float stormK   = clamp(c0, 0.0, 1.0);   // how much weather there is
+    float churnK   = clamp(c1, 0.0, 1.0);   // how hard it turns over
+    float flickerK = clamp(c2, 0.0, 1.0);   // the buried lightning
+    float spreadK  = clamp(c3, 0.0, 1.0);
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    // THINKING IS THIS SPECIES' HOME STATE, so it is read directly rather than
+    // through mh_state, which only designs success and responding. A storm that
+    // rises while the assistant thinks is the whole concept.
+    float think = (stateIndex > 1.5 && stateIndex < 2.5) ? 1.0 : 0.0;
+    float energy = clamp(0.85 * live.pace + 0.65 * think + 0.55 * st.drive, 0.0, 1.6);
+
+    MHShape sh = mh_shape(0.023 + 0.009 * mh_breath(t, 9.2), 0.0, 1.28);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    float scale = (2.55 / S) * mix(1.0, 0.55, small);
+    float warpScale = (1.45 / S) * mix(1.0, 0.58, small);
+    float fold = (0.42 + 0.80 * churnK) * (1.0 + 0.85 * energy) * mix(1.0, 0.50, small);
+    float dr = mh_drift(t, 0.070 + 0.075 * churnK, 0.42, 3.0) * (1.0 + 0.95 * energy);
+    float3 adv = float3(0.88, 0.20, -0.43) * (st.drive * 0.50 * t);
+
+    float absorb = 3.60 * (0.55 + 0.85 * stormK);
+    float emit = 0.58 + 0.72 * stormK;
+
+    // TWO LIGHTNING LANES, on slots that shorten as the storm rises.
+    float rate = 1.0 / (1.0 + 1.30 * energy);
+    float4 f0 = mh_flourish(t, 21.0, mix(2.9, 5.2, small) * rate);
+    float4 f1 = mh_flourish(t, 27.0, mix(4.3, 7.4, small) * rate);
+    float fw = (0.150 + 0.070 * flickerK) * S * mix(1.0, 1.65, small);
+    float fAmp = (0.85 + 2.80 * flickerK) * (1.0 + 0.45 * energy);
+
+    float3 g0 = 0.40 * float3(cos(f0.z * 6.283), 0.75 * sin(f0.z * 9.1 + 1.1), sin(f0.z * 5.3 + 2.7));
+    float3 g1 = 0.40 * float3(cos(f1.z * 7.7 + 2.2), 0.75 * sin(f1.z * 6.4 + 3.9), sin(f1.z * 8.8 + 0.4));
+
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+
+        float w = mh_noise3(p * warpScale + float3(0.0, dr * 0.65, dr) - adv * 0.5);
+        float3 q = p * scale + w * fold * float3(0.90, -0.62, 0.68)
+                 + float3(0.0, 0.0, dr) - adv;
+        float n = mh_noise3(q);
+
+        // Harder than nebula's: the lower edge sits further up, so the cloud has
+        // real holes and the flashes have somewhere dark to be seen against.
+        float dens = smoothstep(-0.12, 0.46, n) * fade;
+
+        float glowIn = 0.26 + 0.72 * (1.0 - smoothstep(0.0, 0.90, length(p)));
+        float e = dens * glowIn * emit * (1.0 + 0.85 * live.voice);
+
+        // THE BURIED LIGHTNING. Depth-masked to the inner two thirds, so it can
+        // never light the shell, and inside the march so the weather in front of
+        // it does the diffusing.
+        float deep = 1.0 - smoothstep(0.35, 0.62, length(p));
+        if (deep > 0.002) {
+            float3 d0 = (p - g0) / max(fw, 1e-3);
+            float3 d1 = (p - g1) / max(fw, 1e-3);
+            float a0 = dot(d0, d0), a1 = dot(d1, d1);
+            // MOSTLY SCATTER, and much more of it than any other hero's: a
+            // flash inside a cloud is seen almost entirely as the cloud lighting
+            // up, not as the flash. At the first cut's balance the core won and
+            // what drew was a bright dot with weather around it -- a bulb in
+            // fog rather than lightning in it.
+            float bolt = f0.x * (exp(-a0) * 0.42 + mh_scatter(a0, 0.62))
+                       + f1.x * (exp(-a1) * 0.42 + mh_scatter(a1, 0.62));
+            // Weighted by the local density: lightning lights the CLOUD, so it
+            // is brightest where there is something for it to light.
+            e += bolt * fAmp * deep * (0.30 + 0.85 * dens);
+        }
+
+        if (st.complete > 0.001) {
+            float sr = (length(p) - mix(0.02, 1.05, st.sweep)) / 0.24;
+            e *= 1.0 + 0.70 * st.complete;
+            e += st.complete * 0.55 * exp(-sr * sr) * dens;
+        }
+
+        acc.x += e * trans * ds;
+        acc.y += e * clamp(p.z, -1.0, 1.0) * trans * ds;
+        trans *= exp(-(absorb * dens + MH_EXT) * ds);
+    }
+
+    float interior = acc.x * 6.20 * b.m * mh_transmit(b.fres) * (1.0 + 0.20 * st.settled);
+    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.66, 0.15);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 14. Helix
+
+// HELIX. A double strand of light, slowly climbing and turning.
+//
+// THE DISTANCE TO A HELIX, CHEAPLY. There is no closed form for the nearest
+// point on a helix, but there is a very good approximation that costs one
+// atan2: read the sample's own angle and radius about the helix axis, work out
+// what angle the strand is at THAT HEIGHT, and take the wrapped difference. The
+// lateral distance is that angle difference times the radius; the radial
+// distance is how far the sample is off the strand's cylinder. Adding them in
+// quadrature is exact for a strand of zero pitch and off by a factor of the
+// cosine of the pitch angle for a real one -- which at the pitches this species
+// uses is under a tenth, and is absorbed into the width. The wrap is what makes
+// it work at all: without it the strand tears open along one radius, which is
+// the same seam limn's arc and comet's trail each had to be rebuilt to avoid.
+//
+// TAPERED LIKE ARC'S THREAD, and for the same reason: a strand of even width
+// running out of the top of the body reads as a cut cable. Both ends fall away
+// on a profile in height, so the pair emerges out of the glass and returns into
+// it, and the strands never touch the shell.
+//
+// EIGHT STEPS RATHER THAN FIVE. The strands are narrower than a sheet and
+// broader than arc's filament, which puts them exactly in the gap where five
+// taps step over them and a closed-form integral is not available. Eight is the
+// smallest count that samples a 0.095 strand honestly, and this species can
+// afford it because its distance function is trigonometry rather than noise.
+//
+// THE TWO STRANDS ARE THE DUOTONE'S NATURAL HOME. They sit half a turn apart
+// and at opposite ends of the spread axis, so with one anchor they are two
+// neighbours of the tone and with two they are the two anchors themselves,
+// climbing around each other. Nothing else in the collection states a
+// two-colour configuration as plainly.
+//
+// LEVEL FEEDS THE STRANDS: voice brightens and thickens them, which on a form
+// this linear reads as the light in a filament being turned up. ACTIVITY
+// QUICKENS THE CLIMB, so cadence moves the pattern up through the body faster
+// without changing its shape.
+//
+// RESPONDING WINDS IT TIGHTER: the turn count rises by half and the climb
+// nearly doubles. A helix under drive is visibly more coiled, which is about as
+// direct a picture of effort as a geometric form can give.
+//
+// THE GESTURE, every nine seconds or so: the whole helix draws in and winds
+// tighter, then relaxes.
+//
+// SUCCESS: a bright pulse climbs both strands to the top on the state's sweep.
+//
+// SIZE: at 18 pt the turns drop from about three to one and a half and the
+// strands thicken by 80 per cent -- three turns of a thin strand inside a
+// thirteen-point bead is a texture, and one and a half turns of a fat one is a
+// double helix. The climb also slows a third, because the same rate over a
+// shorter visible run reads as faster than it is.
+[[ stitchable ]] half4 mh_helix(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float turnsK  = clamp(c0, 0.0, 1.0);   // how many turns across the body
+    float riseK   = clamp(c1, 0.0, 1.0);   // how fast it climbs
+    float glowK   = clamp(c2, 0.0, 1.0);   // the strands' light
+    float spreadK = clamp(c3, 0.0, 1.0);   // the two strands' hues
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.021 + 0.007 * mh_breath(t, 10.4), 0.0, 1.20);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 17.0, 9.3);
+
+    // The axis leans and turns slowly, so the helix is never seen from the same
+    // angle twice and its pole is never a landmark.
+    float ay = mh_drift(t, 0.055, 0.50, 2.0);
+    float ax = 0.22 + 0.13 * sin(t * 0.031);
+
+    float turns = (1.7 + 2.2 * turnsK) * mix(1.0, 0.52, small)
+                * (1.0 + 0.50 * st.drive + 0.30 * fl.x);
+    float climb = mh_drift(t, (0.22 + 0.34 * riseK) * mix(1.0, 0.66, small), 0.44, 5.0)
+                * (1.0 + 0.75 * live.pace + 0.85 * st.drive);
+    float r0 = (0.40 + 0.10 * turnsK) * S * (1.0 - 0.16 * st.drive - 0.12 * fl.x);
+    float w = (0.095 + 0.030 * glowK) * S * mix(1.0, 1.80, small)
+            * (1.0 + 0.30 * live.voice);
+    float bright = (0.72 + 0.60 * glowK) * (1.0 + 0.80 * live.voice);
+
+    float medAmt = mix(0.055, 0.030, small);
+
+    // FOURTEEN STEPS FOR THE STRANDS, FIVE FOR THE MEDIUM, and splitting them is
+    // what fixed this species. At eight shared steps the interval was 0.25 and
+    // the strands are 0.22 across, so a ray crossed one between taps as often as
+    // through them: what drew was a DASHED helix, a stack of disconnected
+    // streaks that read as stripes rather than as two continuous strands
+    // climbing. Fourteen halves the interval and the strands close up.
+    //
+    // They can be afforded because this loop reads no noise at all -- the
+    // distance to a helix is trigonometry -- so fourteen of these cost less than
+    // the eight shared steps did. The medium keeps the family's five, which is
+    // honest for something that broad, and carries the only noise here.
+    const int STRANDS = 14;
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(STRANDS);
+
+    for (int i = 0; i < STRANDS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+
+        float3 q = mh_spin(p, ay, ax) / S;
+        float rho = length(q.xz);
+        float th = atan2(q.z, q.x);
+
+        // Where the strands are at this height. The second is half a turn round.
+        float phi = turns * q.y * 3.14159265 + climb;
+
+        // THE TAPER, in height: the pair emerges from the glass and returns to
+        // it rather than being cut off by the shell.
+        float hp = 1.0 - smoothstep(0.30, 0.86, abs(q.y));
+
+        float dr0 = rho - r0;
+        float aw0 = th - phi;
+        aw0 = aw0 - 6.2831853 * floor(aw0 / 6.2831853 + 0.5);
+        float lat0 = rho * aw0;
+        float a0 = (dr0 * dr0 + lat0 * lat0) / (w * w);
+
+        float aw1 = th - phi - 3.14159265;
+        aw1 = aw1 - 6.2831853 * floor(aw1 / 6.2831853 + 0.5);
+        float lat1 = rho * aw1;
+        float a1 = (dr0 * dr0 + lat1 * lat1) / (w * w);
+
+        // SUCCESS climbs the strands: a bright band travels up the pair.
+        float lift = 1.0;
+        if (st.complete > 0.001) {
+            float sr = (q.y - mix(-1.0, 1.0, st.sweep)) / 0.26;
+            lift += st.complete * (0.35 + 2.10 * exp(-sr * sr));
+        }
+
+        float e0 = (exp(-a0) + mh_scatter(a0, 0.20)) * hp;
+        float e1 = (exp(-a1) + mh_scatter(a1, 0.20)) * hp;
+        float strands = (e0 + e1) * bright * lift;
+
+        // The two strands at the two ends of the spread axis, which under
+        // duotone is the two anchors themselves.
+        float hueW = (e1 - e0) * bright * lift;
+
+        float e = strands * 0.80 * fade;
+        acc.x += e * trans * ds;
+        acc.y += hueW * 0.80 * fade * trans * ds;
+        trans *= exp(-(3.00 * e + MH_EXT) * ds);
+    }
+
+    // The medium, at the family's five.
+    float medE = 0.0;
+    float mtrans = 1.0;
+    float mds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * mds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 2.1 / S) * medAmt;
+        medE += e * mtrans * mds;
+        mtrans *= exp(-(2.00 * e + MH_EXT) * mds);
+    }
+    acc.x += medE;
+
+    float interior = acc.x * 4.20 * b.m * mh_transmit(b.fres) * (1.0 + 0.22 * st.settled);
+    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.48, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 15. Geode
+
+// GEODE. Crystalline facets inside the glass, catching light as the body turns.
+//
+// A FACET IS A DIRECTION, NOT A POLYGON. Drawing real interior planes would mean
+// clipping a solid against six half-spaces per sample, and none of it would
+// survive five taps. So the crystal is built the other way round: six axes on a
+// slowly turning frame, and every point in the volume belongs to whichever axis
+// its own direction is most aligned with. That partition IS the faceting -- the
+// boundaries between the six regions are the crystal's edges, and they fall
+// where they would on a real cut stone, because "nearest axis" is exactly how a
+// convex polyhedron divides the directions around itself.
+//
+// WHAT MAKES IT CATCH LIGHT is then one dot product: each facet is lit by how
+// squarely its own axis faces the key, so as the frame turns, facets come up
+// bright one after another and go dark as they roll away. That sequence is the
+// species. It needs no animation of its own -- the turning does all of it -- and
+// it is why this hero reads as crystalline rather than as a lit blob.
+//
+// SOFT-EDGED, WHICH THE BRIEF INSISTS ON AND WHICH THE PARTITION DOES NOT GIVE
+// FOR FREE. The gap between the best axis and the runner-up is how far inside
+// its facet a point is, and near an edge that gap goes to zero -- so the edge is
+// available as a smooth field rather than as a discontinuity. It is used twice:
+// to crossfade the lighting between neighbouring facets so no boundary is ever
+// a step, and to lay a fine bright line along the edges themselves, which is
+// what a cut crystal does and what `glimmer` dials.
+//
+// THE CRYSTAL SITS INSIDE THE GLASS rather than filling it: a shell profile
+// keeps it clear of the shell so it reads as a stone suspended in a body rather
+// than as the body's own faceting. `depthCrystal` moves it in and out.
+//
+// LEVEL LIGHTS THE STONE: voice raises the facets' response to the key, so more
+// of them are bright at once and the crystal opens up. ACTIVITY TURNS IT: the
+// frame's rotation quickens, so facets change over faster -- a busy assistant's
+// stone is turning in the light.
+//
+// RESPONDING SETTLES IT INTO ONE ATTITUDE and drives the turn one way, so the
+// tumbling becomes a rotation with a direction.
+//
+// THE GESTURE, every ten seconds or so: one facet takes far more light than its
+// share for a breath, the way a real stone throws a flash as it passes an angle.
+//
+// SUCCESS: every facet lights at once, which on a faceted body is unmistakably
+// an event, and then settles back to the sequence.
+//
+// SIZE: at 18 pt the axis count drops from six to four -- six facets across a
+// thirteen-point bead is a texture, four is a cut stone -- the edge lines switch
+// off, and the crystal grows to fill more of the body. What survives is a small
+// turning solid catching light on two or three faces.
+[[ stitchable ]] half4 mh_geode(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float facetK  = clamp(c0, 0.0, 1.0);   // how sharply cut
+    float glimK   = clamp(c1, 0.0, 1.0);   // the edge lines
+    float depthK  = clamp(c2, 0.0, 1.0);   // how big the stone is
+    float spreadK = clamp(c3, 0.0, 1.0);   // facet hues
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.021 + 0.007 * mh_breath(t, 11.7), 0.0, 1.22);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 19.0, 10.2);
+
+    // The frame the stone is cut on. Tumbling at rest, driven under responding.
+    float sp = (1.0 + 0.80 * live.pace + 1.00 * st.drive);
+    float ay = mix(mh_drift(t, 0.088 * sp, 0.48, 2.0), t * 0.30 * sp, st.drive * 0.7);
+    float ax = mix(0.34 + 0.22 * sin(t * 0.041), 0.30, st.drive * 0.7);
+
+    // Six axes: three orthogonal pairs, tilted off the cardinal directions so
+    // the cut never lines up with the frame and looks machined.
+    float3 A0 = normalize(float3( 0.94,  0.28,  0.19));
+    float3 A1 = normalize(float3(-0.22,  0.91,  0.35));
+    float3 A2 = normalize(float3( 0.16, -0.31,  0.94));
+    float3 A3 = normalize(float3( 0.61, -0.58,  0.54));
+    float3 A4 = normalize(float3(-0.66, -0.42,  0.62));
+    float3 A5 = normalize(float3( 0.38,  0.72, -0.58));
+    float fifth = 1.0 - smoothstep(0.24, 0.66, small);   // six facets down to four
+
+    float3 keyF = mh_spin(mh_key(t), ay, ax);
+
+    float Rin = (0.62 + 0.16 * depthK) * S * mix(1.0, 1.12, small);
+    float sharp = 3.0 + 7.0 * facetK;
+    float glimAmt = glimK * (1.0 - small) * (0.55 + 0.55 * live.voice);
+    float medAmt = mix(0.052, 0.030, small);
+
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+
+        // The stone: a soft solid sitting inside the glass.
+        // A SHELL, NOT A BALL, and the reason is a real degeneracy rather than
+        // a preference. The facet a point belongs to is decided by its
+        // DIRECTION from the centre, and direction is undefined at the centre
+        // and changes arbitrarily fast near it -- so every ray passing through
+        // the middle of the stone crossed several facets in a few samples and
+        // drew a hard radial seam out of the core. Fading the crystal out below
+        // 0.38 of its radius removes the degenerate region entirely and leaves a
+        // soft glowing heart where the facets used to fight, which is what the
+        // inside of a geode looks like anyway.
+        float rr = length(p) / max(Rin, 1e-3);
+        float stone = (1.0 - smoothstep(0.55, 1.05, rr)) * smoothstep(0.10, 0.38, rr);
+        if (stone <= 0.002) {
+            float med0 = mh_medium(p, t, 2.0 / S) * medAmt * fade;
+            acc.x += med0 * trans * ds;
+            trans *= exp(-(2.0 * med0 + MH_EXT) * ds);
+            continue;
+        }
+
+        float3 n = mh_spin(normalize(p + 1e-5), ay, ax);
+
+        // WHICH FACET, and how far inside it. The runner-up is kept because the
+        // gap between first and second IS the distance to the edge.
+        float d0 = dot(n, A0), d1 = dot(n, A1), d2 = dot(n, A2);
+        float d3 = dot(n, A3), d4 = dot(n, A4), d5 = dot(n, A5) * fifth;
+        float best = max(max(max(d0, d1), max(d2, d3)), max(d4, d5));
+        float second = -2.0;
+        second = max(second, (d0 < best) ? d0 : -2.0);
+        second = max(second, (d1 < best) ? d1 : -2.0);
+        second = max(second, (d2 < best) ? d2 : -2.0);
+        second = max(second, (d3 < best) ? d3 : -2.0);
+        second = max(second, (d4 < best) ? d4 : -2.0);
+        second = max(second, (d5 < best) ? d5 : -2.0);
+
+        // Which axis won, as a light and a hue. Written as a weighted blend
+        // rather than a branch so the crossover between neighbouring facets is
+        // a crossfade: the brief says soft-edged, and a hard pick here would put
+        // a visible crease down every boundary in the stone.
+        float soft = 0.055 + 0.075 * (1.0 - facetK);
+        float w0 = exp((d0 - best) / soft), w1 = exp((d1 - best) / soft);
+        float w2 = exp((d2 - best) / soft), w3 = exp((d3 - best) / soft);
+        float w4 = exp((d4 - best) / soft), w5 = exp((d5 - best) / soft) * fifth;
+        float wsum = w0 + w1 + w2 + w3 + w4 + w5 + 1e-5;
+
+        float3 fn = normalize((A0 * w0 + A1 * w1 + A2 * w2
+                             + A3 * w3 + A4 * w4 + A5 * w5) / wsum + 1e-5);
+
+        // THE CATCH. Each facet is lit by how squarely it faces the key -- and
+        // the comparison happens in the STONE'S frame, with the key rotated into
+        // it, rather than the other way round. Rotations preserve dot products,
+        // so the answer is identical, and this way there is no inverse rotation
+        // to write: the axes are already in the cut frame and the key only has
+        // to be carried across once, outside the loop.
+        float face = pow(clamp(dot(fn, keyF), 0.0, 1.0), sharp * 0.5);
+        float lit = 0.16 + 1.05 * face * (1.0 + 0.75 * live.voice);
+
+        // THE GESTURE: one facet takes far more than its share for a breath.
+        if (fl.x > 0.002) {
+            float pick = floor(fl.z * 5.999);
+            float mine = (pick < 0.5) ? w0 : (pick < 1.5) ? w1 : (pick < 2.5) ? w2
+                       : (pick < 3.5) ? w3 : (pick < 4.5) ? w4 : w5;
+            lit += fl.x * 1.60 * (mine / wsum);
+        }
+        if (st.complete > 0.001) lit += st.complete * 0.85;
+
+        // THE EDGES. The gap between the winner and the runner-up, read as a
+        // thin bright line along every boundary in the stone.
+        float edge = 0.0;
+        if (glimAmt > 0.002) {
+            float gap = (best - second) / soft;
+            edge = glimAmt * 0.55 * exp(-gap * gap * 0.35);
+        }
+
+        float e = (stone * lit * 0.42 + edge * stone) * fade;
+        float med = mh_medium(p, t, 2.0 / S) * medAmt * fade;
+        e += med;
+
+        acc.x += e * trans * ds;
+        // Facets take hue by which axis won, so neighbouring faces of the stone
+        // are neighbouring hues and the crystal has play of colour in it.
+        float hk = (w0 * -1.0 + w1 * -0.4 + w2 * 0.15 + w3 * 0.55 + w4 * 1.0 + w5 * 0.3) / wsum;
+        acc.y += (stone * lit * 0.42) * hk * fade * trans * ds;
+        trans *= exp(-(2.40 * e + MH_EXT) * ds);
+    }
+
+    float interior = acc.x * 4.40 * b.m * mh_transmit(b.fres) * (1.0 + 0.22 * st.settled);
+    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.72, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 16. Sol
+
+// SOL. A miniature sun: soft prominences lifting and falling inside the glass.
+//
+// THE KNEE DOES THE HEAVY WORK HERE, and this is the one species designed around
+// it rather than merely protected by it. A star is the only subject in the
+// collection whose honest dynamic range is enormous: the photosphere is orders
+// of magnitude above the corona, which is orders above the prominences. Fed
+// straight to the rail that renders as a flat white disc with some dim fuzz
+// round it -- which is exactly what a clamp would give and exactly what the
+// first cut of droplet's success looked like. mh_knee compresses the overshoot
+// asymptotically instead, so a core running at four times the rail's top still
+// has structure in it and the prominences an eighth as bright are still
+// separable. Everything below is built assuming that compression exists; at a
+// clamp this hero would have no picture.
+//
+// THREE LAYERS, AND THEY ARE DIFFERENT KINDS OF THING. The PHOTOSPHERE is a
+// solid body with a soft limb, granulated by a fine field that `simmer` dials --
+// it is the only opaque object any hero puts in the glass, and the interior
+// march's transmittance makes it genuinely occlude what is behind it. The CORONA
+// is a wide soft falloff off that limb, which is what gives the sun its size. The
+// PROMINENCES are tongues: soft plumes rooted on the surface at drifting
+// directions, each lifting and falling on its own long cycle so the sun's
+// silhouette is always changing without ever pulsing.
+//
+// A PROMINENCE IS A DIRECTION PLUS A HEIGHT. The angular term is how close the
+// sample's own direction is to the plume's, the radial term is a soft arch from
+// the surface out to the plume's current height and back, and the product is a
+// tongue of light standing off the limb. Four of them on incommensurate periods
+// -- 13, 17, 21 and 25 seconds -- so they are never all up or all down and the
+// star never looks like it is breathing.
+//
+// LEVEL LIFTS THEM: voice raises every plume's height and brightens the core, so
+// speaking makes the sun visibly more active. That is the most literal reading
+// of `level` in the collection and on this subject it is the right one.
+// ACTIVITY QUICKENS THE SIMMER, the fine granulation crawling across the
+// photosphere, which is the small motion a working star should have.
+//
+// RESPONDING DRIVES ONE PROMINENCE OUT: the plumes bias toward a single heading
+// and the leading one reaches half again its usual height. A star with a flare
+// pointing somewhere reads as intent.
+//
+// THE GESTURE, every twelve seconds or so: one plume arches much higher than the
+// rest and settles back.
+//
+// SUCCESS: every prominence lifts together and the corona flares, which is the
+// only moment the star is symmetric, then it settles brighter.
+//
+// SIZE: at 18 pt two of the four plumes crossfade away, the survivors are half
+// again as wide, the granulation switches off, and the core grows to fill more
+// of the body. What survives is a small bright sun with one or two soft tongues
+// standing off it.
+[[ stitchable ]] half4 mh_sol(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float coronaK = clamp(c0, 0.0, 1.0);   // how far the corona reaches
+    float promK   = clamp(c1, 0.0, 1.0);   // how high the tongues stand
+    float simmerK = clamp(c2, 0.0, 1.0);   // the granulation
+    float spreadK = clamp(c3, 0.0, 1.0);
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.022 + 0.008 * mh_breath(t, 12.9), 0.0, 1.24);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 23.0, 12.4);
+
+    float Rs = (0.30 + 0.10 * coronaK) * S * mix(1.0, 1.45, small);
+    // The corona came down by a third from the first cut. It is what gives the
+    // star its size, but at the original reach it filled every angle the
+    // prominences stand in and they had nothing dark to stand against -- four
+    // tongues were being drawn and none of them could be seen.
+    float corona = (0.17 + 0.16 * coronaK) * S * (1.0 + 0.25 * live.voice);
+    float coreBright = (1.05 + 0.45 * coronaK) * (1.0 + 0.55 * live.voice)
+                     * (1.0 + 0.55 * st.complete);
+
+    float simGate = mh_aa(6.2831853 * 8.5 / (MH_R * S), size, pixelScale) * (1.0 - small);
+    float simAmt = simGate * (0.35 + 0.65 * simmerK) * (0.55 + 0.65 * live.pace);
+    float simRate = t * (0.35 + 0.75 * live.pace);
+
+    float pairB = 1.0 - smoothstep(0.28, 0.70, small);
+    float promW = (0.26 + 0.12 * promK) * mix(1.0, 1.55, small);
+    float promH = (0.55 + 0.60 * promK) * (1.0 + 0.55 * live.voice) * S;
+
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+
+        float r = length(p);
+        float3 n = normalize(p + 1e-5);
+
+        // THE PHOTOSPHERE. A solid body with a soft limb -- the only opaque
+        // thing in the collection -- granulated by a fine field.
+        float core = 1.0 - smoothstep(Rs * 0.78, Rs * 1.10, r);
+        if (simAmt > 0.002) {
+            // READ IN THE VOLUME, NOT ON THE DIRECTION. Sampling granulation at
+            // normalize(p) is the same degeneracy geode's facets hit: direction
+            // is undefined at the centre and spins arbitrarily fast near it, so
+            // the photosphere grew a hard radial starburst out of its own core.
+            // A plain 3D field has no such point, and on a body this size the
+            // difference in what it draws on the LIMB -- where granulation is
+            // actually read -- is nothing.
+            core *= 1.0 + simAmt * 0.40 * mh_noise3(p * (8.5 / S) + float3(0.0, 0.0, simRate));
+        }
+
+        // THE CORONA: a wide soft falloff off the limb, which is the sun's size.
+        float cor = exp(-max(r - Rs, 0.0) / max(corona, 1e-3)) * (1.0 - core * 0.55);
+
+        // THE PROMINENCES. Four tongues, each a direction and a height, on
+        // periods that never come into step.
+        float prom = 0.0;
+        for (int k = 0; k < 4; k++) {
+            float wk = (k < 2) ? 1.0 : pairB;
+            if (wk < 0.002) continue;
+            float fk = float(k);
+            float per = 13.0 + 4.0 * fk;
+            float ph = fk * 2.13;
+            // Lift and fall: sin-squared, so it leaves the surface and returns
+            // to it with flat ends and never snaps.
+            float sn = sin(6.2831853 * t / per + ph);
+            float lift = sn * sn;
+            if (fl.x > 0.002 && k == int(fl.z * 3.999)) lift = max(lift, fl.x);
+            lift = mix(lift, 1.0, st.complete * 0.85);
+
+            // The plume's heading, drifting slowly; under drive they all bias
+            // toward one direction and the leading one reaches higher.
+            float a1 = t * (0.048 + 0.011 * fk) + fk * 1.9;
+            float a2 = t * (0.037 + 0.009 * fk) + fk * 3.1;
+            float3 dir = normalize(float3(cos(a1) * cos(a2), sin(a2), sin(a1) * cos(a2)));
+            dir = normalize(mix(dir, normalize(float3(0.86, -0.32, 0.39)), st.drive * 0.70));
+            float hk = promH * lift * (1.0 + 0.55 * st.drive * (k == 0 ? 1.0 : 0.0));
+
+            float ang = clamp(dot(n, dir), -1.0, 1.0);
+            float lat = (1.0 - ang) / max(promW * promW, 1e-4);
+            // The arch: up off the surface to hk and back down.
+            float hgt = (r - Rs) / max(hk, 1e-3);
+            float arch = exp(-lat) * exp(-hgt * hgt * 1.35) * step(0.0, r - Rs * 0.85);
+            prom += arch * wk * lift;
+        }
+
+        float e = (core * coreBright + cor * 0.42 + prom * 1.65) * fade;
+
+        acc.x += e * trans * ds;
+        // Hue runs outward: the core on the anchor, the corona and the tongues
+        // walking to the neighbour, which is what a star's own colour does with
+        // depth through its atmosphere.
+        acc.y += (cor * 0.42 + prom * 1.65) * fade * trans * ds;
+        // The photosphere is OPAQUE. This is the coefficient that makes it so,
+        // and it is what puts a real silhouette between the near tongues and the
+        // far ones.
+        trans *= exp(-(5.20 * core + 1.30 * (cor + prom) + MH_EXT) * ds);
+    }
+
+    float interior = acc.x * 2.30 * b.m * mh_transmit(b.fres) * (1.0 + 0.20 * st.settled);
+    float hue = (acc.x > 1e-4 ? acc.y / acc.x : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.72 + 0.35 * live.voice, 0.58, 0.16);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * (interior + sf.rim * 0.7) / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 17. Abyss
+
+// ABYSS. Deep-sea dark glass: rare glows passing through, mostly night.
+//
+// THE PATIENCE PIECE, and it is the only hero in the collection whose default
+// state is genuinely almost nothing happening. Still is quiet; this one is dark.
+// The distinction matters: still's rim and catchlight are the figure and they
+// are there every frame, where here the rim is a thin cold line holding a
+// silhouette and the events are the species -- and the events are RARE. At the
+// default `rarity` a creature passes roughly every twenty seconds, and between
+// them there is a dark bead with an edge. Nothing else in this collection asks
+// the viewer to wait, and a set of eighteen presences needs one that does.
+//
+// RARITY IS THE SLOT LENGTH and it runs the intuitive way: high is rarer. Three
+// lanes on long, independently jittered clocks, so the gaps between passes are
+// never equal and two creatures overlap only occasionally -- which is exactly
+// when the frame is worth catching.
+//
+// A CREATURE IS A PASSAGE, NOT AN APPEARANCE. It enters on one side of the
+// volume and leaves by the other over the whole life of its gesture, on a line
+// hashed per pass, so what the eye sees is something crossing rather than
+// something switching on in place. It is solved at the ray's closest approach --
+// the same closed form comet's head and droplet's heart use -- so it is round
+// and stable, and most of its light is in the scatter, because a glow in deep
+// water is mostly the water it lights.
+//
+// LEVEL BRINGS THEM UP. Voice brightens whatever is passing and, more usefully,
+// shortens the clocks: speak to it and the abyss becomes populated. That is the
+// one reading of `level` that suits a species whose subject is scarcity --
+// brightness alone would say nothing about a body that is dark on purpose.
+// ACTIVITY QUICKENS THEIR DRIFT, so a busy assistant's creatures cross faster.
+//
+// RESPONDING TURNS THEM INTO A PROCESSION: the paths align on one heading and
+// the clocks shorten hard, so rare passages become a steady stream in one
+// direction. It is the largest behavioural change any state makes to any hero
+// here, and it should be: this is the species with the most room to change.
+//
+// SUCCESS: the whole volume lights once, briefly, the way a deep-sea bloom does,
+// and falls back to night a little less dark than before.
+//
+// SIZE: at 18 pt one lane crossfades away and the survivors grow by 80 per cent
+// and brighten, because a small dim glow inside a small dark bead is invisible
+// rather than restrained. The clocks also shorten by a third: at a glance you
+// should see the species do its one thing, not wait through its silence.
+[[ stitchable ]] half4 mh_abyss(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float creatureK = clamp(c0, 0.0, 1.0);   // how many, how bright
+    float rarityK   = clamp(c1, 0.0, 1.0);   // high is rarer
+    float driftK    = clamp(c2, 0.0, 1.0);   // how fast they cross
+    float spreadK   = clamp(c3, 0.0, 1.0);
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.019 + 0.006 * mh_breath(t, 14.1), 0.0, 1.14);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    // THE CLOCKS. Rarity sets the slot; voice and drive shorten it hard, and the
+    // small mounts shorten it again so the species shows itself at a glance.
+    float base = mix(9.0, 26.0, rarityK)
+               / (1.0 + 0.55 * live.voice + 0.35 * live.pace + 1.60 * st.drive);
+    base *= mix(1.0, 0.66, small);
+    float4 c0f = mh_flourish(t, 31.0, base);
+    float4 c1f = mh_flourish(t, 37.0, base * 1.37);
+    float4 c2f = mh_flourish(t, 41.0, base * 1.81);
+    float thirdC = 1.0 - smoothstep(0.30, 0.72, small);
+
+    float rad = (0.155 + 0.075 * creatureK) * S * mix(1.0, 1.80, small);
+    float bright = (0.85 + 0.75 * creatureK) * (1.0 + 0.95 * live.voice)
+                 * mix(1.0, 1.45, small);
+    float reach = 0.62 + 0.30 * driftK;
+
+    float glowE = 0.0, glowH = 0.0;
+    for (int k = 0; k < 3; k++) {
+        float4 f = (k == 0) ? c0f : (k == 1) ? c1f : c2f;
+        float wk = (k < 2) ? 1.0 : thirdC;
+        if (f.x <= 0.002 || wk < 0.002) continue;
+        float fk = float(k);
+
+        // THE PASSAGE. A line hashed per pass; under drive they all take one
+        // heading and the abyss becomes a current.
+        float ga = f.z * 6.2831853 + fk * 1.7;
+        float3 dir = normalize(mix(float3(cos(ga), 0.40 * sin(ga * 1.6 + fk), sin(ga * 0.8 + 1.3)),
+                                   float3(0.90, -0.22, 0.37), st.drive * 0.80));
+        float3 side = normalize(cross(dir, float3(0.08, 1.0, 0.14)));
+        float3 gp = side * (0.42 * (f.z * 2.0 - 1.0) * (1.0 - 0.7 * st.drive))
+                  + dir * mix(-reach, reach, smoothstep(0.0, 1.0, f.y));
+
+        float3 to = gp - b.P;
+        float s = dot(to, rd);
+        if (s <= 0.0 || s >= L) continue;
+        float arg = max(dot(to, to) - s * s, 0.0) / max(rad * rad, 1e-6);
+        float vis = mh_inside(b.P + rd * s) * exp(-MH_EXT * s);
+        // Mostly scatter: a glow in deep water is the water it lights.
+        float e = (exp(-arg) * 0.45 + mh_scatter(arg, 0.52)) * vis * f.x * bright * wk;
+
+        glowE += e;
+        glowH += e * ((fk - 1.0));
+    }
+
+    // NIGHT. The floor is a third of what the quietest luminous hero carries:
+    // enough that the far wall exists, not enough to be a colour.
+    float medAmt = mix(0.022, 0.014, small) * (1.0 + 0.60 * live.voice);
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 1.9 / S) * medAmt;
+        if (st.complete > 0.001) {
+            float sr = (length(p) - mix(0.02, 1.0, st.sweep)) / 0.26;
+            e += st.complete * 0.42 * exp(-sr * sr);
+        }
+        acc.x += e * trans * ds;
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
+    }
+
+    float interior = (acc.x * 3.20 + glowE) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.26 * st.settled);
+    float hue = (glowE > 1e-5 ? glowH / glowE : 0.0) * spreadK * MH_SPREAD;
+
+    // A COLD THIN EDGE. The rim is the only thing here every frame, so it holds
+    // the silhouette on its own -- but it runs lower than still's, because this
+    // body is meant to read as dark rather than as quiet.
+    // THE CATCHLIGHT COMES DOWN TO A THIRD of what the luminous heroes wear.
+    // At 0.62 there was a bright point sitting on the shell in every single
+    // frame, including the long dark stretches this species exists for -- and a
+    // permanent highlight on a body whose subject is rarity does not read as
+    // glass, it reads as something stuck. What is left is enough to say the
+    // surface is polished and not enough to be an event.
+    // AND THE RIM GOES UP, not down. It is the only thing in the frame during
+    // the long dark stretches, and a rim term peaks around a third of its
+    // coefficient once the fresnel and the membership have taken their share --
+    // so at 0.92 the silhouette was genuinely almost invisible and the species
+    // read as an empty cell rather than as a dark one. 1.70 is the highest in
+    // the collection, which is right: this is the hero with the least else.
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 1.70 + 0.55 * live.voice, 0.38, 0.11);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * glowE / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
+    return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
+                      uv, pal, glow, inkColor, position, pixelScale);
+}
+
+// MARK: - 18. Chorus
+
+// CHORUS. Many faint lights breathing loosely, falling into alignment.
+//
+// THE ONE HERO LICENSED A RHYTHM, and the licence is narrow. The family's verbs
+// are FLOW and SETTLE, and breathing luminance is banned as a default motif
+// precisely because it is the first thing everyone reaches for. The carve-out in
+// the house rules is for a species whose concept literally IS a rhythm, and an
+// ensemble breathing is that: the pulse is not decoration on the idea, it is the
+// idea, and the thing the species is actually about is not the breathing at all
+// but the PHASE RELATIONSHIP between the breaths.
+//
+// SO THE DESIGN IS SYNC, NOT PULSE. At rest the voices are scattered across the
+// cycle -- `sync` at zero spreads them over a full period -- and what the eye
+// reads is a loose, uncountable shimmer with no beat in it, because nothing ever
+// coincides. As sync rises they gather, and at one they breathe as a single
+// body. RESPONDING drives sync most of the way to one, so an assistant that is
+// answering visibly pulls its ensemble together. That transition from many
+// rhythms to one is the whole species, and it is why the rhythm had to be
+// allowed: you cannot show alignment without something to align.
+//
+// KEPT GENTLE, which is the other half of the licence. The depth of the breath
+// is capped so no voice ever goes out entirely -- the floor is a third -- and
+// the period is long, eight seconds and up. What that produces even at full
+// alignment is a slow swell across a field of small lights, not a blink.
+//
+// SEVEN VOICES ON A FIBONACCI SHELL, so they are evenly spread over the sphere
+// without any two ever lining up into a row or a ring. Each drifts a little on
+// its own slow path, and each is solved at the ray's closest approach, so seven
+// compact lights cost fourteen dot products and are perfectly round.
+//
+// LEVEL PICKS OUT THE NEAREST. Voice does not simply brighten the ensemble: it
+// weights each voice by how near the front of the glass it is, so speaking makes
+// the closest lights bloom and leaves the far ones where they were. An ensemble
+// where the front row answers is a much better picture of being listened to than
+// one where everybody gets louder.
+//
+// ACTIVITY QUICKENS THE BREATHING a little, and only a little: this is the hero
+// where a fast rhythm would be worst.
+//
+// THE GESTURE, every eleven seconds or so: one voice swells well past the rest
+// and subsides, the way a single singer lifts out of a choir.
+//
+// SUCCESS: every voice reaches full together, which after a hero built entirely
+// on their not coinciding is the most legible arrival in the collection.
+//
+// SIZE: at 18 pt the ensemble drops from seven voices to three and they grow by
+// 70 per cent, because seven faint lights in a thirteen-point bead is a texture
+// and three is a group. Their breath also deepens, since with fewer voices there
+// is less overlap to carry the motion.
+[[ stitchable ]] half4 mh_chorus(
+    float2 position, half4 currentColor, float2 size, float time, float pixelScale,
+    half4 inkColor, half4 toneColor,
+    float hueShift, float formScale, float speed, float depth, float glow,
+    float c0, float c1, float c2, float c3, float epoch,
+    float stateIndex, float stateTau, float level, float activity,
+    float2 tilt, half4 tone2
+) {
+    float2 uv = (position - 0.5 * size) / max(min(size.x, size.y), 1.0);
+    float S = max(formScale, 0.10);
+    float t = time * max(speed, 0.0);
+
+    float voicesK = clamp(c0, 0.0, 1.0);   // how many sing
+    float syncK   = clamp(c1, 0.0, 1.0);   // how together they are at rest
+    float depthK  = clamp(c2, 0.0, 1.0);   // how deep the breath
+    float spreadK = clamp(c3, 0.0, 1.0);
+
+    MHState st = mh_state(stateIndex, stateTau);
+    MHLive live = mh_live(level, activity, stateIndex);
+    float small = mh_small(size);
+    float px = 1.0 / (max(min(size.x, size.y), 1.0) * max(pixelScale, 1.0) * MH_R);
+
+    MHShape sh = mh_shape(0.021 + 0.008 * mh_breath(t, 15.6), 0.0, 1.20);
+    MHBody b = mh_body(uv, t, px, sh);
+
+    float3 V = float3(0.0, 0.0, -1.0);
+    float3 rd = mh_look(V, b.N, tilt);
+    float L = mh_exit(b.P, rd);
+
+    float4 fl = mh_flourish(t, 29.0, 11.1);
+
+    // ALIGNMENT. At rest the knob sets it; responding pulls it most of the way
+    // to one, which is the species' whole gesture.
+    float sync = clamp(syncK * 0.75 + 0.85 * st.drive + 0.55 * st.complete, 0.0, 1.0);
+    float per = 8.4 - 2.2 * (live.pace * 0.6);
+    float breathe = (0.30 + 0.45 * depthK) * mix(1.0, 1.35, small);
+
+    // Voices count down at the small mounts.
+    float mid = 1.0 - smoothstep(0.26, 0.62, small);
+    float far = 1.0 - smoothstep(0.10, 0.42, small);
+
+    // Small enough to stay separate on a shell this size: at 0.14 against a
+    // spacing of about 0.35 the seven ran together into one lobed mass and the
+    // ensemble stopped being countable, which is the one thing an ensemble has
+    // to be.
+    float rad = (0.082 + 0.038 * voicesK) * S * mix(1.0, 1.75, small);
+    float bright = (0.70 + 0.55 * voicesK);
+    float turn = mh_drift(t, 0.048, 0.45, 2.0);
+
+    float voiceE = 0.0, voiceH = 0.0;
+
+    for (int k = 0; k < 7; k++) {
+        float fk = float(k);
+        float wk = (k < 3) ? 1.0 : ((k < 5) ? mid : far);
+        if (wk < 0.002) continue;
+
+        // A FIBONACCI SHELL: evenly spread, never in a row or a ring.
+        float zc = 1.0 - 2.0 * (fk + 0.5) / 7.0;
+        float rc = sqrt(max(1.0 - zc * zc, 0.0));
+        float ang = fk * 2.39996323 + turn;
+        float3 dirk = float3(rc * cos(ang), zc, rc * sin(ang));
+        // Each drifts a little on its own slow path, so the shell is never rigid.
+        float3 c = dirk * (0.54 + 0.09 * sin(t * (0.061 + 0.009 * fk) + fk * 2.2))
+                 + float3(0.05 * sin(t * 0.043 + fk), 0.05 * sin(t * 0.037 + fk * 1.7), 0.0);
+        c *= S;
+
+        // THE BREATH. The phase spread is what sync closes: at zero the seven
+        // are scattered over the whole cycle, at one they are on the same beat.
+        // Floored at a third, so no voice ever goes out and the ensemble never
+        // blinks.
+        float phase = mix(fk * 0.897, 0.0, sync) * 6.2831853;
+        float sn = sin(6.2831853 * t / per + phase);
+        float life = 1.0 - breathe + breathe * sn * sn;
+        if (fl.x > 0.002 && k == int(fl.z * 6.999)) life += fl.x * 0.85;
+        life = mix(life, 1.0 + 0.45 * st.complete, st.complete * 0.9);
+
+        float3 to = c - b.P;
+        float s = dot(to, rd);
+        if (s <= 0.0 || s >= L) continue;
+        float arg = max(dot(to, to) - s * s, 0.0) / max(rad * rad, 1e-6);
+        float vis = mh_inside(b.P + rd * s) * exp(-MH_EXT * s);
+
+        // LEVEL PICKS OUT THE NEAREST. Voice is weighted by how far forward the
+        // voice sits, so the front of the ensemble answers and the back does not.
+        float front = 0.5 + 0.5 * clamp(c.z, -1.0, 1.0);
+        float lift = 1.0 + live.voice * (0.25 + 1.15 * front);
+
+        float e = (exp(-arg) * 0.60 + mh_scatter(arg, 0.42)) * vis * life * lift * bright * wk;
+        voiceE += e;
+        voiceH += e * ((fk - 3.0) / 3.0);
+    }
+
+    float medAmt = mix(0.048, 0.028, small);
+    float2 acc = float2(0.0);
+    float trans = 1.0;
+    float ds = L / float(MH_TAPS);
+    for (int i = 0; i < MH_TAPS; i++) {
+        float3 p = b.P + rd * ((float(i) + 0.5) * ds);
+        float fade = mh_inside(p);
+        if (fade <= 0.001) continue;
+        float e = mh_medium(p, t, 2.1 / S) * medAmt;
+        acc.x += e * trans * ds;
+        trans *= exp(-(2.00 * e + MH_EXT) * ds);
+    }
+
+    float interior = (acc.x * 3.30 + voiceE) * b.m * mh_transmit(b.fres)
+                   * (1.0 + 0.22 * st.settled);
+    float hue = (voiceE > 1e-5 ? voiceH / voiceE : 0.0) * spreadK * MH_SPREAD;
+
+    MHSurface sf = mh_surface(b, t, small, inkColor, tilt, 0.80 + 0.35 * live.voice, 0.50, 0.14);
+
+    float e = interior + sf.rim + sf.spec + sf.glow;
+    float hueMix = hue * voiceE / max(e, 1e-4);
+
+    MHPalette pal = mh_palette(inkColor, toneColor, tone2, hueShift, depth);
     return mh_present(interior + sf.rim, sf.spec, sf.glow, hueMix,
                       uv, pal, glow, inkColor, position, pixelScale);
 }

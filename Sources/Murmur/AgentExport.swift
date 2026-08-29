@@ -118,7 +118,14 @@ extension MurmurConfiguration {
 
         out.append("Colors, sRGB, shared by every state:")
         out.append("- ink, the ground the field dissolves into: \(ink.hexString)")
-        out.append("- tone, the single hue family anchor: \(tone.hexString)")
+        out.append("- tone, the hue family anchor: \(tone.hexString)")
+        if let tone2 {
+            out.append(
+                "- tone2, the second duotone anchor: \(tone2.hexString). The "
+                    + "interior palette runs between the two anchors through OKLAB "
+                    + "instead of deriving that side from the spread knob."
+            )
+        }
         out.append("")
         out.append(
             "Match every value above. The indicator is the whole visual: no "
@@ -131,8 +138,9 @@ extension MurmurConfiguration {
             out.append("")
             out.append(
                 "This is the whole \(style.family.rawValue) pack: the shared kit and "
-                    + "its eight species. Keep \(style.shaderName) and delete the other "
-                    + "seven functions if you want a smaller file."
+                    + "its \(style.family.styles.count) species. Keep \(style.shaderName) and "
+                    + "delete the other \(style.family.styles.count - 1) functions if you "
+                    + "want a smaller file."
             )
             out.append("")
             out.append("```metal")
@@ -199,6 +207,19 @@ extension MurmurConfiguration {
         )
         lines.append("")
         lines.append(contentsOf: Self.signalLines(for: surface))
+        if style.family == .glass {
+            lines.append("")
+            lines.append(
+                "This is a glass hero, so its shader takes two arguments the "
+                    + "other families do not, after activity: a float2 tilt, the "
+                    + "device attitude from CoreMotion at roughly -1 to 1 per "
+                    + "axis and 0,0 when unavailable, which parallaxes the "
+                    + "interior while the body holds still; and a half4 tone2, "
+                    + "the second duotone anchor, which equals tone unless one "
+                    + "was set. Pass MurmurTilt's point, or zero, or a drag: the "
+                    + "view does not own the motion manager."
+            )
+        }
         return lines
     }
 
@@ -326,6 +347,7 @@ extension MurmurConfiguration {
 
         if ink != .ink { mutations.append("c.ink = \(MurmurExport.literal(ink))") }
         if tone != .tone { mutations.append("c.tone = \(MurmurExport.literal(tone))") }
+        if let tone2 { mutations.append("c.tone2 = \(MurmurExport.literal(tone2))") }
 
         for state in MurmurState.allCases {
             let design = parameters(for: state)
@@ -383,20 +405,34 @@ extension MurmurConfiguration {
             String(repeating: " ", count: 28)
                 + ".float(\(MurmurExport.number(design.character[i]))),  // \(knobs[i].label)"
         }.joined(separator: "\n")
+        // The heroes take two more, appended as a suffix so the archive
+        // families' call ends exactly where it used to and no trailing comma
+        // is left behind.
+        let pad = String(repeating: " ", count: 28)
+        let isGlass = style.family == .glass
+        let glassSuffix = isGlass
+            ? ",\n" + pad + ".float2(tilt),  // device attitude, 0,0 when unavailable\n"
+                + pad + ".color(\(MurmurExport.colorLiteral(resolvedTone2)))  // tone2"
+            : ""
+        let tiltProperty = isGlass
+            ? "\n                /// Device attitude, roughly -1 to 1 per axis. Zero is fine."
+                + "\n                var tilt: CGPoint = .zero"
+            : ""
+
 
         return """
             import SwiftUI
 
             /// \(style.displayName). \(MurmurExport.sentence(style.species))
             /// Needs \(style.family.packFileName).metal in the same target.
-            /// This runs the thinking design; the other four state designs are
+            /// This runs the thinking design; the other state designs are
             /// listed below, along with what stateIndex and stateTau mean.
             struct \(style.displayName)Indicator: View {
                 var size: CGFloat = 46
                 /// Live signals from the host, 0 to 1. Smooth them before
                 /// they get here: rise about \(MurmurExport.number(MurmurSignals.attack)) s, fall about \(MurmurExport.number(MurmurSignals.release)) s.
                 var level: Double = 0
-                var activity: Double = 0
+                var activity: Double = 0\(tiltProperty)
 
                 @Environment(\\.displayScale) private var displayScale
                 @State private var birth = Date.now
@@ -428,7 +464,7 @@ extension MurmurConfiguration {
                                         .float(2.0),  // stateIndex: thinking
                                         .float(time),  // stateTau
                                         .float(level),
-                                        .float(activity)
+                                        .float(activity)\(glassSuffix)
                                     )
                                 )
                             }
